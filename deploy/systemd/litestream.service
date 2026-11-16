@@ -1,0 +1,20 @@
+[Unit]
+Description=Litestream replication for kadr.db
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=kadr
+Group=kadr
+EnvironmentFile=/etc/kadr/litestream.env
+ExecStart=/usr/bin/litestream replicate -config /etc/kadr/litestream.yml
+Restart=always
+RestartSec=5
+MemoryMax=128M
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/kadr/db
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,14 @@
+/bin/
+/dist/
+/web/dist/
+/web/node_modules/
+/sdk/*/node_modules/
+/sdk/*/dist/
+/edge/*/node_modules/
+*.db
+*.db-wal
+*.db-shm
+.env
+*.key
+.DS_Store
+/test/output/

@@ -1,0 +1,13 @@
+# /etc/kadr/litestream.yml
+# Креденшели — у /etc/kadr/litestream.env (LITESTREAM_ACCESS_KEY_ID, LITESTREAM_SECRET_ACCESS_KEY), токен kadr-backup
+dbs:
+  - path: /var/lib/kadr/db/kadr.db
+    replicas:
+      - type: s3
+        bucket: kadr-system
+        path: litestream/kadr.db
+        endpoint: https://${CF_ACCOUNT_ID}.r2.cloudflarestorage.com
+        region: auto
+        sync-interval: 1s
+        snapshot-interval: 24h
+        retention: 720h
