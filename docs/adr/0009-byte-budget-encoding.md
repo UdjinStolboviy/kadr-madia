@@ -1,14 +1,14 @@
-# ADR-0009: Бюджетне кодування — пошук якості + зменшення розміру
+# ADR-0009: Byte-budget encoding — quality search + downscaling
 
-**Статус:** Accepted
+**Status:** Accepted
 
-## Контекст
-Вимога продукту — фото ≤ 20 КБ, які лишаються чіткими. Фіксована якість не дає гарантії розміру; агресивне зниження якості на великій роздільності дає «мило» й блоки.
+## Context
+A core product promise is photos ≤ 20 KB that stay sharp. A fixed quality gives no size guarantee; aggressively lowering quality at a high resolution produces mush and blocking.
 
-## Рішення
-Бінарний пошук максимальної якості, що вміщується в бюджет (≤ 5 спроб), на поточному розмірі; якщо не вміщується навіть при `qMin` — зменшення сторони на `downscaleStep` (0.85) і повтор, до `minSide`. Якщо бюджет недосяжний — результат на `minSide/qMin` з прапорцем `over_budget`. Режими пресету: `budget`, `fixed`, `ssim` (ціль перцептивної якості).
+## Decision
+Binary search for the highest quality that fits the budget (≤ 5 attempts) at the current size; if even `qMin` does not fit, shrink the long side by `downscaleStep` (0.85) and repeat, down to `minSide`. If the budget is unreachable, return the `minSide/qMin` result with an `over_budget` flag. Preset modes: `budget`, `fixed`, `ssim` (perceptual quality target).
 
-## Наслідки
-- Гарантований розмір і найкраща можлива якість у межах бюджету.
-- 3–10 кодувань маленького растра (~20–60 мс кожне) — прийнятно.
-- Метрики: підібрана `quality`, кількість ітерацій, `over_budget`-частка → підказки в адмінці.
+## Consequences
+- Guaranteed size and the best achievable quality within the budget.
+- 3–10 encodes of a small raster (~20–60 ms each) — acceptable.
+- Metrics: chosen `quality`, iteration count, `over_budget` share → tuning hints in the admin console.

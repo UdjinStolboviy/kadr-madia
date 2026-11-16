@@ -1,8 +1,8 @@
-# Модель даних
+# Data Model
 
-Повна схема: [`internal/db/migrations/0001_init.sql`](../internal/db/migrations/0001_init.sql).
+Full schema: [`internal/db/migrations/0001_init.sql`](../internal/db/migrations/0001_init.sql).
 
-## Діаграма
+## Diagram
 
 ```mermaid
 erDiagram
@@ -23,36 +23,36 @@ erDiagram
   projects ||--o{ cloud_connections : has
 ```
 
-## Ключові рішення
+## Key decisions
 
-| Рішення | Чому |
+| Decision | Why |
 |---|---|
-| **Asset / Blob / Rendition** | Asset — логічна сутність проєкту (з метаданими й namespace). Blob — фізичний результат обробки, спільний для дублікатів. Rendition — конкретний файл у R2. Так працюють дедуплікація, refcount-GC і переобробка без зміни ID асета. |
-| **Unique `(project, visibility, preset, version, sha256)` на blobs** | Межа дедуплікації: різні проєкти ніколи не ділять файли (ізоляція), приватне не стає публічним через дедуп. |
-| **Незмінні `preset_versions`** | Відтворюваність; зміна пресету не ламає існуючі URL. |
-| **`reserved_bytes`** | Квота резервується при створенні тікета (за `declared_bytes`) і розраховується за фактом після обробки — не можна перевищити ліміт паралельними завантаженнями. |
-| **Outbox (`events` + `webhook_deliveries`)** | Подія пишеться в тій самій транзакції, що й зміна стану — жодних втрачених або «фантомних» вебхуків. |
-| **`jobs` з `lease_until`** | Падіння воркера не губить задачу: прострочений lease повертає її в чергу. |
-| **Секрети тільки `*_enc`** | AES-256-GCM, envelope-шифрування майстер-ключем (див. SECURITY.md). |
-| **Ключі API як хеш** | У БД немає жодного робочого секрету API. |
-| **Unix-мілісекунди, ULID** | Сортування за часом, без проблем із часовими поясами; ULID з префіксом читається в логах. |
+| **Asset / Blob / Rendition** | An Asset is the product's logical entity (with metadata and namespace). A Blob is the physical processing result, shared by duplicates. A Rendition is a concrete file in R2. This enables dedup, refcount GC and reprocessing without changing the asset ID. |
+| **Unique `(project, visibility, preset, version, sha256)` on blobs** | The dedup boundary: different projects never share files (isolation), and private never becomes public through dedup. |
+| **Immutable `preset_versions`** | Reproducibility; changing a preset never breaks existing URLs. |
+| **`reserved_bytes`** | Quota is reserved when the ticket is created (from `declared_bytes`) and settled after processing — concurrent uploads cannot exceed the limit. |
+| **Outbox (`events` + `webhook_deliveries`)** | The event is written in the same transaction as the state change — no lost or "phantom" webhooks. |
+| **`jobs` with `lease_until`** | A crashed worker never loses a job: an expired lease puts it back in the queue. |
+| **Secrets only as `*_enc`** | AES-256-GCM, envelope encryption with the master key (see SECURITY.md). |
+| **API keys as hashes** | The database holds no usable API secret. |
+| **Unix milliseconds, ULIDs** | Time-sortable, no timezone issues; prefixed ULIDs are readable in logs. |
 
-## Ключі обʼєктів у R2
+## R2 object keys
 
 ```
-kadr-private/tmp/{project}/{upload_id}                 # сирці, lifecycle 1 день
-kadr-private/{project}/{blob_id}/{name}.{format}       # приватні рендиції
-kadr-private/originals/{project}/{blob_id}.{ext}       # якщо retainOriginal
-kadr-public/{project}/{blob_id}/{name}.{format}        # публічні рендиції
-kadr-system/litestream/kadr.db/…                       # репліка БД
+kadr-private/tmp/{project}/{upload_id}                 # sources, 1-day lifecycle
+kadr-private/{project}/{blob_id}/{name}.{format}       # private renditions
+kadr-private/originals/{project}/{blob_id}.{ext}       # if retainOriginal
+kadr-public/{project}/{blob_id}/{name}.{format}        # public renditions
+kadr-system/litestream/kadr.db/…                       # database replica
 ```
 
-`blob_id` — ULID (80 біт випадковості), тож публічні URL неможливо перебрати. Namespace у ключ не входить: це дозволяє ділити Blob між асетами, а видалення простору імен виконується через БД (`purge_namespace` → refcount → GC).
+`blob_id` is a ULID (80 bits of randomness), so public URLs cannot be enumerated. The namespace is not part of the key: this lets Blobs be shared between assets, and namespace deletion is done through the database (`purge_namespace` → refcount → GC).
 
-## Робота з SQLite
+## Working with SQLite
 
-- Одне зʼєднання для запису (серіалізація записів у застосунку, без `SQLITE_BUSY`) + пул читачів `NumCPU`.
-- Короткі транзакції; жодних мережевих викликів (R2, вебхуки) всередині транзакції.
-- `sqlc` генерує типізовані запити; `Store`-інтерфейс приховує діалект, щоб мати шлях на Postgres (S3 у ROADMAP).
-- Щонічний `PRAGMA optimize` і `wal_checkpoint(TRUNCATE)`; `VACUUM INTO` для знімків.
-- Ретеншн: `events` 30 днів, `webhook_deliveries` 30 днів, `jobs` (succeeded) 7 днів, `idempotency_keys` 24 год, `audit_log` 1 рік.
+- One writer connection (writes serialized in the application, no `SQLITE_BUSY`) + a reader pool of `NumCPU`.
+- Short transactions; no network calls (R2, webhooks) inside a transaction.
+- Queries live in one place per aggregate, ready for `sqlc`; the `Store` interface hides the dialect to keep the Postgres path open (S3 in the ROADMAP).
+- Nightly `PRAGMA optimize` and `wal_checkpoint(TRUNCATE)`; `VACUUM INTO` for snapshots.
+- Retention: `events` 30 days, `webhook_deliveries` 30 days, `jobs` (succeeded) 7 days, `idempotency_keys` 24 h, `audit_log` 1 year.

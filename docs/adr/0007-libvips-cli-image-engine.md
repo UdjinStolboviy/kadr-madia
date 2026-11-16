@@ -1,25 +1,25 @@
-# ADR-0007: libvips CLI замість демона imgproxy
+# ADR-0007: libvips CLI instead of an imgproxy daemon
 
-**Статус:** Accepted
+**Status:** Accepted
 
-## Контекст
-Розглядалися: imgproxy як постійний сервіс поруч; govips/bimg (CGO-біндинги до libvips); виклик CLI `vips`.
+## Context
+Options considered: imgproxy as a resident sidecar; govips/bimg (CGO bindings to libvips); invoking the `vips` CLI.
 
-Що важливо для Kadr:
-- рендиції генеруються під час запису, а не на льоту (ADR-0008);
-- потрібні grayscale + normalise (пресет DOCUMENT), smart crop, керований AVIF-енкодер;
-- бажано лишити `CGO_ENABLED=0`;
-- `max_bytes` в imgproxy працює не для всіх форматів, а частина операцій доступна лише в Pro-версії.
+What matters for Kadr:
+- renditions are generated at write time, not on the fly (ADR-0008);
+- we need grayscale + normalise (DOCUMENT preset), smart crop and a controllable AVIF encoder;
+- we want to keep `CGO_ENABLED=0`;
+- imgproxy's `max_bytes` does not apply to every format, and some operations are Pro-only.
 
-## Рішення
-Інтерфейс `ImageEngine` з реалізацією **VipsCLI**: послідовність викликів `vips`/`vipsthumbnail`/`vipsheader` через `exec.CommandContext` із проміжним `.v`-файлом; бюджетне кодування реалізує Kadr (ADR-0009).
+## Decision
+An `ImageEngine` interface with a **VipsCLI** implementation: a sequence of `vips`/`vipsthumbnail`/`vipsheader` calls via `exec.CommandContext` with an intermediate `.v` file; budget encoding is implemented by Kadr (ADR-0009).
 
-## Наслідки
-- 0 МБ RAM у простої, повний набір операцій libvips, без CGO.
-- Накладні витрати на запуск процесу ~10–30 мс — несуттєво для асинхронної обробки.
-- Версію libvips задає дистрибутив (Debian 13: 8.16); `kadr doctor` перевіряє, чи є AVIF-енкодер.
-- Реалізацію можна замінити на govips або imgproxy без змін у пайплайні.
+## Consequences
+- 0 MB RAM at idle, the full libvips operation set, no CGO.
+- Process spawn overhead of ~10–30 ms — negligible for asynchronous processing.
+- The libvips version comes from the distribution (Debian 13: 8.16); `kadr doctor` verifies the AVIF encoder.
+- The implementation can be swapped for govips or imgproxy without touching the pipeline.
 
-## Альтернативи
-- imgproxy-демон — +40–60 МБ постійно, функції Pro; доцільний лише для рендицій на вимогу (M5).
-- govips — CGO, складна кросзбірка з Mac.
+## Alternatives
+- imgproxy daemon — +40–60 MB resident, Pro features; worthwhile only for on-demand renditions (M5).
+- govips — CGO, hard to cross-compile from a Mac.

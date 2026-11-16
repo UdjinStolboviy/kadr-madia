@@ -1,59 +1,59 @@
-# Безпека
+# Security
 
-## 1. Модель загроз (STRIDE, коротко)
+## 1. Threat model (STRIDE, condensed)
 
-| Загроза | Вектор | Захист |
+| Threat | Vector | Mitigation |
 |---|---|---|
-| **Spoofing** | Викрадений API-ключ проєкту | Ключі тільки в бекендах; LAN-only API; scopes; ротація; `last_used_at` + аудит; відкликання миттєве |
-| | Підробка приватного URL | HMAC-SHA256, обовʼязковий `exp`, `kid`, порівняння в константний час |
-| | Підробка вебхука | Standard Webhooks HMAC + timestamp (вікно 5 хв) |
-| **Tampering** | Підміна файлу між тікетом і complete | Підписані `Content-Length` і `Content-Type` у presigned PUT; `HEAD` перед обробкою; перевірка `sha256` після завантаження |
-| **Repudiation** | Хто змінив пресет / видалив ключ | `audit_log` для всіх адмін-дій і чутливих API-викликів |
-| **Information disclosure** | Приватний файл стає публічним | Фізично окремі бакети; дедуп не перетинає visibility; публічний бакет не має прав запису з Worker |
-| | Витік GPS/EXIF | Метадані завжди видаляються (vips strip, ffmpeg `-map_metadata -1`) |
-| | Перебір публічних URL | ULID blob_id (80 біт ентропії), немає листингу бакета |
-| | Витік секретів із БД | Envelope-шифрування; майстер-ключ поза БД і поза бекапом |
-| **DoS** | «Бомби» (decompression, 100k×100k PNG, відео на 10 год) | `maxInputBytes`, `maxInputPixels`, ffprobe-ліміти до запуску ffmpeg, таймаути процесів, семафори пулів, квоти |
-| | Масові тікети | Rate limit на ключ і namespace (token bucket), резерв квоти |
-| **Elevation of privilege** | RCE через баг кодека | Дочірні процеси без shell (`exec.Command` з масивом аргументів), окремий непривілейований користувач `kadr`, systemd sandboxing, unprivileged LXC, оновлення libvips/ffmpeg |
-| | SSRF через URL-імпорт | Резолв → перевірка IP (RFC1918, loopback, link-local, CGNAT, metadata, IPv6 ULA) → dial на перевірений IP; тільки http/https; ліміт редиректів із повторною перевіркою |
+| **Spoofing** | Stolen project API key | Keys live only in backends; LAN-only API; scopes; rotation; `last_used_at` + audit; instant revocation |
+| | Forged private URL | HMAC-SHA256, mandatory `exp`, `kid`, constant-time comparison |
+| | Forged webhook | Standard Webhooks HMAC + timestamp (5-minute window) |
+| **Tampering** | File swapped between ticket and complete | Signed `Content-Length` and `Content-Type` in the presigned PUT; `HEAD` before processing; `sha256` check after download |
+| **Repudiation** | Who changed a preset / deleted a key | `audit_log` for all admin actions and sensitive API calls |
+| **Information disclosure** | Private file becomes public | Physically separate buckets; dedup never crosses visibility; the Worker has no write path to the public bucket |
+| | GPS/EXIF leakage | Metadata is always stripped (vips strip, ffmpeg `-map_metadata -1`) |
+| | Public URL enumeration | ULID blob_id (80 bits of entropy), no bucket listing |
+| | Secrets leaked from the DB | Envelope encryption; the master key lives outside the DB and outside backups |
+| **DoS** | "Bombs" (decompression, 100k×100k PNG, 10-hour video) | `maxInputBytes`, `maxInputPixels`, ffprobe limits before ffmpeg runs, process timeouts, pool semaphores, quotas |
+| | Ticket flooding | Rate limits per key and namespace (token bucket), quota reservation |
+| **Elevation of privilege** | RCE via a codec bug | Child processes without a shell (`exec.Command` with an argument array), dedicated unprivileged `kadr` user, systemd sandboxing, unprivileged LXC, libvips/ffmpeg updates |
+| | SSRF via URL import | Resolve → check IP (RFC 1918, loopback, link-local, CGNAT, metadata, IPv6 ULA) → dial the verified IP; http/https only; limited redirects, each re-checked |
 
-## 2. Ключі та секрети
+## 2. Keys and secrets
 
-| Секрет | Де живе | Формат |
+| Secret | Where it lives | Format |
 |---|---|---|
-| Майстер-ключ (KEK) | `/etc/kadr/master.key` (0400, owner kadr), копія в менеджері паролів | 32 байти |
-| Pepper для API-ключів | `/etc/kadr/env` | 32 байти |
-| API-ключі проєктів | Лише SHA-256(secret‖pepper) у БД | `kd_live_<8 символів префікса>_<32 байти base62>` |
-| Секрети підпису URL | `signing_keys.secret_enc` + Worker secrets | 32 байти, `kid` |
-| Креденшели S3/R2, OAuth-токени, секрети вебхуків | `*_enc` у БД | AES-256-GCM, DEK на запис, DEK зашифрований KEK |
-| Сесії адмінки | SHA-256 токена в БД | 32 байти, cookie `__Host-kadr_session` |
+| Master key (KEK) | `/etc/kadr/master.key` (0440, root:kadr), copy in a password manager | 32 bytes |
+| API key pepper | `/etc/kadr/env` | 32 bytes |
+| Project API keys | Only SHA-256(secret‖pepper) in the DB | `kd_live_<8-char prefix>_<32 base62 chars>` |
+| URL signing secrets | `signing_keys.secret_enc` + Worker secrets | 32 bytes, `kid` |
+| S3/R2 credentials, OAuth tokens, webhook secrets | `*_enc` in the DB | AES-256-GCM, per-record DEK, DEK wrapped by the KEK |
+| Admin sessions | SHA-256 of the token in the DB | 32 bytes, cookie `__Host-kadr_session` |
 
-**Ротація:**
-- `kadr keys rotate-master` — перешифровує всі DEK новим KEK (дані не чіпаються).
-- Ключ підпису URL: новий → `active`, старий → `verify_only` на max TTL (наприклад, 24 год) → `retired`. Worker отримує обидва.
-- API-ключі: кілька активних одночасно для безшовної заміни.
+**Rotation:**
+- `kadr keys rotate-master` — re-wraps every DEK with the new KEK (data untouched).
+- URL signing key: new → `active`, old → `verify_only` for the max TTL (e.g. 24 h) → `retired`. The Worker receives both.
+- API keys: several can be active at once for seamless replacement.
 
-## 3. Мережева ізоляція
+## 3. Network isolation
 
 ```
-Інтернет ──► Cloudflare ──► Tunnel ──► kadr:8081 (/admin) — лише через Cloudflare Access (email + MFA)
-LAN 192.168.50.0/24 ──► kadr:8080 (/v1) — firewall LXC: allow тільки IP omi/ofi/mif-api
-kadr ──► R2 / вебхуки / імпорт — вихідні зʼєднання
+Internet ──► Cloudflare ──► Tunnel ──► kadr:8081 (/admin) — only via Cloudflare Access (email + MFA)
+Private network ──► kadr:8080 (/v1) — host firewall: allow only the product backends' IPs
+kadr ──► R2 / webhooks / imports — outbound connections
 ```
 
-- `/v1` не опубліковано в тунелі взагалі.
-- Адмінка: Cloudflare Access + власний логін (argon2id) + TOTP. Опційно WebAuthn (M4).
-- Додатково: перевірка заголовка `Cf-Access-Jwt-Assertion` на сервері адмінки.
+- `/v1` is not published through the tunnel at all.
+- Admin console: Cloudflare Access + own login (argon2id) + TOTP. Optional WebAuthn (M4).
+- Additionally: the admin server verifies the `Cf-Access-Jwt-Assertion` header.
 
-## 4. systemd-пісочниця
+## 4. systemd sandbox
 
 ```ini
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
-PrivateDevices=no            # потрібен /dev/dri для VAAPI; без iGPU → yes
+PrivateDevices=no            # /dev/dri is needed for VAAPI; without an iGPU → yes
 DeviceAllow=/dev/dri/renderD128 rw
 ReadWritePaths=/var/lib/kadr
 ProtectKernelTunables=yes
@@ -62,29 +62,29 @@ ProtectControlGroups=yes
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 RestrictNamespaces=yes
 LockPersonality=yes
-MemoryDenyWriteExecute=no    # libx264/libaom використовують JIT-асемблер
+MemoryDenyWriteExecute=no    # libx264/libaom use JIT assembly
 SystemCallArchitectures=native
 CapabilityBoundingSet=
 ```
 
-## 5. Обробка вхідних файлів
+## 5. Handling input files
 
-1. Розмір перевіряється тричі: при тікеті (декларований), підписом R2 (`Content-Length`), `HEAD` перед завантаженням.
-2. Тип визначається за magic bytes, а не за розширенням чи `Content-Type`.
-3. Растрові: `vipsheader` → ширина × висота ≤ `maxInputPixels` до будь-якого декодування.
-4. Відео: `ffprobe` з таймаутом 10 с → тривалість, кодеки, роздільність, кількість потоків.
-5. Кожна задача — окремий каталог `/var/lib/kadr/tmp/<job_id>/`, видаляється в `defer`; sweeper прибирає залишки під час старту.
-6. Таймаути процесів: фото 30 с, відео `duration × 4 + 60 с`.
+1. Size is checked three times: at ticket creation (declared), by the R2 signature (`Content-Length`), and by `HEAD` before download.
+2. The type is detected by magic bytes, never by extension or `Content-Type`.
+3. Raster images: `vipsheader` → width × height ≤ `maxInputPixels` before any decoding.
+4. Video: `ffprobe` with a 10 s timeout → duration, codecs, resolution, stream count.
+5. Each job gets its own directory `/var/lib/kadr/tmp/<job_id>/`, removed in a `defer`; the sweeper cleans leftovers at startup.
+6. Process timeouts: photo 30 s, video `duration × 4 + 60 s`.
 
-## 6. Приватність і відповідність
+## 6. Privacy and compliance
 
-- **GDPR / право на видалення:** `DELETE /v1/namespaces/{ns}` і `DELETE /v1/assets/{id}`; фізичне видалення з R2 через GC (SLA ≤ 24 год), підтвердження подією.
-- **Мінімізація даних:** оригінали за замовчуванням не зберігаються; EXIF/GPS видаляються.
-- **Регіон даних:** R2 location hint EEUR/WEUR або jurisdiction `eu` для EU-only.
-- **Логи:** без вмісту файлів, без повних підписаних URL і секретів (редакція в slog).
+- **GDPR / right to erasure:** `DELETE /v1/namespaces/{ns}` and `DELETE /v1/assets/{id}`; physical deletion from R2 via GC (SLA ≤ 24 h), confirmed by an event.
+- **Data minimization:** originals are not kept by default; EXIF/GPS are stripped.
+- **Data residency:** R2 location hint EEUR/WEUR or the `eu` jurisdiction for EU-only.
+- **Logs:** no file contents, no full signed URLs or secrets (slog redaction).
 
-## 7. Ланцюг постачання
+## 7. Supply chain
 
-- `go mod verify`, `govulncheck` у CI; Renovate для залежностей.
-- Відтворювані збірки (`-trimpath`, фіксований Go), SHA-256 і підпис артефакту (cosign / minisign).
-- `ffmpeg`, `libvips`, `rclone` — з офіційних пакетів Debian (security-оновлення через `unattended-upgrades`).
+- `go mod verify`, `govulncheck` in CI; Renovate for dependencies.
+- Reproducible builds (`-trimpath`, pinned Go), SHA-256 and artifact signing (cosign / minisign).
+- `ffmpeg`, `libvips`, `rclone` from official Debian packages (security updates via `unattended-upgrades`).

@@ -1,76 +1,76 @@
-# Дорожня карта
+# Roadmap
 
-Оцінки — для однієї людини, яка працює над проєктом повний день, з допомогою AI-агентів.
+Estimates assume one full-time engineer working with AI agents.
 
-## M0 — Foundation (1–2 тижні)
+## M0 — Foundation (1–2 weeks)
 
-- Скелет: `cmd/kadr` (serve, migrate, admin, doctor), конфіг, slog, graceful shutdown.
-- SQLite: writer + reader pool, міграції (embed), sqlc, `Store`-інтерфейс.
-- Envelope-шифрування, API-ключі, сесії адмінки (argon2id + TOTP).
-- Проєкти, storage profiles (+ кнопка «Тест з'єднання» до R2), стандартні пресети.
-- Адмінка: каркас (React + Vite + shadcn), логін, Projects, Keys, Storage.
-- CI: lint, test, govulncheck, кросзбірка linux/amd64; `make deploy` / `rollback`.
+- Skeleton: `cmd/kadr` (serve, migrate, admin, doctor), config, slog, graceful shutdown.
+- SQLite: writer + reader pool, embedded migrations, `Store` interface.
+- Envelope encryption, API keys, admin sessions (argon2id + TOTP).
+- Projects, storage profiles (+ "Test connection" against R2), default presets.
+- Admin console: shell (React + Vite + shadcn), login, Projects, Keys, Storage.
+- CI: lint, test, govulncheck, linux/amd64 cross build; `make deploy` / `rollback`.
 
-**Готово, коли:** `kadr doctor` зелений на LXC, у адмінці створюється проєкт `omi-staging` з ключем і робочим R2-профілем.
+**Done when:** `kadr doctor` is green on the LXC, and the admin console can create an `acme-staging` project with a key and a working R2 profile.
 
-## M1 — Images (2–3 тижні)
+## M1 — Images (2–3 weeks)
 
-- `POST /v1/uploads` (PUT), `complete?wait`, `POST /v1/assets` (серверне завантаження).
-- Черга на SQLite (lease, ретраї, DLQ), пул `image`.
-- `engine/image`: vips CLI, бюджетне кодування, AVIF+WebP, ThumbHash, dominant color.
-- Дедуплікація sha256, refcount-GC, sweeper прострочених upload-ів.
-- Outbox + вебхуки (Standard Webhooks).
-- Квоти проєкту й namespace з резервуванням.
-- `@kadr/node` (тікети, signUrl, verify webhook).
-- **Інтеграція з Omi за feature flag** (staging).
+- `POST /v1/uploads` (PUT), `complete?wait`, `POST /v1/assets` (server-side upload).
+- SQLite queue (leases, retries, DLQ), `image` pool.
+- `engine/image`: vips CLI, budget encoding, AVIF+WebP, ThumbHash, dominant color.
+- sha256 dedup, refcount GC, expired-upload sweeper.
+- Outbox + webhooks (Standard Webhooks).
+- Project and namespace quotas with reservations.
+- `@kadr/node` (tickets, signUrl, webhook verification).
+- **First design-partner product integrated behind a feature flag** (staging).
 
-**Готово, коли:** фото з iPhone (HEIC 4 МБ) → ≤ 20 КБ AVIF у R2 за p95 < 1.5 с від complete; golden-тести зелені.
+**Done when:** an iPhone photo (4 MB HEIC) → ≤ 20 KB AVIF in R2 with p95 < 1.5 s from complete; golden tests green.
 
-## M2 — Video (2 тижні)
+## M2 — Video (2 weeks)
 
-- S3 Multipart (тікети частин, complete з ETag), abort.
-- `engine/video`: ffprobe-валідація, libx264 / VAAPI автодетект, постер, прогрес.
-- Пул `video` з heartbeat lease; таймаути від тривалості.
-- Квота хвилин відео на місяць.
-- Сторінка Jobs в адмінці (live-прогрес через SSE, Retry/Cancel).
+- S3 Multipart (part tickets, complete with ETags), abort.
+- `engine/video`: ffprobe validation, libx264 / VAAPI auto-detection, poster, progress.
+- `video` pool with heartbeat leases; duration-based timeouts.
+- Monthly video-minute quota.
+- Jobs page in the admin console (live progress via SSE, Retry/Cancel).
 
-**Готово, коли:** 60-секундне відео 4K 300 МБ завантажується повз тунель, стискається до ≤ 5 МБ 720p і програється одразу (faststart).
+**Done when:** a 60-second 4K 300 MB video uploads bypassing the tunnel, compresses to ≤ 5 MB 720p, and plays instantly (faststart).
 
-## M3 — Private delivery & SDK (1–2 тижні)
+## M3 — Private delivery & SDKs (1–2 weeks)
 
-- Worker `kadr-edge`: HMAC-перевірка, Cache API, Range-запити для відео, `Content-Disposition`.
-- Signing keys: створення, ротація, публікація в Worker через Cloudflare API.
-- Зміна видимості (CopyObject між бакетами).
-- `@kadr/web` (pre-resize у Web Worker, multipart з паралельністю, ретраї частин, прогрес), `@kadr/react` (`<KadrImage>`, `<KadrVideo>`).
-- OpenAPI 3.1 опубліковано; SDK генерується.
-- **Підключення ofi та mif.**
+- `kadr-edge` Worker: HMAC verification, Cache API, Range requests for video, `Content-Disposition`.
+- Signing keys: creation, rotation, publishing to the Worker via the Cloudflare API.
+- Visibility changes (CopyObject between buckets).
+- `@kadr/web` (pre-resize in a Web Worker, parallel multipart, part retries, progress), `@kadr/react` (`<KadrImage>`, `<KadrVideo>`).
+- OpenAPI 3.1 published; SDKs generated.
+- **Onboard two more design-partner products; integration guide validated (< 1 day per product).**
 
-## M4 — Product polish (2–3 тижні)
+## M4 — Product polish (2–3 weeks)
 
-- Асет-експлорер (фільтри, перегляд метаданих, видалення).
-- **Playground:** завантажити зразок, крутити параметри пресету, порівняння До/Після (split view), розмір/SSIM у реальному часі, «Зберегти як нову версію».
-- Аналітика: прийнято / збережено / економія %, хвилини відео, failed-rate, p95 — по проєктах і днях.
-- Журнал вебхуків з повторною відправкою; аудит-лог.
-- URL-імпорт (SSRF-safe) і хмарні підключення (Google Drive / OneDrive / Dropbox через rclone).
-- Litestream + `restore-drill`; `/metrics`, вбудовані алерти (Telegram/email).
-- WebAuthn для адмінки.
+- Asset explorer (filters, metadata view, deletion).
+- **Playground:** upload a sample, tweak preset parameters, Before/After split view, live size/SSIM, "Save as new version".
+- Analytics: ingested / stored / savings %, video minutes, failed rate, p95 — per project and day.
+- Webhook delivery log with re-send; audit log.
+- URL imports (SSRF-safe) and cloud connections (Google Drive / OneDrive / Dropbox via rclone).
+- Litestream + `restore-drill`; `/metrics`, built-in alerts (Telegram/email).
+- WebAuthn for the admin console.
 
-## M5 — Scale & SaaS-ready (за потребою)
+## M5 — Scale & SaaS-ready (as needed)
 
-- `kadr worker` на окремих вузлах (internal lease API, mTLS); GPU-вузол з NVENC/QSV.
-- HLS-драбина, спрайти таймлайну, AV1-рендиції.
-- Рендиції на вимогу (lazy, кеш у R2) — або imgproxy за Worker-ом.
-- Postgres-драйвер для `Store` (multi-instance control plane).
-- Білінг: метеринг із `usage_daily` → Stripe; тарифні плани.
-- Модерація контенту (NSFW-класифікатор як окремий пул), перевірка документів.
-- Self-hosted пакет: `.deb`, інсталятор для Proxmox (helper-script), документація для клієнтів.
+- `kadr worker` on separate nodes (internal lease API, mTLS); GPU node with NVENC/QSV.
+- HLS ladder, timeline sprites, AV1 renditions.
+- On-demand renditions (lazy, cached in R2) — or imgproxy behind a Worker.
+- Postgres driver for `Store` (multi-instance control plane).
+- Billing: metering from `usage_daily` → Stripe; plans.
+- Content moderation (NSFW classifier as a separate pool), document checks.
+- Self-hosted package: `.deb`, Proxmox installer (helper script), customer documentation.
 
-## Ризики
+## Risks
 
-| Ризик | Вплив | Мітигація |
+| Risk | Impact | Mitigation |
 |---|---|---|
-| Обмеження SQLite при рості записів | Затримки API | Один writer + батчинг; Postgres-драйвер у M5; поріг ≈ сотні записів/с — далеко від потреб S1 |
-| Канал Proxmox на скачування відео з R2 | Черга відео росте | VAAPI, S2-воркери у VPS/Hetzner поруч із R2 |
-| Зміна умов R2 (ціни, ToS) | Вартість | Абстракція `StorageDriver`; B2/Hetzner/Garage як заміна без зміни API |
-| Якість ≤ 20 КБ на складних фото | Невдоволення користувачів | `photo-balanced` як альтернатива, `over_budget`-прапорець, Playground для підбору |
-| Bus factor = 1 | Підтримка | ADR, OpenAPI, тести, runbook-и в OPERATIONS.md |
+| SQLite limits as writes grow | API latency | Single writer + batching; Postgres driver in M5; the threshold (hundreds of writes/s) is far beyond S1 needs |
+| Proxmox uplink for pulling video from R2 | Video queue grows | VAAPI, S2 workers on a VPS/Hetzner close to R2 |
+| R2 terms change (pricing, ToS) | Cost | `StorageDriver` abstraction; B2/Hetzner/Garage as drop-in replacements without API changes |
+| ≤ 20 KB quality on complex photos | User dissatisfaction | `photo-balanced` alternative, `over_budget` flag, Playground for tuning |
+| Bus factor = 1 | Maintainability | ADRs, OpenAPI, tests, runbooks in OPERATIONS.md |

@@ -1,21 +1,21 @@
-# ADR-0006: Три бакети — public / private / system
+# ADR-0006: Three buckets — public / private / system
 
-**Статус:** Accepted
+**Status:** Accepted
 
-## Контекст
-Потрібно гарантувати, що приватне не стане публічним через помилку в коді, і обмежити наслідки компрометації токенів.
+## Context
+We must guarantee that private files never become public through a code bug, and limit the blast radius of a leaked token.
 
-## Рішення
-- `kadr-public` — лише публічні рендиції, Custom Domain.
-- `kadr-private` — tmp-сирці, приватні рендиції, оригінали; публічного доступу немає.
-- `kadr-system` — репліка БД; окремий токен, недоступний процесу обробки.
-- Проєкти розділені префіксом `{project}/` усередині бакетів, а не окремими бакетами.
+## Decision
+- `kadr-public` — public renditions only, Custom Domain.
+- `kadr-private` — tmp sources, private renditions, originals; no public access.
+- `kadr-system` — database replica; separate token, not available to the processing code path.
+- Projects are separated by a `{project}/` prefix inside the buckets, not by separate buckets.
 
-## Наслідки
-- Фізичний барʼєр між публічним і приватним; публічний бакет не має шляху запису з Worker.
-- Не потрібно створювати бакети для кожного нового проєкту; квоти й ізоляцію тримає Kadr.
-- Проєкт, якому потрібна повна фізична ізоляція, отримує BYOS-профіль (власні бакети).
+## Consequences
+- A physical barrier between public and private; the public bucket has no write path from the Worker.
+- No bucket creation per new project; Kadr enforces quotas and isolation.
+- A project that needs full physical isolation gets a BYOS profile (its own buckets).
 
-## Альтернативи
-- Один бакет з префіксами public/private — одна помилка в Custom Domain/правилах відкриває все.
-- Бакети для кожного проєкту — більше налаштувань і токенів без реальної вигоди на S1.
+## Alternatives
+- One bucket with public/private prefixes — a single Custom Domain/rule mistake exposes everything.
+- Buckets per project — more setup and tokens without real benefit at S1.

@@ -1,22 +1,22 @@
-# ADR-0004: Завантаження напряму в R2; Kadr не виставлений в інтернет
+# ADR-0004: Direct-to-storage uploads; Kadr not exposed to the internet
 
-**Статус:** Accepted
+**Status:** Accepted
 
-## Контекст
-Початкова ідея — вбудувати tusd у Kadr для resumable-завантажень. Але тоді браузери мусять ходити в Kadr, тобто Kadr треба публікувати через Cloudflare Tunnel: ліміт тіла 100 МБ, ToS тунелю щодо відео, навантаження на домашній канал, більша поверхня атаки.
+## Context
+The initial idea was to embed tusd into Kadr for resumable uploads. But then browsers must reach Kadr, so Kadr would have to be published to the internet (often via a Cloudflare Tunnel with a 100 MB body limit and a ToS restricting video), loading the operator's uplink and widening the attack surface.
 
-## Рішення
-- Усі клієнтські завантаження йдуть **напряму в `kadr-private/tmp/`** через presigned PUT (≤ 64 МБ) або S3 Multipart (> 64 МБ, частини по 16 МБ).
-- Resumable-поведінка — на рівні частин multipart: `@kadr/web` повторює лише невдалі частини; стан завантаження зберігається в IndexedDB для продовження після перезавантаження сторінки.
-- Тікети видає Kadr бекенду проєкту по LAN; бекенд передає їх браузеру.
-- `/v1` слухає лише LAN-інтерфейс. Через тунель публікується тільки адмінка за Cloudflare Access.
+## Decision
+- All client uploads go **directly to `kadr-private/tmp/`** via presigned PUT (≤ 64 MB) or S3 Multipart (> 64 MB, 16 MB parts).
+- Resumability works at the multipart-part level: `@kadr/web` retries only failed parts and keeps upload state in IndexedDB to resume after a page reload.
+- Kadr issues tickets to the product backend over the private network; the backend hands them to the browser.
+- `/v1` listens on the private interface only. Only the admin console is published, behind Cloudflare Access (or a VPN).
 
-## Наслідки
-- Через тунель і API проєктів проходить 0 байт медіа; ліміти 25/100 МБ не діють.
-- Kadr недосяжний з інтернету — значно менша поверхня атаки.
-- Потрібен CORS на `kadr-private` і обробка ETag у клієнті.
-- tusd не потрібен (менше залежностей). Може зʼявитися пізніше лише для LAN-клієнтів.
+## Consequences
+- Zero media bytes pass through tunnels or product APIs; 25/100 MB body limits do not apply.
+- Kadr is unreachable from the internet — a much smaller attack surface.
+- Requires CORS on `kadr-private` and ETag handling in the client.
+- tusd is not needed (fewer dependencies). It may return later for private-network clients only.
 
-## Альтернативи
-- tusd у Kadr через тунель — ліміти, ToS, канал.
-- POST з FormData — R2 не підтримує S3 POST policy.
+## Alternatives
+- tusd in Kadr behind a tunnel — limits, ToS, uplink load.
+- FormData POST — R2 does not support S3 POST policies.

@@ -1,20 +1,20 @@
 # ADR-0001: Go + chi
 
-**Статус:** Accepted
+**Status:** Accepted
 
-## Контекст
-Потрібен сервіс з мінімальним споживанням RAM, простим деплоєм одного файлу з Mac на Linux LXC і вбудованою адмінкою. Розглядалися Node.js/Fastify (поточний стек omi/ofi/mif), Bun/Elysia, Go, Rust/Axum.
+## Context
+We need a service with minimal RAM usage, a single-file deployment that cross-compiles from macOS to Linux, and an embedded admin console. Candidates: Node.js/Fastify, Bun/Elysia, Go, Rust/Axum.
 
-## Рішення
-Go 1.25, роутер **chi v5** поверх стандартного `net/http`.
+## Decision
+Go 1.25 with the **chi v5** router on top of the standard `net/http`.
 
-## Наслідки
-- `CGO_ENABLED=0 GOOS=linux go build` з Mac за секунди; один статичний бінарник, адмінка всередині через `go:embed`.
-- ~15–30 МБ RAM у простої; горутини для пулів воркерів без зовнішніх брокерів.
-- Сумісність із `net/http`-екосистемою (tusd, aws-sdk-go-v2, middleware) без адаптерів.
-- Команда пише на TypeScript: на Go потрібно 1–2 тижні адаптації. SDK для проєктів лишаються на TypeScript.
+## Consequences
+- `CGO_ENABLED=0 GOOS=linux go build` from a Mac in seconds; one static binary with the admin console embedded via `go:embed`.
+- ~15–30 MB RAM at idle; goroutine worker pools without an external broker.
+- Compatible with the `net/http` ecosystem (tusd, aws-sdk-go-v2, middleware) without adapters.
+- Client SDKs remain in TypeScript (and other languages via OpenAPI), so integrators never need Go.
 
-## Альтернативи
-- **Fiber** — працює на fasthttp, несумісний із `net/http`; ламає стрімінг і middleware.
-- **Rust/Axum** — економія ~20 МБ RAM, але 90% ресурсів тут споживають ffmpeg/libvips; складна кросзбірка з Apple Silicon, у 2–3 рази повільніша розробка.
-- **Node/Fastify, Bun** — 60–110 МБ RAM, `node_modules`, складніше розповсюджувати як self-hosted продукт.
+## Alternatives
+- **Fiber** — built on fasthttp, incompatible with `net/http`; breaks streaming and middleware.
+- **Rust/Axum** — saves ~20 MB RAM, but 90% of resources here are consumed by ffmpeg/libvips; cross-compiling from Apple Silicon is painful and development is 2–3× slower.
+- **Node/Fastify, Bun** — 60–110 MB RAM, `node_modules`, harder to distribute as a self-hosted product.

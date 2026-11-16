@@ -1,16 +1,16 @@
-# ADR-0010: H.264 MP4 faststart за замовчуванням, VAAPI автодетект, HLS пізніше
+# ADR-0010: H.264 MP4 faststart by default, VAAPI auto-detection, HLS later
 
-**Статус:** Accepted
+**Status:** Accepted
 
-## Контекст
-Більшість відео в продуктах — короткі кліпи (≤ 2–5 хв). Потрібна універсальна сумісність (iOS Safari, старі Android), мінімальний розмір і миттєвий старт.
+## Context
+Most video in user-generated products is short clips (≤ 2–5 min). We need universal compatibility (iOS Safari, older Android), minimal size and instant start.
 
-## Рішення
-- Один MP4: H.264 High, CRF + VBV-стеля (`maxrate`/`bufsize`), AAC, `+faststart`, без метаданих; постер ≤ 15 КБ.
-- Під час старту визначаються апаратні можливості: при наявності `/dev/dri` і успішному пробному кодуванні використовується `h264_vaapi`, інакше `libx264 -preset slow -threads 2`.
-- Пул відео — 1 одночасна задача на S1.
-- HLS-драбина, AV1 і спрайти — M5, для довгого контенту.
+## Decision
+- A single MP4: H.264 High, CRF + VBV ceiling (`maxrate`/`bufsize`), AAC, `+faststart`, no metadata; poster ≤ 15 KB.
+- Hardware capabilities are detected at startup: if `/dev/dri` exists and a test encode succeeds, use `h264_vaapi`; otherwise `libx264 -preset slow -threads 2`.
+- The video pool runs 1 concurrent job at S1.
+- HLS ladder, AV1 and sprites come in M5 for long-form content.
 
-## Наслідки
-- Відтворюється всюди, Range-запити з R2/Worker, без плеєра HLS.
-- Для довгих відео на слабкому інтернеті якість не адаптується до швидкості з'єднання — це прийнятно для S1.
+## Consequences
+- Plays everywhere, Range requests from R2/Worker, no HLS player needed.
+- Long videos on slow connections do not adapt quality to bandwidth — acceptable for S1.

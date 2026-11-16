@@ -1,19 +1,19 @@
-# ADR-0002: Один unprivileged LXC, systemd, без Docker
+# ADR-0002: Single unprivileged LXC/host, systemd, no Docker
 
-**Статус:** Accepted
+**Status:** Accepted
 
-## Контекст
-Інфраструктура — Proxmox. Docker усередині LXC додає dockerd/containerd (~200–350 МБ RAM), ускладнює прокидання `/dev/dri` і дублює ізоляцію, яку вже дає LXC.
+## Context
+The reference deployment is a Proxmox LXC; any small Linux host with systemd must work too. Docker inside an LXC adds dockerd/containerd (~200–350 MB RAM), complicates `/dev/dri` passthrough, and duplicates the isolation the container already provides.
 
-## Рішення
-Debian 13 unprivileged LXC; процеси `kadr` і `litestream` під systemd з пісочницею (див. SECURITY.md §4). Обробники (`vips`, `ffmpeg`, `rclone`) — системні пакети, що запускаються під задачу.
+## Decision
+Debian 13 unprivileged LXC (or VM/bare metal); `kadr` and `litestream` run under systemd with sandboxing (see SECURITY.md §4). Processors (`vips`, `ffmpeg`, `rclone`) are system packages launched per job.
 
-## Наслідки
-- Мінімальний простій, прямий доступ до iGPU.
-- Оновлення кодеків через `apt` (security-патчі Debian).
-- Відтворюваність середовища забезпечує `kadr doctor` + скрипт провізії (`deploy/lxc/provision.sh`), а не образ.
-- Для зовнішніх self-hosted клієнтів у майбутньому можна додатково випустити `.deb` і, за потреби, Docker-образ — архітектура від цього не залежить.
+## Consequences
+- Minimal idle footprint, direct iGPU access.
+- Codec updates via `apt` (Debian security patches).
+- Environment reproducibility comes from `kadr doctor` + the provisioning script (`deploy/lxc/provision.sh`), not from an image.
+- For self-hosted customers we can additionally ship a `.deb` and, if requested, a Docker image — the architecture does not depend on either.
 
-## Альтернативи
-- Docker Compose у VM/LXC — зайва RAM, складніший GPU passthrough.
-- Два LXC (control plane + worker) — передчасно; шлях закладено через `kadr worker` (ADR-0003, ARCHITECTURE §8).
+## Alternatives
+- Docker Compose in a VM/LXC — extra RAM, harder GPU passthrough.
+- Two containers (control plane + worker) — premature; the path is designed in via `kadr worker` (ADR-0003, ARCHITECTURE §8).

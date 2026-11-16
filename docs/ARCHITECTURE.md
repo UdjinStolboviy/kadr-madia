@@ -1,21 +1,21 @@
-# Архітектура Kadr
+# Kadr Architecture
 
-## 1. Принципи
+## 1. Principles
 
-1. **Kadr не стоїть на шляху читання.** Перегляди йдуть із Cloudflare (R2 Custom Domain для публічних файлів, edge Worker для приватних). Kadr бере участь лише у записі.
-2. **Медіабайти не проходять через тунель і API проєктів.** Браузер вантажить прямо в R2; Kadr забирає файл із R2 (egress $0) по своєму каналу.
-3. **Kadr не виставлений в інтернет.** Публічний API слухає лише LAN Proxmox. Адмінка доступна через Cloudflare Access (лише JSON і статика).
-4. **Мінімум процесів у простої.** Один Go-бінарник; `vips`, `ffmpeg`, `rclone` запускаються як короткоживучі процеси під задачу.
-5. **Без стану поза одним файлом.** Постійні дані — у R2; метадані й черга — у `kadr.db` (SQLite WAL), який безперервно реплікується в R2.
-6. **Незмінні рендиції.** Кожен згенерований файл незмінний (`Cache-Control: immutable`). Зміна пресету створює нову версію з новим URL, а не перезаписує стару.
-7. **Шари замінні без переписування.** Інтерфейси `Store`, `Queue`, `ImageEngine`, `VideoEngine`, `StorageDriver` дозволяють перейти на Postgres, віддалених воркерів, GPU-вузли або іншого S3-провайдера.
+1. **Kadr is not on the read path.** Views are served by Cloudflare (R2 Custom Domain for public files, an edge Worker for private ones). Kadr only participates in writes.
+2. **Media bytes never pass through the tunnel or product APIs.** The browser uploads directly to R2; Kadr pulls the file from R2 (egress $0) over its own uplink.
+3. **Kadr is not exposed to the internet.** The public API listens on the private network only. The admin console is reachable through Cloudflare Access (JSON and static assets only).
+4. **Minimum idle processes.** One Go binary; `vips`, `ffmpeg`, `rclone` run as short-lived processes per job.
+5. **No state outside one file.** Durable data lives in R2; metadata and the queue live in `kadr.db` (SQLite WAL), continuously replicated to R2.
+6. **Immutable renditions.** Every generated file is immutable (`Cache-Control: immutable`). Changing a preset creates a new version with new URLs instead of overwriting.
+7. **Replaceable layers.** The `Store`, `Queue`, `ImageEngine`, `VideoEngine` and `StorageDriver` interfaces allow moving to Postgres, remote workers, GPU nodes or another S3 provider without rewrites.
 
-## 2. Контекст системи
+## 2. System context
 
 ```mermaid
 flowchart LR
-  subgraph Users["Користувачі"]
-    B[Браузер / мобільний застосунок]
+  subgraph Users["Users"]
+    B[Browser / mobile app]
   end
 
   subgraph CF["Cloudflare"]
@@ -28,37 +28,37 @@ flowchart LR
     ACC[Cloudflare Access]
   end
 
-  subgraph PVE["Proxmox LAN 192.168.50.0/24"]
-    OMI[omi-api]
-    OFI[ofi-api]
-    MIF[mif-api]
+  subgraph PVE["Private network (e.g. Proxmox LAN)"]
+    P1[product-a API]
+    P2[product-b API]
+    P3[product-c API]
     K[Kadr LXC<br/>kadr serve]
   end
 
-  B -- "JSON (тікет, complete)" --> T --> OMI & OFI & MIF
-  OMI & OFI & MIF -- "LAN: /v1 API" --> K
-  K -- "LAN: вебхуки" --> OMI & OFI & MIF
-  B -- "PUT байтів (presigned)" --> PRIV
-  K -- "GET сирця / PUT рендицій" --> PRIV & PUB
+  B -- "JSON (ticket, complete)" --> T --> P1 & P2 & P3
+  P1 & P2 & P3 -- "LAN: /v1 API" --> K
+  K -- "LAN: webhooks" --> P1 & P2 & P3
+  B -- "PUT bytes (presigned)" --> PRIV
+  K -- "GET source / PUT renditions" --> PRIV & PUB
   K -- "Litestream WAL" --> SYS
-  B -- "GET публічних" --> CDN --> PUB
-  B -- "GET приватних (підпис)" --> EDGE --> PRIV
-  Admin[Адміністратор] --> ACC --> T --> K
+  B -- "GET public" --> CDN --> PUB
+  B -- "GET private (signed)" --> EDGE --> PRIV
+  Admin[Administrator] --> ACC --> T --> K
 ```
 
-**Трафік через тунель:** лише JSON проєктів і адмінка. **Трафік Proxmox ↔ R2:** завантаження сирця на обробку + вивантаження стиснених рендицій (зазвичай у 20–100 разів менше за сирець).
+**Tunnel traffic:** product JSON and the admin console only. **Proxmox ↔ R2 traffic:** downloading the source for processing + uploading compressed renditions (typically 20–100× smaller than the source).
 
-## 3. Компоненти всередині бінарника
+## 3. Components inside the binary
 
 ```mermaid
 flowchart TB
-  subgraph kadr["kadr serve (один процес)"]
+  subgraph kadr["kadr serve (single process)"]
     direction TB
     HTTP["HTTP (chi)<br/>:8080 LAN — /v1<br/>:8081 — /admin + UI"]
-    AUTH[auth<br/>API keys, scopes, сесії]
+    AUTH[auth<br/>API keys, scopes, sessions]
     SVC[pipeline<br/>uploads, assets, presets]
     Q[queue<br/>SQLite lease queue]
-    subgraph Pools["Пули воркерів (горутини + семафори)"]
+    subgraph Pools["Worker pools (goroutines + semaphores)"]
       IMG[image ×N]
       VID[video ×1]
       IMP[import ×1]
@@ -67,8 +67,8 @@ flowchart TB
     end
     ENG_I[engine/image → vips CLI]
     ENG_V[engine/video → ffprobe/ffmpeg]
-    IMPT[importer → http SSRF-safe / rclone]
-    ST[storage → S3/R2 драйвери]
+    IMPT[importer → SSRF-safe http / rclone]
+    ST[storage → S3/R2 drivers]
     DB[(kadr.db<br/>SQLite WAL)]
     OBS[observability<br/>slog, /metrics, /healthz]
   end
@@ -80,176 +80,176 @@ flowchart TB
   VID --> ENG_V
   IMP --> IMPT
   Pools --> ST
-  WH -->|HTTP POST| ext[Бекенди проєктів]
+  WH -->|HTTP POST| ext[Product backends]
 ```
 
-| Модуль | Відповідальність | Ключові рішення |
+| Module | Responsibility | Key decisions |
 |---|---|---|
-| `api/public` | REST `/v1` для бекендів проєктів | OpenAPI 3.1, `Idempotency-Key`, курсорна пагінація, RFC 9457 помилки |
-| `api/admin` | REST `/admin/api` для адмінки | Окремий порт, сесії в cookie, CSRF, TOTP |
-| `auth` | Ключі `kd_live_…`/`kd_test_…`, scopes | Зберігається тільки SHA-256(ключ + pepper), префікс для пошуку |
-| `pipeline` | Життєвий цикл upload → asset → renditions | Явна машина станів, події в outbox у тій самій транзакції |
-| `queue` | Задачі з пріоритетами, ретраями, lease | `UPDATE … RETURNING`, visibility timeout, DLQ |
-| `engine/image` | Декодування, ресайз, різкість, бюджетне кодування | libvips CLI, бінарний пошук якості, ThumbHash |
-| `engine/video` | Перевірка, транскодування, постер | ffprobe-валідація, CRF+VBV, автодетект VAAPI |
-| `storage` | Put/Get/Copy/Delete/Presign/Multipart | aws-sdk-go-v2, драйвер на профіль сховища (платформний або BYOS) |
-| `delivery` | Підписані URL для приватних файлів | HMAC-SHA256 з `kid`, ротація ключів, ключі синхронізуються в Worker |
-| `importer` | URL-імпорт, хмарні диски | Перевірка IP після DNS-резолву, ліміти; rclone як разовий процес |
-| `webhook` | Доставка подій проєктам | Transactional outbox, специфікація Standard Webhooks, експоненційні ретраї |
-| `observability` | Логи, метрики, health | slog JSON → journald, VictoriaMetrics/metrics, `/healthz`, `/readyz` |
+| `api/public` | REST `/v1` for product backends | OpenAPI 3.1, `Idempotency-Key`, cursor pagination, RFC 9457 errors |
+| `api/admin` | REST `/admin/api` for the console | Separate port, cookie sessions, CSRF, TOTP |
+| `auth` | Keys `kd_live_…`/`kd_test_…`, scopes | Only SHA-256(key + pepper) is stored, prefix used for lookup |
+| `pipeline` | Lifecycle upload → asset → renditions | Explicit state machine, outbox events in the same transaction |
+| `queue` | Jobs with priorities, retries, leases | `UPDATE … RETURNING`, visibility timeout, DLQ |
+| `engine/image` | Decode, resize, sharpen, budget encoding | libvips CLI, binary search over quality, ThumbHash |
+| `engine/video` | Validation, transcoding, posters | ffprobe validation, CRF+VBV, VAAPI auto-detection |
+| `storage` | Put/Get/Copy/Delete/Presign/Multipart | aws-sdk-go-v2, driver per storage profile (platform or BYOS) |
+| `delivery` | Signed URLs for private files | HMAC-SHA256 with `kid`, key rotation, keys synced to the Worker |
+| `importer` | URL imports, cloud drives | IP checks after DNS resolution, limits; rclone as a one-off process |
+| `webhook` | Event delivery to products | Transactional outbox, Standard Webhooks spec, exponential retries |
+| `observability` | Logs, metrics, health | slog JSON → journald, VictoriaMetrics/metrics, `/healthz`, `/readyz` |
 
-## 4. Доменна модель
+## 4. Domain model
 
 ```
-Project (omi-prod, ofi-prod, mif-prod, omi-staging…)
+Project (acme, acme-staging, shop, crm…)
  ├── ApiKey[]            scopes: uploads:write, assets:read, assets:delete, urls:sign
- ├── SigningKey[]        kid + secret для приватних URL (ротація)
- ├── StorageProfile      платформний R2 або власний S3/R2 клієнта (BYOS)
- ├── Preset[] → PresetVersion[]   незмінні версії параметрів обробки
+ ├── SigningKey[]        kid + secret for private URLs (rotation)
+ ├── StorageProfile      platform R2 or the customer's own S3/R2 (BYOS)
+ ├── Preset[] → PresetVersion[]   immutable versions of processing parameters
  ├── WebhookEndpoint[]
- └── Namespace[]         непрозорий ID від проєкту (orgId / householdId / userId), квоти
-      └── Asset          логічний файл: visibility, metadata, status
-           └── Blob      фізичний результат обробки (дедуплікація за sha256 + preset version)
+ └── Namespace[]         opaque ID from the product (orgId / householdId / userId), quotas
+      └── Asset          logical file: visibility, metadata, status
+           └── Blob      physical processing result (dedup by sha256 + preset version)
                 └── Rendition[]   avif/webp/mp4/poster: key, bytes, width, height
 ```
 
-**Asset ≠ Blob.** Один і той самий файл, завантажений двічі в межах `(project, visibility, preset_version)`, дає два Asset і один Blob (refcount). Видалення Asset зменшує refcount; Blob і його обʼєкти в R2 видаляє GC, коли refcount = 0.
+**Asset ≠ Blob.** The same file uploaded twice within `(project, visibility, preset_version)` yields two Assets and one Blob (refcounted). Deleting an Asset decrements the refcount; GC deletes the Blob and its R2 objects when the refcount reaches 0.
 
-Повна схема: [DATA_MODEL.md](DATA_MODEL.md).
+Full schema: [DATA_MODEL.md](DATA_MODEL.md).
 
-## 5. Потоки
+## 5. Flows
 
-### 5.1 Завантаження (фото або відео)
+### 5.1 Upload (photo or video)
 
 ```mermaid
 sequenceDiagram
   autonumber
-  participant B as Браузер (@kadr/web)
-  participant P as omi-api
+  participant B as Browser (@kadr/web)
+  participant P as Product API
   participant K as Kadr (LAN)
   participant R as R2 kadr-private
   participant W as Kadr worker
 
-  B->>B: pre-resize фото до 1600px (Web Worker), SHA-256
+  B->>B: pre-resize photo to 1600px (Web Worker), SHA-256
   B->>P: POST /media/uploads {preset, size, type, sha256}
-  P->>P: перевірка прав користувача на orgId
+  P->>P: check user access to orgId
   P->>K: POST /v1/uploads {preset, namespace: orgId, visibility, size, sha256}
-  alt sha256 вже є (дедуп)
+  alt sha256 already known (dedup)
     K-->>P: 200 {asset: ready}
-  else новий файл
-    K->>K: перевірка квоти + резерв, створення upload
+  else new file
+    K->>K: quota check + reservation, create upload
     K-->>P: 201 {uploadId, method: PUT|MULTIPART, url(s), headers, expiresAt}
-    P-->>B: тікет
-    B->>R: PUT tmp/{project}/{uploadId} (підписані Content-Length + Content-Type)
+    P-->>B: ticket
+    B->>R: PUT tmp/{project}/{uploadId} (signed Content-Length + Content-Type)
     B->>P: POST /media/uploads/{id}/complete
     P->>K: POST /v1/uploads/{id}/complete?wait=5s
-    K->>R: HEAD (перевірити розмір)
+    K->>R: HEAD (verify size)
     K->>K: job process_image|process_video
-    W->>R: GET сирця → /var/lib/kadr/tmp
-    W->>W: magic bytes, ліміти, vips/ffmpeg, ThumbHash
-    W->>R: PUT рендицій у kadr-public або kadr-private
+    W->>R: GET source → /var/lib/kadr/tmp
+    W->>W: magic bytes, limits, vips/ffmpeg, ThumbHash
+    W->>R: PUT renditions to kadr-public or kadr-private
     W->>R: DELETE tmp/…
     W->>K: asset=ready, outbox: asset.ready
-    K-->>P: 200 {asset} (фото зазвичай встигає в межах wait)
-    K--)P: webhook asset.ready (відео / якщо wait вичерпано)
+    K-->>P: 200 {asset} (photos usually finish within wait)
+    K--)P: webhook asset.ready (video / if wait elapsed)
   end
 ```
 
-**Стійкість:**
-- Якщо клієнт не викликав `complete`, sweeper робить `HEAD` для прострочених upload-ів: є обʼєкт — запускає обробку, немає — `upload.expired` і знімає резерв квоти.
-- Lifecycle-правила R2: `tmp/` видаляється через 1 день, незавершені multipart скасовуються через 1 день.
-- Повторний `complete` ідемпотентний; задачі мають `dedupe_key`.
+**Resilience:**
+- If the client never calls `complete`, the sweeper `HEAD`s expired uploads: if the object exists it starts processing, otherwise it emits `upload.expired` and releases the quota reservation.
+- R2 lifecycle rules: `tmp/` deleted after 1 day, incomplete multipart uploads aborted after 1 day.
+- Repeated `complete` calls are idempotent; jobs carry a `dedupe_key`.
 
-### 5.2 Публічна видача
+### 5.2 Public delivery
 
-`https://cdn.<domain>/{project}/{blobId}/{rendition}.{ext}` — R2 Custom Domain, кеш Cloudflare, `immutable`. SDK рендерить `<picture>` з AVIF і WebP, тож Worker на публічному шляху не потрібен (жодних витрат на виклики Worker).
+`https://cdn.<domain>/{project}/{blobId}/{rendition}.{ext}` — R2 Custom Domain, Cloudflare cache, `immutable`. The SDK renders `<picture>` with AVIF and WebP, so no Worker is needed on the public path (no Worker invocation cost).
 
-### 5.3 Приватна видача
+### 5.3 Private delivery
 
 ```mermaid
 sequenceDiagram
-  participant B as Браузер
-  participant P as omi-api (@kadr/node)
+  participant B as Browser
+  participant P as Product API (@kadr/node)
   participant E as kadr-edge Worker
   participant R as R2 kadr-private
   B->>P: GET /receipts/123
-  P->>P: перевірка доступу
-  P->>P: signUrl(key, ttl=1h) локально (HMAC, kid)
+  P->>P: access check
+  P->>P: signUrl(key, ttl=1h) locally (HMAC, kid)
   P-->>B: https://media.domain/{key}?exp=…&kid=…&sig=…
   B->>E: GET
-  E->>E: перевірка exp + HMAC (ключі в Worker secrets)
-  E->>E: Cache API (ключ кешу без підпису)
+  E->>E: verify exp + HMAC (keys in Worker secrets)
+  E->>E: Cache API (cache key without signature)
   E->>R: R2 binding get(key)
   E-->>B: 200, Cache-Control: private, max-age=…
 ```
 
-Підпис генерується **локально в бекенді проєкту** через SDK — без мережевого запиту до Kadr на кожне посилання. Kadr лише керує ключами (створення, ротація, публікація в Worker через Cloudflare API).
+Signatures are generated **locally in the product backend** by the SDK — no network round trip to Kadr per link. Kadr only manages the keys (creation, rotation, publishing to the Worker via the Cloudflare API).
 
-### 5.4 Зміна видимості (private → public)
+### 5.4 Visibility change (private → public)
 
-`PATCH /v1/assets/{id} {visibility: "public"}` → для кожної рендиції `CopyObject` між бакетами всередині R2 (без завантаження на Proxmox) → новий Blob → оновлення URL → `asset.updated`. Старий приватний обʼєкт видаляє GC.
+`PATCH /v1/assets/{id} {visibility: "public"}` → `CopyObject` for each rendition between buckets inside R2 (no download to Proxmox) → new Blob → updated URLs → `asset.updated`. GC removes the old private object.
 
-### 5.5 Імпорт
+### 5.5 Imports
 
-- **За URL:** резолв DNS → блок приватних/loopback/link-local/metadata-діапазонів → зʼєднання саме на перевірений IP → ліміти розміру й часу → далі той самий пайплайн.
-- **З хмарних дисків:** OAuth-підключення зберігається зашифрованим; під задачу генерується тимчасовий конфіг rclone (0600) → `rclone copyto` у tmp → пайплайн → конфіг видаляється.
+- **From URL:** resolve DNS → block private/loopback/link-local/metadata ranges → connect to exactly the verified IP → size and time limits → then the same pipeline.
+- **From cloud drives:** the OAuth connection is stored encrypted; a temporary rclone config (0600) is generated per job → `rclone copyto` into tmp → pipeline → config deleted.
 
-## 6. Черга задач
+## 6. Job queue
 
 ```mermaid
 stateDiagram-v2
   [*] --> queued
   queued --> running: lease (worker_id, lease_until)
   running --> succeeded
-  running --> queued: помилка, attempts < max (backoff)
-  running --> queued: lease прострочено (падіння воркера)
+  running --> queued: error, attempts < max (backoff)
+  running --> queued: lease expired (worker crashed)
   running --> dead: attempts = max
-  dead --> queued: Retry з адмінки
+  dead --> queued: Retry from admin
   succeeded --> [*]
 ```
 
-- Захоплення задачі — одна атомарна інструкція `UPDATE jobs … WHERE id = (SELECT … ORDER BY priority, run_at LIMIT 1) RETURNING *`.
-- Окремі пули й ліміти конкурентності для кожного `kind`: `image` = max(1, NumCPU/2), `video` = 1, `import` = 1, `webhook` = 4.
-- Heartbeat продовжує lease довгих задач (відео); при graceful shutdown незавершені задачі повертаються в чергу.
-- Ізоляція CPU: дочірні процеси `vips`/`ffmpeg` запускаються з `nice 10` + `ionice -c3`; systemd `CPUWeight`/`MemoryMax` на весь сервіс.
+- Claiming a job is a single atomic statement `UPDATE jobs … WHERE id = (SELECT … ORDER BY priority, run_at LIMIT 1) RETURNING *`.
+- Separate pools and concurrency limits per `kind`: `image` = max(1, NumCPU/2), `video` = 1, `import` = 1, `webhook` = 4.
+- A heartbeat extends leases of long jobs (video); on graceful shutdown unfinished jobs return to the queue.
+- CPU isolation: `vips`/`ffmpeg` child processes run with `nice 10` + `ionice -c3`; systemd `CPUWeight`/`MemoryMax` cap the whole service.
 
-## 7. Сховища
+## 7. Storage
 
-| Бакет | Доступ | Вміст | Lifecycle |
+| Bucket | Access | Contents | Lifecycle |
 |---|---|---|---|
-| `kadr-public` | Custom Domain `cdn.<domain>` | Публічні рендиції `{project}/{blobId}/…` | — |
-| `kadr-private` | Закритий; читання тільки через Worker binding або presigned GET | `tmp/…` сирці, приватні рендиції, оригінали (якщо пресет їх зберігає) | `tmp/` 1 день, abort multipart 1 день, `originals/` за політикою |
-| `kadr-system` | Закритий, окремий токен | Репліка Litestream, експорти | Версії 30 днів |
+| `kadr-public` | Custom Domain `cdn.<domain>` | Public renditions `{project}/{blobId}/…` | — |
+| `kadr-private` | Closed; reads only via Worker binding or presigned GET | `tmp/…` sources, private renditions, originals (if the preset keeps them) | `tmp/` 1 day, abort multipart 1 day, `originals/` per policy |
+| `kadr-system` | Closed, separate token | Litestream replica, exports | Versions 30 days |
 
-Окремі R2 API-токени з мінімальними правами: `kadr-rw` (public+private), `kadr-backup` (лише system), Worker має тільки read binding на private.
+Separate least-privilege R2 API tokens: `kadr-rw` (public+private), `kadr-backup` (system only); the Worker only has a read binding on private.
 
-**BYOS:** проєкт або його клієнт може підключити власний S3/R2/B2 (`storage_profiles`). Тоді Kadr обробляє файли, але зберігає результат у сховищі клієнта.
+**BYOS:** a project or its customer can connect their own S3/R2/B2 (`storage_profiles`). Kadr then processes files but stores results in the customer's storage.
 
-## 8. Модель розгортання і масштабування
+## 8. Deployment and scaling model
 
-| Стадія | Топологія | Коли |
+| Stage | Topology | When |
 |---|---|---|
-| **S1 — зараз** | 1 LXC: `kadr serve` (API + адмінка + усі пули) | omi/ofi/mif, до ~сотень тисяч асетів/міс |
-| **S2** | + N вузлів `kadr worker --control=http://kadr.lan` (GPU-хост, ще один LXC). Воркери беруть задачі через внутрішній lease API. Код пайплайну не змінюється. | Черга відео > 5 хв, потреба в NVENC/QSV |
-| **S3 — SaaS** | Control plane на Postgres (той самий `Store`-інтерфейс, sqlc для обох діалектів), воркери в кількох регіонах, білінг з `usage_daily` | Зовнішні клієнти |
+| **S1 — now** | 1 LXC: `kadr serve` (API + admin + all pools) | First products, up to hundreds of thousands of assets/month |
+| **S2** | + N `kadr worker --control=http://kadr.internal` nodes (GPU host, another LXC). Workers claim jobs via an internal lease API. Pipeline code is unchanged. | Video queue > 5 min, need for NVENC/QSV |
+| **S3 — SaaS** | Control plane on Postgres (same `Store` interface), workers in multiple regions, billing from `usage_daily` | External customers |
 
-## 9. Відмови
+## 9. Failure modes
 
-| Що впало | Наслідок | Захист |
+| What fails | Impact | Mitigation |
 |---|---|---|
-| Kadr LXC | Нові завантаження недоступні. **Перегляди працюють.** | systemd restart; проєкти показують «спробуйте пізніше»; відновлення з Litestream за хвилини |
-| R2 | Перегляди й завантаження недоступні | SLA Cloudflare; BYOS-резерв для критичних проєктів (S3) |
-| Диск LXC (втрата) | Втрата tmp і, можливо, кількох секунд метаданих | Litestream (RPO ≈ 1 с), сирці ще лежать у `tmp/` R2 протягом доби |
-| Вебхук-ендпоінт проєкту | Події накопичуються | Ретраї до 24 год, повторна відправка з адмінки, `GET /v1/assets/{id}` як fallback |
-| Біте/шкідливе медіа | Задача падає | Magic bytes, ліміт пікселів, ffprobe, таймаути, окремий tmp, без shell |
+| Kadr LXC | New uploads unavailable. **Views keep working.** | systemd restart; products show "try again later"; restore from Litestream in minutes |
+| R2 | Views and uploads unavailable | Cloudflare SLA; BYOS fallback (S3) for critical projects |
+| LXC disk (lost) | Loss of tmp and possibly a few seconds of metadata | Litestream (RPO ≈ 1 s); sources stay in R2 `tmp/` for a day |
+| Product webhook endpoint | Events pile up | Retries for up to 24 h, re-send from admin, `GET /v1/assets/{id}` as fallback |
+| Corrupt/malicious media | Job fails | Magic bytes, pixel limit, ffprobe, timeouts, isolated tmp, no shell |
 
-## 10. Бюджет ресурсів (S1)
+## 10. Resource budget (S1)
 
-| Стан | RAM | CPU |
+| State | RAM | CPU |
 |---|---|---|
-| Простій (`kadr` + ОС LXC) | ~60–90 МБ | ~0 |
-| Фото (кожна паралельна обробка) | +60–150 МБ | 1 ядро на 0.2–1 с |
-| Відео 720p (libx264 slow, 2 потоки) | +300–600 МБ | 2 ядра, ~0.5–1× реального часу |
-| Відео з VAAPI | +150–250 МБ | < 10% ядра, у 5–10× швидше |
+| Idle (`kadr` + LXC OS) | ~60–90 MB | ~0 |
+| Photo (per concurrent job) | +60–150 MB | 1 core for 0.2–1 s |
+| Video 720p (libx264 slow, 2 threads) | +300–600 MB | 2 cores, ~0.5–1× real time |
+| Video with VAAPI | +150–250 MB | < 10% of a core, 5–10× faster |
 
-Рекомендований LXC: **2–4 vCPU, 2 ГБ RAM + 512 МБ swap, 30 ГБ NVMe**. Деталі: [OPERATIONS.md](OPERATIONS.md).
+Recommended LXC: **2–4 vCPU, 2 GB RAM + 512 MB swap, 30 GB NVMe**. Details: [OPERATIONS.md](OPERATIONS.md).

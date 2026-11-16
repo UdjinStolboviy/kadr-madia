@@ -1,5 +1,5 @@
 # /etc/kadr/litestream.yml
-# Креденшели — у /etc/kadr/litestream.env (LITESTREAM_ACCESS_KEY_ID, LITESTREAM_SECRET_ACCESS_KEY), токен kadr-backup
+# Credentials live in /etc/kadr/litestream.env (LITESTREAM_ACCESS_KEY_ID, LITESTREAM_SECRET_ACCESS_KEY), using the kadr-backup token
 dbs:
   - path: /var/lib/kadr/db/kadr.db
     replicas:

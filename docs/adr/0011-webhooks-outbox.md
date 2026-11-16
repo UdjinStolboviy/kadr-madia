@@ -1,15 +1,15 @@
-# ADR-0011: Вебхуки через transactional outbox, Standard Webhooks
+# ADR-0011: Webhooks via transactional outbox, Standard Webhooks
 
-**Статус:** Accepted
+**Status:** Accepted
 
-## Контекст
-Проєкти мають надійно дізнаватися про `asset.ready` / `asset.failed`. Надсилання HTTP безпосередньо з обробника може втратити подію (падіння між комітом і відправкою) або надіслати подію про стан, який не закомічено.
+## Context
+Products must reliably learn about `asset.ready` / `asset.failed`. Sending HTTP directly from the processor can lose an event (crash between commit and send) or announce a state that was never committed.
 
-## Рішення
-- Подія записується в `events` + `webhook_deliveries` у тій самій транзакції, що й зміна стану.
-- Окремий пул доставки бере `pending` з lease, надсилає з таймаутом 10 с, ретраї ~24 год, далі `dead`.
-- Формат підпису — специфікація Standard Webhooks (`webhook-id`, `webhook-timestamp`, `webhook-signature`), сумісна з готовими бібліотеками перевірки.
+## Decision
+- The event is written to `events` + `webhook_deliveries` in the same transaction as the state change.
+- A dedicated delivery pool claims `pending` deliveries with a lease, sends with a 10 s timeout, retries for ~24 h, then marks them `dead`.
+- The signature format follows the Standard Webhooks spec (`webhook-id`, `webhook-timestamp`, `webhook-signature`), compatible with existing verification libraries.
 
-## Наслідки
-- Доставка at-least-once; отримувачі ідемпотентні за `webhook-id`.
-- Журнал доставок і повторна відправка в адмінці.
+## Consequences
+- At-least-once delivery; receivers are idempotent by `webhook-id`.
+- Delivery log and manual re-send in the admin console.

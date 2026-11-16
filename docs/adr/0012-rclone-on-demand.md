@@ -1,15 +1,15 @@
-# ADR-0012: rclone як разовий процес для хмарних імпортів
+# ADR-0012: rclone as a one-off process for cloud imports
 
-**Статус:** Accepted
+**Status:** Accepted
 
-## Контекст
-Потрібен імпорт із Google Drive, OneDrive, Dropbox. `rclone rcd` як постійний демон займає памʼять і зберігає креденшели у своєму конфігу; rclone як Go-бібліотека суттєво збільшує бінарник і залежності.
+## Context
+We need imports from Google Drive, OneDrive and Dropbox. `rclone rcd` as a resident daemon consumes memory and keeps credentials in its own config; rclone as a Go library inflates the binary and dependency tree.
 
-## Рішення
-OAuth-флоу і зберігання токенів (зашифровано) — у Kadr. Під задачу генерується тимчасовий `rclone.conf` (0600, у робочому каталозі задачі), виконується `rclone copyto remote:path tmpfile`, конфіг видаляється; оновлений refresh-токен зчитується назад і зберігається.
+## Decision
+The OAuth flow and token storage (encrypted) live in Kadr. Per job, a temporary `rclone.conf` (0600, in the job's working directory) is generated, `rclone copyto remote:path tmpfile` runs, and the config is deleted; a refreshed token is read back and stored.
 
-Хмарні диски — **лише джерело імпорту**, а не місце видачі: їхні прямі посилання тимчасові (OneDrive ~1 год), мають rate limit (Google Drive) або денні ліміти трафіку (Dropbox).
+Cloud drives are **import sources only**, never delivery origins: their direct links are temporary (OneDrive ~1 h), rate-limited (Google Drive) or capped by daily bandwidth (Dropbox).
 
-## Наслідки
-- 0 МБ у простої, підтримка 70+ провайдерів «безкоштовно».
-- Залежність від CLI-інтерфейсу rclone (фіксована версія, інтеграційні тести).
+## Consequences
+- 0 MB at idle, support for 70+ providers for free.
+- Dependency on rclone's CLI interface (pinned version, integration tests).

@@ -1,66 +1,66 @@
-# Kadr: продукт
+# Kadr: Product
 
-## Одним реченням
+## One sentence
 
-**Kadr — медіа-інфраструктура для продуктових команд: завантаження, стиснення під бюджет, приватна й публічна видача фото та відео за ціною обʼєктного сховища, без оплати за трафік.**
+**Kadr is media infrastructure for product teams: uploads, byte-budget compression, and private and public delivery of photos and video at object-storage prices, with zero egress fees.**
 
-## Проблема
+## The problem
 
-1. **Медіа — найдорожча й найважча частина користувацького контенту.** Сирі фото з телефона важать 4–8 МБ, відео — 60–150 МБ за 30 секунд.
-2. **Готові сервіси дорогі на масштабі.** Cloudinary, ImageKit і Uploadcare беруть гроші за трансформації та трафік; Mux бере за хвилини кодування, зберігання й доставки. У AWS S3 вихідний трафік коштує ~$0.09/ГБ.
-3. **Самописні рішення повторюються в кожному продукті** й часто мають дірки: файли йдуть через API-сервери, приватні документи доступні за публічним URL, сміття ніхто не прибирає.
+1. **Media is the most expensive and heaviest part of user-generated content.** Raw phone photos weigh 4–8 MB, video 60–150 MB per 30 seconds.
+2. **Managed services get expensive at scale.** Cloudinary, ImageKit and Uploadcare charge for transformations and bandwidth; Mux charges for encoding, storage and delivery minutes. AWS S3 egress costs ~$0.09/GB.
+3. **Home-grown solutions are rebuilt in every product** and often have holes: files flow through API servers, private documents are reachable via public URLs, nobody cleans up garbage.
 
-## Рішення
+## The solution
 
-Один сервіс, який:
-- приймає файли напряму в обʼєктне сховище (браузер → R2), не навантажуючи API продукту;
-- стискає під **бюджет у байтах** або під **перцептивну якість** — фото ≤ 20 КБ, які лишаються чіткими;
-- видає публічні файли через CDN, а приватні — через підписані посилання на edge;
-- **не стоїть на шляху читання**: збій Kadr не впливає на перегляди;
-- працює на мінімальному залізі (один Go-бінарник, ~60–90 МБ RAM у простої).
+One service that:
+- ingests files directly into object storage (browser → R2) without loading the product's API;
+- compresses to a **byte budget** or a **perceptual quality target** — photos ≤ 20 KB that stay sharp;
+- delivers public files through a CDN and private files through edge-verified signed links;
+- **is not on the read path**: a Kadr outage does not affect views;
+- runs on minimal hardware (one Go binary, ~60–90 MB RAM at idle).
 
-## Чим відрізняється
+## Differentiation
 
-| | Kadr | Cloudinary / ImageKit | Mux | Uploadcare | Самописне на S3 |
+| | Kadr | Cloudinary / ImageKit | Mux | Uploadcare | DIY on S3 |
 |---|---|---|---|---|---|
-| Оплата трафіку | **$0** (R2) | за ГБ / кредити | за хвилини доставки | за ГБ | ~$0.09/ГБ (AWS) |
-| Бюджетне стиснення (≤ N КБ) | **так, гарантовано** | частково (auto-quality) | — | частково | вручну |
-| Фото + відео в одному API | так | так | лише відео | так | вручну |
-| Приватні файли | окремий бакет + edge HMAC | signed URLs | signed playback | signed URLs | часто відсутні |
-| Self-hosted / власне сховище | **так (BYOS)** | ні | ні | ні | так |
-| Впливає на перегляди при збої | **ні** | так (їхній CDN) | так | так | залежить |
-| Vendor lock-in | ні (S3 API) | високий | високий | високий | ні |
+| Egress fees | **$0** (R2) | per GB / credits | per delivery minute | per GB | ~$0.09/GB (AWS) |
+| Byte-budget compression (≤ N KB) | **yes, guaranteed** | partial (auto-quality) | — | partial | manual |
+| Photo + video in one API | yes | yes | video only | yes | manual |
+| Private files | separate bucket + edge HMAC | signed URLs | signed playback | signed URLs | often missing |
+| Self-hosted / own storage | **yes (BYOS)** | no | no | no | yes |
+| Outage affects views | **no** | yes (their CDN) | yes | yes | depends |
+| Vendor lock-in | none (S3 API) | high | high | high | none |
 
-## Економіка (на прикладі власних проєктів)
+## Economics
 
-| Обсяг | Сирі файли | Після Kadr | R2/міс |
+| Volume | Raw files | After Kadr | R2/month |
 |---|---|---|---|
-| 1 млн фото | ~5 ТБ | ~20 ГБ (photo-lite) | ~$0.15 |
-| 10 тис. відео по 30 с | ~1 ТБ | ~25 ГБ (720p) | ~$0.23 |
-| Трафік 10 ТБ/міс | — | — | **$0** egress |
+| 1M photos | ~5 TB | ~20 GB (photo-lite) | ~$0.15 |
+| 10k videos × 30 s | ~1 TB | ~25 GB (720p) | ~$0.23 |
+| 10 TB/month traffic | — | — | **$0** egress |
 
-Собівартість для продукту — ціна зберігання результату + частка LXC. Порівняно із зберіганням оригіналів економія на зберіганні становить **95–99%**, на трафіку — 100%.
+Cost for a product = storage of the results + a share of the LXC. Compared with storing originals, storage savings are **95–99%** and bandwidth savings 100%.
 
-## Шлях продукту
+## Product path
 
-1. **Внутрішня платформа (зараз):** omi, ofi, mif. Доводимо надійність, збираємо метрики економії й продуктивності.
-2. **Open-core self-hosted:** Community (безкоштовно: фото, відео MP4, один вузол) + Pro-ліцензія (HLS, GPU, віддалені воркери, SSO, аудит, пріоритетна підтримка). Цільова аудиторія — студії, агенції, SaaS-команди на Proxmox/VPS.
-3. **Managed Kadr Cloud:** хмарний control plane + воркери, BYOS або платформний R2. Модель: фіксований план + метеринг (оброблені ГБ, хвилини відео), **без плати за доставку**.
+1. **Design partners (now):** run Kadr in production for a small set of products, prove reliability, collect savings and performance metrics.
+2. **Open-core self-hosted:** Community (free: photos, MP4 video, single node) + Pro license (HLS, GPU, remote workers, SSO, audit, priority support). Target audience: studios, agencies, SaaS teams on Proxmox/VPS.
+3. **Managed Kadr Cloud:** hosted control plane + workers, BYOS or platform R2. Model: flat plan + metering (processed GB, video minutes), **no delivery fees**.
 
-## Метрики, які показуємо інвесторам
+## Metrics for investors
 
-| Метрика | Ціль |
+| Metric | Target |
 |---|---|
-| Економія зберігання (bytes in → bytes stored) | ≥ 95% |
-| p95 обробки фото (complete → ready) | < 1.5 с |
-| p95 обробки відео 30 с (CPU / VAAPI) | < 25 с / < 6 с |
-| Доступність видачі | = SLA Cloudflare (Kadr поза шляхом читання) |
-| Частка failed-обробок | < 0.5% |
-| Вартість на 1 000 активних асетів/міс | < $0.01 |
-| Час підключення нового проєкту | < 1 дня |
+| Storage savings (bytes in → bytes stored) | ≥ 95% |
+| Photo processing p95 (complete → ready) | < 1.5 s |
+| 30 s video processing p95 (CPU / VAAPI) | < 25 s / < 6 s |
+| Delivery availability | = Cloudflare SLA (Kadr off the read path) |
+| Failed processing rate | < 0.5% |
+| Cost per 1,000 active assets/month | < $0.01 |
+| Time to onboard a new product | < 1 day |
 
-## Ризики й відповіді
+## Risks and answers
 
-- **«Cloudflare змінить ціни»** → сховище за S3 API, заміна на B2/Hetzner/Garage — це зміна конфігурації, а не коду.
-- **«Чому не Cloudinary?»** → у 10–100 разів дешевше на масштабі, без lock-in, дані в нашому акаунті.
-- **«Масштабованість однонодової архітектури»** → шлях S1 → S2 (віддалені воркери) → S3 (Postgres, кілька регіонів) закладено в інтерфейсах із першого дня ([ARCHITECTURE.md §8](ARCHITECTURE.md)).
+- **"Cloudflare will change pricing"** → storage is behind the S3 API; switching to B2/Hetzner/Garage is configuration, not code.
+- **"Why not Cloudinary?"** → 10–100× cheaper at scale, no lock-in, data stays in our account.
+- **"Single-node architecture won't scale"** → the S1 → S2 (remote workers) → S3 (Postgres, multi-region) path is built into the interfaces from day one ([ARCHITECTURE.md §8](ARCHITECTURE.md)).

@@ -1,13 +1,13 @@
-# ADR-0013: Один легальний акаунт R2 + BYOS
+# ADR-0013: One legitimate platform storage account + BYOS
 
-**Статус:** Accepted
+**Status:** Accepted
 
-## Контекст
-Розглядалася ідея кількох безкоштовних акаунтів R2 по 10 ГБ із шардингом через Kadr.
+## Context
+An idea was floated to combine several free-tier R2 accounts (10 GB each) and shard across them through Kadr.
 
-## Рішення
-Один платформний акаунт Cloudflare з білінгом і алертом. Клієнти та проєкти, яким потрібні власні сховища, підключають їх як BYOS-профіль (`storage_profiles.is_platform = 0`).
+## Decision
+One platform Cloudflare account with billing and an alert. Customers and projects that need their own storage connect it as a BYOS profile (`storage_profiles.is_platform = 0`).
 
-## Наслідки
-- Немає ризику блокування всіх акаунтів за порушення ToS (і втрати всіх медіа) заради економії ~$1–2/міс.
-- BYOS — легальний спосіб розподілити зберігання, і водночас продуктова фіча для SaaS.
+## Consequences
+- No risk of all accounts being banned for ToS violations (and losing all media) to save ~$1–2/month.
+- BYOS is the legitimate way to distribute storage — and a product feature for SaaS customers.
