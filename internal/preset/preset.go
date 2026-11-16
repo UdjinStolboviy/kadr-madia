@@ -1,7 +1,7 @@
-// Package pipeline will own the upload → asset → rendition lifecycle. In M0
-// it only defines preset parameter schemas and the default presets created
-// for every new project (docs/PIPELINES.md §1).
-package pipeline
+// Package preset defines preset parameter schemas and the default presets
+// created for every new project (docs/PIPELINES.md §1). It has no
+// dependencies on engines or the pipeline, so both can import it.
+package preset
 
 import "encoding/json"
 

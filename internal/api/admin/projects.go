@@ -15,7 +15,7 @@ import (
 	"github.com/UdjinStolboviy/kadr-madia/internal/api/httpx"
 	"github.com/UdjinStolboviy/kadr-madia/internal/auth"
 	"github.com/UdjinStolboviy/kadr-madia/internal/db"
-	"github.com/UdjinStolboviy/kadr-madia/internal/pipeline"
+	"github.com/UdjinStolboviy/kadr-madia/internal/preset"
 )
 
 var slugRe = regexp.MustCompile(`^[a-z][a-z0-9-]{1,31}$`)
@@ -101,7 +101,7 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		if err := tx.CreateProject(ctx, p); err != nil {
 			return err
 		}
-		for _, dp := range pipeline.DefaultPresets() {
+		for _, dp := range preset.DefaultPresets() {
 			if err := tx.CreatePreset(ctx, &db.Preset{ID: db.NewID(db.PrefixPreset), ProjectID: p.ID, Slug: dp.Slug,
 				Kind: dp.Kind, Description: dp.Description, CurrentVersion: 1, Params: dp.Params, CreatedAt: now}, adminID); err != nil {
 				return err
