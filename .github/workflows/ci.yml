@@ -1,0 +1,90 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # go.mod declares the minimum language version (1.25); build and
+          # scan with the latest patched toolchain so stdlib fixes apply.
+          go-version: "1.27.x"
+          check-latest: true
+          cache: true
+
+      - name: go mod verify
+        run: go mod verify
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+
+      - name: go test -race
+        run: go test -race -count=1 ./...
+
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  build:
+    runs-on: ubuntu-latest
+    needs: go
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          # web/package.json has no "packageManager" field; keep in sync with the local pnpm major.
+          version: 12
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: build admin UI
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - uses: actions/setup-go@v5
+        with:
+          # go.mod declares the minimum language version (1.25); build and
+          # scan with the latest patched toolchain so stdlib fixes apply.
+          go-version: "1.27.x"
+          check-latest: true
+          cache: true
+
+      - name: cross build linux/amd64 (CGO_ENABLED=0)
+        run: |
+          VERSION="$(git describe --tags --always --dirty)"
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
+            -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${GITHUB_SHA::7}" \
+            -o bin/kadr ./cmd/kadr
+          file bin/kadr
+          sha256sum bin/kadr
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kadr-linux-amd64
+          path: bin/kadr
+          retention-days: 7

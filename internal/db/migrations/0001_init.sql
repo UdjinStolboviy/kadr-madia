@@ -1,22 +1,26 @@
--- Kadr: початкова схема (SQLite, WAL)
--- Рантайм PRAGMA (встановлює застосунок при кожному зʼєднанні):
+-- Kadr: initial schema (SQLite, WAL)
+-- Runtime PRAGMAs (set by the application on every connection):
 --   journal_mode=WAL; synchronous=NORMAL; foreign_keys=ON; busy_timeout=5000;
 --   temp_store=MEMORY; cache_size=-16000; mmap_size=134217728;
--- Час: INTEGER unix-мілісекунди. ID: TEXT ULID із префіксом типу.
+-- Time: INTEGER unix milliseconds. IDs: TEXT ULID with a type prefix.
+-- Note: projects.storage_profile_id references storage_profiles, which is
+-- declared later. SQLite resolves foreign keys at DML time, so forward
+-- references are valid even with foreign_keys=ON.
 
--- ───────────── Адміністратори ─────────────
+-- ───────────── Administrators ─────────────
 CREATE TABLE admins (
   id             TEXT PRIMARY KEY,               -- adm_
   email          TEXT NOT NULL UNIQUE COLLATE NOCASE,
   password_hash  TEXT NOT NULL,                  -- argon2id
-  totp_secret_enc BLOB,                          -- AES-256-GCM
+  totp_secret_enc BLOB,                          -- AES-256-GCM envelope; set by totp/setup
+  totp_enabled_at INTEGER,                       -- NULL = TOTP not enabled (secret may be pending)
   role           TEXT NOT NULL DEFAULT 'owner' CHECK (role IN ('owner','admin','viewer')),
   created_at     INTEGER NOT NULL,
   last_login_at  INTEGER
 );
 
 CREATE TABLE admin_sessions (
-  id_hash     BLOB PRIMARY KEY,                  -- SHA-256 токена сесії
+  id_hash     BLOB PRIMARY KEY,                  -- SHA-256 of the session token
   admin_id    TEXT NOT NULL REFERENCES admins(id) ON DELETE CASCADE,
   csrf_token  TEXT NOT NULL,
   ip          TEXT,
@@ -26,15 +30,15 @@ CREATE TABLE admin_sessions (
 );
 CREATE INDEX admin_sessions_expires ON admin_sessions(expires_at);
 
--- ───────────── Проєкти та доступ ─────────────
+-- ───────────── Projects and access ─────────────
 CREATE TABLE projects (
   id               TEXT PRIMARY KEY,             -- prj_
-  slug             TEXT NOT NULL UNIQUE,         -- omi, ofi, mif (префікс ключів обʼєктів)
+  slug             TEXT NOT NULL UNIQUE,         -- e.g. acme, acme-staging (object key prefix)
   name             TEXT NOT NULL,
   environment      TEXT NOT NULL DEFAULT 'live' CHECK (environment IN ('live','test')),
   storage_profile_id TEXT REFERENCES storage_profiles(id),
-  allowed_origins  TEXT NOT NULL DEFAULT '[]',   -- JSON, для CORS R2 / SDK
-  quota_bytes      INTEGER,                      -- NULL = без ліміту
+  allowed_origins  TEXT NOT NULL DEFAULT '[]',   -- JSON, for R2 CORS / SDK
+  quota_bytes      INTEGER,                      -- NULL = unlimited
   used_bytes       INTEGER NOT NULL DEFAULT 0,
   reserved_bytes   INTEGER NOT NULL DEFAULT 0,
   disabled_at      INTEGER,
@@ -46,9 +50,9 @@ CREATE TABLE api_keys (
   id           TEXT PRIMARY KEY,                 -- key_
   project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   name         TEXT NOT NULL,
-  prefix       TEXT NOT NULL UNIQUE,             -- kd_live_ab12cd34 (перші символи, для пошуку й показу)
+  prefix       TEXT NOT NULL UNIQUE,             -- kd_live_ab12cd34 (leading chars, for lookup and display)
   secret_hash  BLOB NOT NULL,                    -- SHA-256(secret || pepper)
-  scopes       TEXT NOT NULL,                    -- JSON масив
+  scopes       TEXT NOT NULL,                    -- JSON array
   last_used_at INTEGER,
   expires_at   INTEGER,
   revoked_at   INTEGER,
@@ -56,15 +60,15 @@ CREATE TABLE api_keys (
 );
 
 CREATE TABLE signing_keys (
-  id          TEXT PRIMARY KEY,                  -- kid, напр. omi-k3
+  id          TEXT PRIMARY KEY,                  -- kid, e.g. acme-k3
   project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   secret_enc  BLOB NOT NULL,
   status      TEXT NOT NULL CHECK (status IN ('active','verify_only','retired')),
-  published_at INTEGER,                          -- коли синхронізовано в kadr-edge
+  published_at INTEGER,                          -- when synced to kadr-edge
   created_at  INTEGER NOT NULL
 );
 
--- ───────────── Сховища ─────────────
+-- ───────────── Storage ─────────────
 CREATE TABLE storage_profiles (
   id              TEXT PRIMARY KEY,              -- stp_
   name            TEXT NOT NULL,
@@ -76,14 +80,14 @@ CREATE TABLE storage_profiles (
   public_base_url TEXT NOT NULL,                 -- https://cdn.domain
   private_base_url TEXT,                         -- https://media.domain (kadr-edge)
   credentials_enc BLOB NOT NULL,                 -- {access_key_id, secret_access_key}
-  is_platform     INTEGER NOT NULL DEFAULT 0,    -- 1 = платформний R2; 0 = BYOS
+  is_platform     INTEGER NOT NULL DEFAULT 0,    -- 1 = platform R2; 0 = BYOS
   last_test_at    INTEGER,
   last_test_ok    INTEGER,
   created_at      INTEGER NOT NULL,
   updated_at      INTEGER NOT NULL
 );
 
--- ───────────── Пресети ─────────────
+-- ───────────── Presets ─────────────
 CREATE TABLE presets (
   id             TEXT PRIMARY KEY,               -- pst_
   project_id     TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -99,16 +103,16 @@ CREATE TABLE presets (
 CREATE TABLE preset_versions (
   preset_id    TEXT NOT NULL REFERENCES presets(id) ON DELETE CASCADE,
   version      INTEGER NOT NULL,
-  params_json  TEXT NOT NULL,                    -- незмінний після створення
+  params_json  TEXT NOT NULL,                    -- immutable after creation
   created_by   TEXT,
   created_at   INTEGER NOT NULL,
   PRIMARY KEY (preset_id, version)
 );
 
--- ───────────── Простори імен (орг / юзер у проєкті) ─────────────
+-- ───────────── Namespaces (org / user within a project) ─────────────
 CREATE TABLE namespaces (
   project_id     TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  ns             TEXT NOT NULL,                  -- непрозорий ID від проєкту
+  ns             TEXT NOT NULL,                  -- opaque ID supplied by the project
   quota_bytes    INTEGER,
   quota_assets   INTEGER,
   quota_video_sec_month INTEGER,
@@ -120,7 +124,7 @@ CREATE TABLE namespaces (
   PRIMARY KEY (project_id, ns)
 );
 
--- ───────────── Завантаження ─────────────
+-- ───────────── Uploads ─────────────
 CREATE TABLE uploads (
   id              TEXT PRIMARY KEY,              -- upl_
   project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -135,7 +139,7 @@ CREATE TABLE uploads (
   content_type    TEXT,
   declared_bytes  INTEGER,
   declared_sha256 BLOB,
-  source_ref      TEXT,                          -- URL або connection_id:file_id
+  source_ref      TEXT,                          -- URL or connection_id:file_id
   metadata_json   TEXT NOT NULL DEFAULT '{}',
   status          TEXT NOT NULL CHECK (status IN ('pending','uploaded','processing','done','expired','aborted','failed')),
   asset_id        TEXT,
@@ -145,7 +149,7 @@ CREATE TABLE uploads (
 );
 CREATE INDEX uploads_status_expires ON uploads(status, expires_at);
 
--- ───────────── Blob і рендиції (фізичні дані) ─────────────
+-- ───────────── Blobs and renditions (physical data) ─────────────
 CREATE TABLE blobs (
   id              TEXT PRIMARY KEY,              -- blb_
   project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -159,11 +163,11 @@ CREATE TABLE blobs (
   original_width  INTEGER,
   original_height INTEGER,
   original_content_type TEXT,
-  original_key    TEXT,                          -- якщо пресет зберігає оригінал
+  original_key    TEXT,                          -- if the preset retains the original
   duration_ms     INTEGER,
   thumbhash       BLOB,
   dominant_color  TEXT,
-  total_bytes     INTEGER NOT NULL DEFAULT 0,    -- сума рендицій
+  total_bytes     INTEGER NOT NULL DEFAULT 0,    -- sum of renditions
   refcount        INTEGER NOT NULL DEFAULT 0,
   status          TEXT NOT NULL CHECK (status IN ('processing','ready','failed','gc_pending','deleted')),
   created_at      INTEGER NOT NULL,
@@ -180,12 +184,12 @@ CREATE TABLE renditions (
   width       INTEGER,
   height      INTEGER,
   bitrate     INTEGER,
-  quality     INTEGER,                           -- підібрана q
+  quality     INTEGER,                           -- chosen quality
   over_budget INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (blob_id, name, format)
 );
 
--- ───────────── Асети (логічні файли) ─────────────
+-- ───────────── Assets (logical files) ─────────────
 CREATE TABLE assets (
   id            TEXT PRIMARY KEY,                -- ast_
   project_id    TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -206,12 +210,12 @@ CREATE TABLE assets (
 CREATE INDEX assets_ns ON assets(project_id, ns, created_at DESC);
 CREATE INDEX assets_blob ON assets(blob_id);
 
--- ───────────── Черга задач ─────────────
+-- ───────────── Job queue ─────────────
 CREATE TABLE jobs (
   id           TEXT PRIMARY KEY,                 -- job_
   kind         TEXT NOT NULL,                    -- process_image | process_video | import_url | import_cloud | copy_visibility | gc_blob | purge_namespace | publish_keys
   pool         TEXT NOT NULL,                    -- image | video | import | maintenance
-  priority     INTEGER NOT NULL DEFAULT 100,     -- менше = раніше
+  priority     INTEGER NOT NULL DEFAULT 100,     -- lower = earlier
   dedupe_key   TEXT UNIQUE,
   payload_json TEXT NOT NULL,
   status       TEXT NOT NULL CHECK (status IN ('queued','running','succeeded','dead','cancelled')),
@@ -228,7 +232,7 @@ CREATE TABLE jobs (
 CREATE INDEX jobs_ready ON jobs(pool, status, priority, run_at);
 CREATE INDEX jobs_lease ON jobs(status, lease_until) WHERE status = 'running';
 
--- ───────────── Вебхуки (transactional outbox) ─────────────
+-- ───────────── Webhooks (transactional outbox) ─────────────
 CREATE TABLE webhook_endpoints (
   id          TEXT PRIMARY KEY,                  -- whe_
   project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -264,7 +268,7 @@ CREATE TABLE webhook_deliveries (
 );
 CREATE INDEX webhook_deliveries_due ON webhook_deliveries(status, next_attempt_at);
 
--- ───────────── Хмарні підключення ─────────────
+-- ───────────── Cloud connections ─────────────
 CREATE TABLE cloud_connections (
   id           TEXT PRIMARY KEY,                 -- con_
   project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -277,7 +281,7 @@ CREATE TABLE cloud_connections (
   created_at   INTEGER NOT NULL
 );
 
--- ───────────── Ідемпотентність API ─────────────
+-- ───────────── API idempotency ─────────────
 CREATE TABLE idempotency_keys (
   project_id    TEXT NOT NULL,
   key           TEXT NOT NULL,
@@ -288,7 +292,7 @@ CREATE TABLE idempotency_keys (
   PRIMARY KEY (project_id, key)
 );
 
--- ───────────── Облік використання ─────────────
+-- ───────────── Usage accounting ─────────────
 CREATE TABLE usage_daily (
   project_id      TEXT NOT NULL,
   ns              TEXT NOT NULL DEFAULT '',
@@ -296,15 +300,15 @@ CREATE TABLE usage_daily (
   uploads         INTEGER NOT NULL DEFAULT 0,
   assets_ready    INTEGER NOT NULL DEFAULT 0,
   assets_failed   INTEGER NOT NULL DEFAULT 0,
-  bytes_in        INTEGER NOT NULL DEFAULT 0,    -- оригінали
-  bytes_stored    INTEGER NOT NULL DEFAULT 0,    -- рендиції
+  bytes_in        INTEGER NOT NULL DEFAULT 0,    -- originals
+  bytes_stored    INTEGER NOT NULL DEFAULT 0,    -- renditions
   video_sec       INTEGER NOT NULL DEFAULT 0,
   cpu_ms          INTEGER NOT NULL DEFAULT 0,
   dedup_hits      INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (project_id, ns, day)
 );
 
--- ───────────── Аудит ─────────────
+-- ───────────── Audit ─────────────
 CREATE TABLE audit_log (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   actor_type  TEXT NOT NULL CHECK (actor_type IN ('admin','api_key','system')),
@@ -318,7 +322,7 @@ CREATE TABLE audit_log (
 );
 CREATE INDEX audit_log_created ON audit_log(created_at DESC);
 
--- ───────────── Налаштування ─────────────
+-- ───────────── Settings ─────────────
 CREATE TABLE settings (
   key        TEXT PRIMARY KEY,
   value_json TEXT NOT NULL,
