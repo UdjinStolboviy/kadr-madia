@@ -267,7 +267,7 @@ func TestProjectsKeysPresetsAndPublicPing(t *testing.T) {
 	// Default presets.
 	r = c.do("GET", "/admin/api/projects/"+pid+"/presets", nil, false)
 	items := r.json(t)["items"].([]any)
-	if len(items) != 6 {
+	if len(items) != 12 {
 		t.Fatalf("presets = %d", len(items))
 	}
 	slugs := map[string]map[string]any{}

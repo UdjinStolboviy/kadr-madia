@@ -19,13 +19,14 @@ type Project struct {
 	QuotaBytes       *int64
 	UsedBytes        int64
 	ReservedBytes    int64
+	DefaultMode      string // compact | balanced | quality
 	DisabledAt       *time.Time
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 }
 
 const projectCols = `id, slug, name, environment, storage_profile_id, allowed_origins, quota_bytes,
-	used_bytes, reserved_bytes, disabled_at, created_at, updated_at`
+	used_bytes, reserved_bytes, default_mode, disabled_at, created_at, updated_at`
 
 func scanProject(row interface{ Scan(...any) error }) (*Project, error) {
 	var p Project
@@ -34,7 +35,7 @@ func scanProject(row interface{ Scan(...any) error }) (*Project, error) {
 	var quota, disabled sql.NullInt64
 	var created, updated int64
 	if err := row.Scan(&p.ID, &p.Slug, &p.Name, &p.Environment, &spID, &origins, &quota,
-		&p.UsedBytes, &p.ReservedBytes, &disabled, &created, &updated); err != nil {
+		&p.UsedBytes, &p.ReservedBytes, &p.DefaultMode, &disabled, &created, &updated); err != nil {
 		return nil, mapErr(err)
 	}
 	if err := json.Unmarshal([]byte(origins), &p.AllowedOrigins); err != nil {
@@ -62,9 +63,9 @@ func originsJSON(o []string) string {
 func (s *Store) CreateProject(ctx context.Context, p *Project) error {
 	_, err := s.w.ExecContext(ctx,
 		`INSERT INTO projects (id, slug, name, environment, storage_profile_id, allowed_origins, quota_bytes,
-		  disabled_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		  default_mode, disabled_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ID, p.Slug, p.Name, p.Environment, nullStr(p.StorageProfileID), originsJSON(p.AllowedOrigins),
-		nullInt(p.QuotaBytes), nullMs(p.DisabledAt), ms(p.CreatedAt), ms(p.UpdatedAt))
+		nullInt(p.QuotaBytes), defaultModeOr(p.DefaultMode), nullMs(p.DisabledAt), ms(p.CreatedAt), ms(p.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("create project: %w", mapErr(err))
 	}
@@ -75,8 +76,8 @@ func (s *Store) CreateProject(ctx context.Context, p *Project) error {
 func (s *Store) UpdateProject(ctx context.Context, p *Project) error {
 	res, err := s.w.ExecContext(ctx,
 		`UPDATE projects SET name = ?, storage_profile_id = ?, allowed_origins = ?, quota_bytes = ?,
-		  disabled_at = ?, updated_at = ? WHERE id = ?`,
-		p.Name, nullStr(p.StorageProfileID), originsJSON(p.AllowedOrigins), nullInt(p.QuotaBytes),
+		  default_mode = ?, disabled_at = ?, updated_at = ? WHERE id = ?`,
+		p.Name, nullStr(p.StorageProfileID), originsJSON(p.AllowedOrigins), nullInt(p.QuotaBytes), defaultModeOr(p.DefaultMode),
 		nullMs(p.DisabledAt), ms(p.UpdatedAt), p.ID)
 	if err != nil {
 		return fmt.Errorf("update project: %w", mapErr(err))
@@ -118,4 +119,11 @@ func (s *Store) CountStorageProfileUsage(ctx context.Context, profileID string) 
 		`SELECT (SELECT count(*) FROM projects WHERE storage_profile_id = ?)
 		      + (SELECT count(*) FROM blobs WHERE storage_profile_id = ?)`, profileID, profileID).Scan(&n)
 	return n, mapErr(err)
+}
+
+func defaultModeOr(m string) string {
+	if m == "" {
+		return "balanced"
+	}
+	return m
 }

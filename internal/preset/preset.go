@@ -83,6 +83,8 @@ type VideoParams struct {
 	Poster       Poster      `json:"poster"`
 	Limits       VideoLimits `json:"limits"`
 	RetainOrigin bool        `json:"retainOriginal"`
+	// HLS additionally produces an adaptive HLS ladder (fMP4 segments).
+	HLS bool `json:"hls,omitempty"`
 }
 
 // VideoCodec settings.
@@ -206,6 +208,7 @@ func DefaultPresets() []DefaultPreset {
 			Limits:    defaultVideoLimits,
 		}},
 	}
+	items = append(items, modePresets()...)
 	out := make([]DefaultPreset, 0, len(items))
 	for _, it := range items {
 		b, err := json.Marshal(it.params)
