@@ -4,7 +4,7 @@ compatibility_date = "2025-01-01"
 workers_dev = false
 
 # Serve on the private delivery host. Replace <domain>.
-routes = [{ pattern = "media.<domain>", custom_domain = true }]
+routes = [{ pattern = "media.do1ob.com", custom_domain = true }]
 
 # Read-only use of the private bucket. The Worker code only calls head()/get().
 [[r2_buckets]]
