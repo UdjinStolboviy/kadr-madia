@@ -104,6 +104,37 @@ func (s *Server) handleRetireSigningKey(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handlePublishSigningKeys: POST /admin/api/signing-keys/publish pushes the
+// active and verify_only keys of all projects to kadr-edge (SIGNING_KEYS).
+func (s *Server) handlePublishSigningKeys(w http.ResponseWriter, r *http.Request) {
+	if !s.cfg.Edge.Configured() {
+		httpx.WriteProblem(w, http.StatusServiceUnavailable, "edge_not_configured", "set KADR_CF_ACCOUNT_ID and KADR_CF_API_TOKEN to publish keys to kadr-edge")
+		return
+	}
+	ks, err := s.store.ListSigningKeys(r.Context(), "", false)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	m := make(map[string]string, len(ks))
+	for _, k := range ks {
+		sec, err := s.cfg.Keyring.Decrypt(k.SecretEnc, pipeline.SigningKeySecretAAD(k.ID))
+		if err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		m[k.ID] = string(sec)
+	}
+	if err := s.cfg.Edge.Publish(r.Context(), m); err != nil {
+		s.log.WarnContext(r.Context(), "publish signing keys", "err", err)
+		httpx.WriteProblem(w, http.StatusBadGateway, "edge_publish_failed", err.Error())
+		return
+	}
+	_ = s.store.MarkSigningKeysPublished(r.Context(), s.now())
+	_ = s.audit(r, s.store, "signing_key.publish", nil, nil, map[string]any{"count": len(m)})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"published": len(m)})
+}
+
 // handleEdgeConfig: GET /admin/api/signing-keys/edge-config returns the
 // kid → secret map for the kadr-edge SIGNING_KEYS secret (active and
 // verify_only keys of every project). Audited; the response is never cached.

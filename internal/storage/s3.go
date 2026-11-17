@@ -112,9 +112,19 @@ func (d *S3) Delete(ctx context.Context, bucket, key string) error {
 }
 
 // Copy copies an object server-side (between buckets of the same account).
-func (d *S3) Copy(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string) error {
+func (d *S3) Copy(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string, opts ...PutOptions) error {
 	src := srcBucket + "/" + url.PathEscape(srcKey)
-	if _, err := d.client.CopyObject(ctx, &s3.CopyObjectInput{Bucket: &dstBucket, Key: &dstKey, CopySource: &src}); err != nil {
+	in := &s3.CopyObjectInput{Bucket: &dstBucket, Key: &dstKey, CopySource: &src}
+	if len(opts) > 0 {
+		in.MetadataDirective = types.MetadataDirectiveReplace
+		if opts[0].ContentType != "" {
+			in.ContentType = aws.String(opts[0].ContentType)
+		}
+		if opts[0].CacheControl != "" {
+			in.CacheControl = aws.String(opts[0].CacheControl)
+		}
+	}
+	if _, err := d.client.CopyObject(ctx, in); err != nil {
 		return fmt.Errorf("storage: copy %s/%s -> %s/%s: %w", srcBucket, srcKey, dstBucket, dstKey, mapErr(err))
 	}
 	return nil

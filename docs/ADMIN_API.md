@@ -120,3 +120,50 @@ Secret format: `whsec_<base64 of 32 random bytes>`. It is stored encrypted (`web
 `Delivery`: `{ id, event_id, event_type, endpoint_id, endpoint_url, status, attempts, next_attempt_at (pending only), last_status_code, last_error, last_duration_ms, delivered_at, created_at }` (`created_at` is the event time).
 
 Audit actions: `webhook.create`, `webhook.delete`, `webhook.test`, `delivery.retry`.
+
+## Jobs (M2)
+
+| Method | Path | Response |
+|---|---|---|
+| GET | `/admin/api/jobs?status=&pool=&kind=&limit=` | `200 { items: Job[] }`, newest first |
+| GET | `/admin/api/jobs/stream` | Server-Sent Events: event `jobs` with `{ items }` (same filters) whenever the list changes; `: keepalive` comments every 15 s |
+| POST | `/admin/api/jobs/{id}/retry` | `200 Job` — dead/cancelled → queued · `409 invalid_state` |
+| POST | `/admin/api/jobs/{id}/cancel` | `200 Job` — queued/running → cancelled · `409 invalid_state` |
+
+`Job`: `{ id, kind, pool, status, attempts, max_attempts, progress (0–100, video), last_error, run_at, created_at, finished_at }`. Audit: `job.retry`, `job.cancel`.
+
+## Asset explorer, analytics (M4)
+
+| Method | Path | Response |
+|---|---|---|
+| GET | `/admin/api/projects/{id}/assets?namespace=&kind=&status=&limit=&cursor=` | `200 { items: Asset[], next_cursor }` (same `Asset` as the public API) |
+| GET | `/admin/api/projects/{id}/assets/{asset_id}` | `200 Asset` |
+| DELETE | `/admin/api/projects/{id}/assets/{asset_id}` | `204` (audit `asset.delete`) |
+| GET | `/admin/api/projects/{id}/analytics?days=30` | `200 { from, to, days: UsageDay[], totals, savings_ratio, failed_rate }` |
+
+`UsageDay`: `{ day, uploads, assets_ready, assets_failed, bytes_in, bytes_stored, video_sec, cpu_ms, dedup_hits }`.
+
+## Playground and preset versions (M4)
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| POST | `/admin/api/playground` | `multipart/form-data`: `file` (≤ 25 MB), `params` (image preset parameters JSON) | `200 { source, renditions: [{ name, format, content_type, bytes, width, height, quality, iterations, over_budget, ssim, data (base64) }], thumbhash, dominant_color, elapsed_ms }` · `429` when busy · `503` without libvips. Nothing is stored |
+| POST | `/admin/api/projects/{id}/presets/{slug}/versions` | `{ params, description? }` | `200 Preset` (new version; assets keep the version they were processed with) or `201` when the slug is new (image presets only) |
+
+## Signing keys (M3)
+
+| Method | Path | Response |
+|---|---|---|
+| GET | `/admin/api/projects/{id}/signing-keys` | `200 { items: [{ id, project_id, status: active\|verify_only\|retired, published_at, created_at }] }` |
+| POST | `/admin/api/projects/{id}/signing-keys` | `201 { key, secret }` — rotation: the new key becomes `active`, the previous one `verify_only`; the secret is shown **once** |
+| DELETE | `/admin/api/signing-keys/{kid}` | `204` — retired (the edge stops accepting it after the next publish) |
+| GET | `/admin/api/signing-keys/edge-config` | `200 { kid: secret }` for the `SIGNING_KEYS` Worker secret (audited, `no-store`) |
+| POST | `/admin/api/signing-keys/publish` | `200 { published }` — pushes the map to kadr-edge via the Cloudflare API (`KADR_CF_ACCOUNT_ID`, `KADR_CF_API_TOKEN`, `KADR_CF_WORKER_NAME`); `503 edge_not_configured` · `502 edge_publish_failed` |
+
+## Cloud connections (M4)
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| GET | `/admin/api/projects/{id}/cloud-connections` | — | `200 { items }` |
+| POST | `/admin/api/projects/{id}/cloud-connections` | `{ provider: gdrive\|onedrive\|dropbox, token (rclone token JSON), account_label?, namespace? }` | `201` — the token is stored encrypted and never returned |
+| DELETE | `/admin/api/cloud-connections/{id}` | — | `204` (token wiped) |

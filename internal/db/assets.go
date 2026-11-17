@@ -340,3 +340,8 @@ func (s *Store) ListRenditions(ctx context.Context, blobID string) ([]*Rendition
 	}
 	return out, mapErr(rows.Err())
 }
+
+// MoveAssetToBlob points a ready asset at another blob and visibility.
+func (s *Store) MoveAssetToBlob(ctx context.Context, id, blobID, visibility string) (bool, error) {
+	return s.execOne(ctx, `UPDATE assets SET blob_id = ?, visibility = ? WHERE id = ? AND status = 'ready'`, blobID, visibility, id)
+}

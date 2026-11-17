@@ -1,0 +1,349 @@
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { getRouteApi } from "@tanstack/react-router";
+import { FolderKanban, ImageOff, Images, Loader2, Trash2, Video } from "lucide-react";
+import { useCallback, useState } from "react";
+
+import { CopyButton, KeyValue, PageHeader, RelativeTime, StatusBadge } from "@/components/common";
+import { FilterSelect, ProjectSelect } from "@/components/project-select";
+import { EmptyState, ErrorState } from "@/components/states";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useActiveProject } from "@/lib/use-active-project";
+import { api } from "@/lib/api";
+import { formatBytes, formatDateTime } from "@/lib/format";
+import { assetQuery, qk, useDeleteAsset } from "@/lib/queries";
+import { ASSET_KINDS, ASSET_STATUSES, type Asset, type Rendition } from "@/lib/types";
+import { cn } from "@/lib/utils";
+
+const route = getRouteApi("/app/assets");
+const PAGE = 30;
+
+type Tone = "success" | "danger" | "warning" | "neutral" | "info";
+const STATUS_TONE: Record<string, Tone> = { ready: "success", failed: "danger", processing: "info" };
+
+function previewRendition(a: Asset): Rendition | undefined {
+  return a.renditions.find((r) => r.url && r.format !== "mp4" && r.format !== "webm" && r.format !== "m3u8");
+}
+
+function Thumb({ asset, className }: { asset: Asset; className?: string }) {
+  const src = (asset.poster?.url || previewRendition(asset)?.url) ?? undefined;
+  const Icon = asset.kind === "video" ? Video : ImageOff;
+  return (
+    <div
+      className={cn("flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted text-muted-foreground", className)}
+      style={!src && asset.placeholder?.dominant_color ? { backgroundColor: asset.placeholder.dominant_color } : undefined}
+    >
+      {src ? <img src={src} alt="" loading="lazy" className="size-full object-cover" /> : <Icon className="size-4 opacity-60" />}
+    </div>
+  );
+}
+
+function Preview({ asset }: { asset: Asset }) {
+  const video = asset.renditions.find((r) => r.url && (r.format === "mp4" || r.format === "webm"));
+  const img = previewRendition(asset);
+  if (asset.status === "failed") return null;
+  if (asset.kind === "video" && video?.url) {
+    return (
+      <video
+        src={video.url}
+        poster={asset.poster?.url}
+        controls
+        preload="metadata"
+        className="max-h-72 w-full rounded-lg border bg-black"
+      />
+    );
+  }
+  if (img?.url) {
+    return (
+      <div className="flex justify-center rounded-lg border bg-muted/40 p-2">
+        <img src={img.url} alt={asset.original.filename ?? asset.id} className="max-h-72 rounded object-contain" />
+      </div>
+    );
+  }
+  if (asset.visibility !== "public") {
+    return (
+      <p className="rounded-lg border border-dashed p-4 text-center text-xs text-muted-foreground">
+        Private asset — previews need a signed URL.
+      </p>
+    );
+  }
+  return null;
+}
+
+function AssetDetail({ projectId, assetId, onClose }: { projectId: string; assetId: string | null; onClose: () => void }) {
+  const asset = useQuery({ ...assetQuery(projectId, assetId ?? ""), enabled: !!assetId });
+  const del = useDeleteAsset(projectId);
+  const [confirm, setConfirm] = useState(false);
+  const a = asset.data;
+
+  return (
+    <Sheet open={!!assetId} onOpenChange={(o) => !o && onClose()}>
+      <SheetContent className="sm:max-w-lg">
+        <SheetHeader>
+          <SheetTitle className="pr-6 truncate">{a?.original.filename ?? assetId}</SheetTitle>
+          <SheetDescription className="font-mono text-xs break-all">{assetId}</SheetDescription>
+        </SheetHeader>
+        <div className="flex-1 space-y-5 overflow-y-auto px-4 pb-4">
+          {asset.isPending ? (
+            <>
+              <Skeleton className="h-48 w-full" />
+              <Skeleton className="h-24 w-full" />
+            </>
+          ) : asset.isError ? (
+            <ErrorState error={asset.error} onRetry={() => void asset.refetch()} />
+          ) : a ? (
+            <>
+              <Preview asset={a} />
+              {a.error && (
+                <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
+                  <div className="font-mono text-xs font-semibold text-destructive">{a.error.code}</div>
+                  {a.error.detail && <p className="mt-1 text-muted-foreground">{a.error.detail}</p>}
+                </div>
+              )}
+              <dl className="divide-y">
+                <KeyValue label="Status">
+                  <StatusBadge tone={STATUS_TONE[a.status] ?? "neutral"}>{a.status}</StatusBadge>
+                </KeyValue>
+                <KeyValue label="Kind">{a.kind}</KeyValue>
+                <KeyValue label="Namespace" mono>
+                  {a.namespace}
+                </KeyValue>
+                <KeyValue label="Visibility">{a.visibility}</KeyValue>
+                <KeyValue label="Preset">
+                  {a.preset ? `${a.preset} v${a.preset_version}` : "—"}
+                </KeyValue>
+                <KeyValue label="Original">
+                  {formatBytes(a.original.bytes)}
+                  {a.original.width && a.original.height ? ` · ${a.original.width}×${a.original.height}` : ""}
+                </KeyValue>
+                <KeyValue label="Savings">
+                  {a.savings_ratio === null ? "—" : `${(a.savings_ratio * 100).toFixed(1)}%`}
+                </KeyValue>
+                {a.duration_sec !== null && <KeyValue label="Duration">{a.duration_sec.toFixed(1)} s</KeyValue>}
+                <KeyValue label="Created">{formatDateTime(a.created_at)}</KeyValue>
+                <KeyValue label="Ready">{formatDateTime(a.ready_at)}</KeyValue>
+              </dl>
+
+              <section>
+                <h4 className="mb-2 text-sm font-semibold">Renditions</h4>
+                {a.renditions.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No renditions.</p>
+                ) : (
+                  <ul className="divide-y rounded-lg border">
+                    {a.renditions.map((r) => (
+                      <li key={r.name + r.format} className="flex items-center gap-3 px-3 py-2 text-sm">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium">
+                            {r.name} <span className="font-mono text-xs text-muted-foreground uppercase">{r.format}</span>
+                          </div>
+                          <div className="truncate font-mono text-xs text-muted-foreground" title={r.url ?? r.key}>
+                            {r.width && r.height ? `${r.width}×${r.height} · ` : ""}
+                            {r.url ?? r.key}
+                          </div>
+                        </div>
+                        <div className="text-right text-xs tabular-nums">
+                          <div className="font-medium">{formatBytes(r.bytes)}</div>
+                          {a.original.bytes > 0 && (
+                            <div className="text-muted-foreground">
+                              {(((a.original.bytes - r.bytes) / a.original.bytes) * 100).toFixed(0)}% smaller
+                            </div>
+                          )}
+                        </div>
+                        {(r.url ?? r.key) && <CopyButton value={(r.url ?? r.key)!} label={`Copy ${r.name} location`} size="icon-xs" />}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+
+              <section>
+                <h4 className="mb-2 text-sm font-semibold">Metadata</h4>
+                <pre className="max-h-48 overflow-auto rounded-lg bg-muted/60 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap">
+                  {JSON.stringify(a.metadata ?? {}, null, 2)}
+                </pre>
+              </section>
+
+              <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => setConfirm(true)}>
+                <Trash2 /> Delete asset
+              </Button>
+            </>
+          ) : null}
+        </div>
+
+        <AlertDialog open={confirm} onOpenChange={setConfirm}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete this asset?</AlertDialogTitle>
+              <AlertDialogDescription>
+                The asset and any renditions no longer shared with other assets are removed from storage. This can't be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-white hover:bg-destructive/90"
+                onClick={() => {
+                  if (assetId) del.mutate(assetId, { onSuccess: onClose });
+                  setConfirm(false);
+                }}
+              >
+                Delete asset
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+export default function AssetsPage() {
+  const { project } = route.useSearch();
+  const navigate = route.useNavigate();
+  const setProject = useCallback((id: string) => void navigate({ search: { project: id }, replace: true }), [navigate]);
+  const { projects, list, active } = useActiveProject(project, setProject);
+
+  const [namespace, setNamespace] = useState("");
+  const [kind, setKind] = useState<string | undefined>();
+  const [status, setStatus] = useState<string | undefined>();
+  const [selected, setSelected] = useState<string | null>(null);
+  const ns = namespace.trim() || undefined;
+
+  const pid = active?.id ?? "";
+  const assets = useInfiniteQuery({
+    queryKey: [...qk.assets(pid), { ns, kind, status }],
+    queryFn: ({ pageParam }) => api.assets.list(pid, { namespace: ns, kind, status, limit: PAGE, cursor: pageParam }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.next_cursor || null,
+    enabled: !!pid,
+  });
+  const items = assets.data?.pages.flatMap((p) => p.items) ?? [];
+
+  return (
+    <>
+      <PageHeader
+        title="Assets"
+        description="Browse processed media in a project."
+        actions={<ProjectSelect projects={list} value={active?.id} onChange={setProject} loading={projects.isPending} />}
+      />
+
+      {projects.isError ? (
+        <ErrorState error={projects.error} onRetry={() => void projects.refetch()} />
+      ) : projects.isSuccess && list.length === 0 ? (
+        <EmptyState icon={<FolderKanban />} title="No projects yet" description="Create a project to start uploading media." />
+      ) : (
+        <>
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <Input
+              value={namespace}
+              onChange={(e) => setNamespace(e.target.value)}
+              placeholder="Namespace"
+              aria-label="Namespace"
+              className="h-8 w-44"
+            />
+            <FilterSelect value={kind} onChange={setKind} options={ASSET_KINDS} allLabel="All kinds" label="Kind" />
+            <FilterSelect value={status} onChange={setStatus} options={ASSET_STATUSES} allLabel="All statuses" label="Status" />
+          </div>
+
+          {assets.isPending ? (
+            <div className="space-y-2 rounded-xl border bg-card p-4">
+              {Array.from({ length: 6 }, (_, i) => (
+                <Skeleton key={i} className="h-12 w-full" />
+              ))}
+            </div>
+          ) : assets.isError ? (
+            <ErrorState error={assets.error} onRetry={() => void assets.refetch()} />
+          ) : items.length === 0 ? (
+            <EmptyState
+              icon={<Images />}
+              title="No assets"
+              description={ns || kind || status ? "No assets match these filters." : "Uploaded media will appear here."}
+            />
+          ) : (
+            <>
+              <div className="overflow-hidden rounded-xl border bg-card">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="pl-4">Asset</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="hidden md:table-cell">Namespace</TableHead>
+                      <TableHead className="hidden sm:table-cell">Size</TableHead>
+                      <TableHead className="hidden lg:table-cell">Preset</TableHead>
+                      <TableHead className="hidden lg:table-cell pr-4">Created</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {items.map((a) => (
+                      <TableRow
+                        key={a.id}
+                        tabIndex={0}
+                        className="cursor-pointer"
+                        onClick={() => setSelected(a.id)}
+                        onKeyDown={(e) => e.key === "Enter" && setSelected(a.id)}
+                      >
+                        <TableCell className="pl-4">
+                          <div className="flex items-center gap-3">
+                            <Thumb asset={a} />
+                            <div className="min-w-0">
+                              <div className="max-w-[16rem] truncate text-sm font-medium">{a.original.filename ?? a.id}</div>
+                              <div className="font-mono text-xs text-muted-foreground">{a.kind}</div>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <StatusBadge tone={STATUS_TONE[a.status] ?? "neutral"}>{a.status}</StatusBadge>
+                        </TableCell>
+                        <TableCell className="hidden font-mono text-xs md:table-cell">{a.namespace}</TableCell>
+                        <TableCell className="hidden text-sm tabular-nums sm:table-cell">
+                          {formatBytes(a.original.bytes)}
+                          {a.savings_ratio !== null && a.savings_ratio > 0 && (
+                            <span className="ml-1.5 text-xs text-success">−{(a.savings_ratio * 100).toFixed(0)}%</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="hidden font-mono text-xs lg:table-cell">
+                          {a.preset ? `${a.preset} v${a.preset_version}` : "—"}
+                        </TableCell>
+                        <TableCell className="hidden pr-4 text-sm text-muted-foreground lg:table-cell">
+                          <RelativeTime value={a.created_at} />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              <div className="mt-4 flex items-center justify-between text-sm text-muted-foreground">
+                <span>
+                  {items.length} asset{items.length === 1 ? "" : "s"}
+                </span>
+                {assets.hasNextPage ? (
+                  <Button variant="outline" size="sm" onClick={() => void assets.fetchNextPage()} disabled={assets.isFetchingNextPage}>
+                    {assets.isFetchingNextPage && <Loader2 className="animate-spin" />}
+                    Load more
+                  </Button>
+                ) : (
+                  <span>End of list</span>
+                )}
+              </div>
+            </>
+          )}
+        </>
+      )}
+
+      {pid && <AssetDetail projectId={pid} assetId={selected} onClose={() => setSelected(null)} />}
+    </>
+  );
+}

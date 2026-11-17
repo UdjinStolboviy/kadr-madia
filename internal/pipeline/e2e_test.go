@@ -806,7 +806,7 @@ func TestValidationAbortPatchAndPresets(t *testing.T) {
 	expect(t, e.call("POST", "/v1/uploads/"+id+"/complete", nil, nil), 409, "upload_aborted")
 	expect(t, e.call("POST", "/v1/uploads/upl_missing/complete", nil, nil), 404, "not_found")
 
-	// PATCH metadata; visibility changes are 501 until M3.
+	// PATCH metadata.
 	a := e.upload(photo("patch"), "org_v", "public")
 	id = a["id"].(string)
 	r = e.call("PATCH", "/v1/assets/"+id, map[string]any{"metadata": map[string]any{"entity": "listing", "entity_id": "lst_99"}}, nil)
@@ -814,7 +814,6 @@ func TestValidationAbortPatchAndPresets(t *testing.T) {
 	if r.obj(t)["metadata"].(map[string]any)["entity_id"] != "lst_99" || len(e.events(webhook.EventAssetUpdated)) != 1 {
 		t.Fatalf("patch: %s", r.body)
 	}
-	expect(t, e.call("PATCH", "/v1/assets/"+id, map[string]any{"visibility": "private"}, nil), 501, "not_implemented")
 	expect(t, e.call("PATCH", "/v1/assets/"+id, map[string]any{"metadata": []int{1}}, nil), 422, "validation_failed")
 
 	// Presets.

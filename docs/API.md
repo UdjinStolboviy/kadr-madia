@@ -67,7 +67,15 @@ Scope `uploads:write`.
 }
 ```
 
-Files larger than 64 MB need multipart uploads, which are not available yet (planned for M2): such requests get `413 too_large`.
+Image files are limited to 64 MB. **Video files over 64 MB** get a multipart ticket (`"method": "MULTIPART"`) instead of `url`/`headers`:
+
+```json
+{ "upload_id": "upl_…", "method": "MULTIPART", "part_size": 16777216,
+  "parts": [{ "part_number": 1, "url": "https://…" }, { "part_number": 2, "url": "https://…" }],
+  "expires_at": "2026-11-16T22:00:00Z" }
+```
+
+`PUT` bytes `[(n-1)*part_size, n*part_size)` of the file to each part URL (the last part may be smaller; parts can be uploaded in parallel and retried), collect the `ETag` response header of every part, then `POST /v1/uploads/{id}/complete` with `{ "parts": [{ "part_number": 1, "etag": "…" }, …] }`. Complete is idempotent. Multipart tickets live for 1 hour; abandoned ones are aborted by the sweeper. The bucket CORS rule must expose the `ETag` header for browser uploads (`@kadr/web` reports a clear error otherwise).
 
 **200** — deduplicated: `sha256` matches a ready blob within the same project, visibility and preset version. A new ready asset referencing it is created (and `asset.ready` is emitted); no upload is needed:
 
@@ -106,11 +114,15 @@ Scope `uploads:write`. For backend processes (scanners, imports): files ≤ 25 M
 
 **Errors:** as for tickets, plus `too_large` (413, over 25 MB), `unsupported_content_type` (415, the body is not multipart/form-data), `invalid_multipart` (400).
 
-### Planned (not implemented yet, `501`)
+### `POST /v1/imports/url` — import from a URL
 
-- `POST /v1/uploads/{id}/parts` and multipart tickets (`"method": "MULTIPART"`) for files over 64 MB (M2).
-- `POST /v1/imports/url` — `{ "url": "https://…", "preset": "photo-lite", "namespace": "org_8f2c", "visibility": "public" }` → `202 { asset (processing) }`.
-- `POST /v1/imports/cloud` — `{ "connection_id": "con_…", "file_id": "…", "preset": "…", "namespace": "…", "visibility": "…" }` → `202`.
+`{ "url": "https://…", "preset": "photo-lite", "namespace": "org_8f2c", "visibility": "public", "filename"?, "metadata"? }` → `202` with the asset in `processing`; `asset.ready` / `asset.failed` follow. Scope `imports:write`.
+
+The fetch is SSRF-safe: http/https only, no credentials in the URL, ports 80/443/8080/8443, the host is resolved once and **every** address must be public (RFC 1918, loopback, link-local, CGNAT, cloud metadata, multicast and IPv6 ULA are refused), the connection goes to the verified IP, at most 5 redirects, each re-validated. Size is capped by the preset's `maxInputBytes`. Failure codes: `import_blocked`, `import_failed` (HTTP errors, timeouts after retries), `too_large`, plus the engine codes.
+
+### `POST /v1/imports/cloud` — import from a cloud drive
+
+`{ "connection_id": "con_…", "file_id": "…", "preset", "namespace", "visibility" }` → `202`. Connections (Google Drive, OneDrive, Dropbox) are created in the admin console from an `rclone authorize` token; `file_id` is the Drive file id, or a path for OneDrive/Dropbox. Requires the `rclone` binary on the host.
 
 ## Assets
 
@@ -151,7 +163,7 @@ Scope `uploads:write`. For backend processes (scanners, imports): files ≤ 25 M
 |---|---|---|---|
 | GET | `/v1/assets/{id}` | `assets:read` | Get (deleted assets: `404 not_found`) |
 | GET | `/v1/assets?namespace=&kind=&status=&limit=&cursor=` | `assets:read` | List, newest first. `status`: `processing`, `ready` or `failed`; `limit` 1–200 (default 50). Returns `{ "items": [...], "next_cursor": … }` |
-| PATCH | `/v1/assets/{id}` | `assets:write` | `{ "metadata": {…} }` replaces the metadata and emits `asset.updated`. Changing `visibility` (a cross-bucket copy) is planned for M3 and answers `501 not_implemented`; sending the current visibility is accepted |
+| PATCH | `/v1/assets/{id}` | `assets:write` | `{ "metadata": {…} }` replaces the metadata and emits `asset.updated`. Changing `visibility` copies the renditions server-side into the other bucket (new blob, public copies get public cache headers), re-points the asset and lets GC remove the old objects; it can be combined with `metadata`, emits one `asset.updated` (`changes: ["visibility", …]`) and answers `409 asset_not_ready` unless the asset is ready. Sending the current visibility is a no-op |
 | DELETE | `/v1/assets/{id}` | `assets:delete` | `204`. Soft delete, releases quota, emits `asset.deleted`; stored files are removed by refcount GC. `409 asset_processing` while the asset is processing |
 | POST | `/v1/assets/{id}/reprocess` | | Planned (`501`) |
 
@@ -164,11 +176,11 @@ const url = kadr.signUrl(asset.renditions[0].key, { ttl: 3600, download: "receip
 // https://media.example.com/acme/blb_…/main.avif?exp=1763330400&kid=k3&sig=Base64Url(HMAC-SHA256(secret, "GET\n/acme/blb_…/main.avif\n1763330400\nreceipt.avif"))
 ```
 
-The canonical form is specified in `sdk/node/README.md`. The edge Worker that verifies these URLs and signing-key management are not implemented yet.
+The canonical form is specified in `sdk/node/README.md`. The `kadr-edge` Worker (`edge/kadr-edge`) verifies these URLs. Signing keys are created and rotated per project in the admin console (Signing keys tab) and published to the Worker with `POST /admin/api/signing-keys/publish` (or copied into the `SIGNING_KEYS` Worker secret).
 
-### Via the API (planned, `501`)
+### Via the API (scope `urls:sign`)
 
-`POST /v1/signed-urls` `{ "items": [{ "asset_id": "ast_…", "rendition": "main", "ttl": 3600 }] }` → `{ "items": [{ "url": "…", "expires_at": "…" }] }`
+`POST /v1/signed-urls` `{ "items": [{ "asset_id": "ast_…", "rendition": "main.avif", "ttl": 3600, "download": "receipt.avif" }] }` → `{ "items": [{ "url": "…", "expires_at": "…" }] }` (1–100 items, ttl ≤ 7 days). Only ready **private** assets can be signed; `409 no_signing_key` until a key exists, `503 signing_unavailable` without `KADR_EDGE_BASE_URL`.
 
 ## Namespaces and quotas
 

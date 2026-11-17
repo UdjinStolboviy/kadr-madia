@@ -252,3 +252,261 @@ export interface AuditPage {
   items: AuditEntry[];
   next_cursor: string | null;
 }
+
+// ---- Jobs -------------------------------------------------------------------
+
+export const JOB_STATUSES = ["queued", "running", "succeeded", "dead", "cancelled"] as const;
+export const JOB_POOLS = ["image", "video", "maintenance", "webhook"] as const;
+
+export interface Job {
+  id: string;
+  kind: string;
+  pool: string;
+  status: string;
+  attempts: number;
+  max_attempts: number;
+  /** 0-100 for running video jobs, otherwise null. */
+  progress: number | null;
+  last_error: string | null;
+  run_at: ISODateTime;
+  created_at: ISODateTime;
+  finished_at: ISODateTime | null;
+}
+
+export interface JobFilters {
+  status?: string;
+  pool?: string;
+  limit?: number;
+}
+
+// ---- Assets -----------------------------------------------------------------
+
+export const ASSET_KINDS = ["image", "video"] as const;
+export const ASSET_STATUSES = ["processing", "ready", "failed"] as const;
+
+export interface AssetOriginal {
+  filename: string | null;
+  content_type: string | null;
+  bytes: number;
+  width: number | null;
+  height: number | null;
+}
+
+export interface Rendition {
+  name: string;
+  format: string;
+  bytes: number;
+  width: number | null;
+  height: number | null;
+  /** Present for public assets. */
+  url?: string;
+  /** Present for private assets. */
+  key?: string;
+}
+
+export interface Asset {
+  id: string;
+  status: string;
+  kind: string;
+  namespace: string;
+  visibility: string;
+  preset: string;
+  preset_version: number;
+  original: AssetOriginal;
+  renditions: Rendition[];
+  placeholder: { thumbhash: string | null; dominant_color: string | null } | null;
+  duration_sec: number | null;
+  poster: Rendition | null;
+  metadata: Record<string, unknown>;
+  savings_ratio: number | null;
+  error?: { code: string; detail?: string };
+  created_at: ISODateTime;
+  ready_at: ISODateTime | null;
+}
+
+export interface AssetPage {
+  items: Asset[];
+  next_cursor: string | null;
+}
+
+export interface AssetFilters {
+  namespace?: string;
+  kind?: string;
+  status?: string;
+}
+
+// ---- Analytics --------------------------------------------------------------
+
+export const ANALYTICS_DAYS = [7, 30, 90] as const;
+
+export interface UsageDay {
+  day: string;
+  uploads: number;
+  assets_ready: number;
+  assets_failed: number;
+  bytes_in: number;
+  bytes_stored: number;
+  video_sec: number;
+  cpu_ms: number;
+  dedup_hits: number;
+}
+
+export interface Analytics {
+  from: string;
+  to: string;
+  days: UsageDay[];
+  totals: UsageDay;
+  savings_ratio: number;
+  failed_rate: number;
+}
+
+// ---- Playground -------------------------------------------------------------
+
+/** Image preset params (docs/PIPELINES.md §1); only the parts the playground edits are typed strictly. */
+export interface ImageParams {
+  kind?: string;
+  resize: { maxWidth: number; maxHeight: number; fit: string; crop?: string | null; aspect?: string | null };
+  color: { grayscale: boolean; normalise: boolean };
+  sharpen?: { sigma: number; m1: number; m2: number } | null;
+  outputs: { name: string; format: string; effort?: number; chroma?: string; smartSubsample?: boolean }[];
+  quality: {
+    mode: "budget" | "ssim" | "fixed";
+    maxBytes?: number;
+    qMax?: number;
+    qMin?: number;
+    downscaleStep?: number;
+    minSide?: number;
+    q?: number;
+    target?: number;
+  };
+  placeholder?: { thumbhash: boolean; dominantColor: boolean };
+  limits?: Record<string, unknown>;
+  retainOriginal?: boolean;
+  [k: string]: unknown;
+}
+
+export interface PlaygroundRendition {
+  name: string;
+  format: string;
+  content_type: string;
+  bytes: number;
+  width: number;
+  height: number;
+  quality: number;
+  iterations: number;
+  over_budget: boolean;
+  ssim: number;
+  /** Base64 of the encoded file. */
+  data: string;
+}
+
+export interface PlaygroundResult {
+  source: { format: string; bytes: number; width: number; height: number };
+  renditions: PlaygroundRendition[];
+  elapsed_ms: number;
+  dominant_color?: string;
+  thumbhash?: string;
+}
+
+export interface SavePresetVersionRequest {
+  params: ImageParams;
+  description?: string;
+}
+
+// ---- Webhooks ---------------------------------------------------------------
+
+export const WEBHOOK_EVENTS = [
+  "*",
+  "asset.*",
+  "asset.ready",
+  "asset.failed",
+  "asset.updated",
+  "asset.deleted",
+  "upload.*",
+  "upload.expired",
+  "quota.*",
+  "quota.warning",
+  "quota.exceeded",
+  "namespace.*",
+  "namespace.purged",
+] as const;
+
+export interface WebhookEndpoint {
+  id: string;
+  project_id: string;
+  url: string;
+  events: string[];
+  disabled: boolean;
+  created_at: ISODateTime;
+}
+
+export interface CreateWebhookRequest {
+  url: string;
+  events?: string[];
+}
+
+export interface CreateWebhookResponse {
+  webhook: WebhookEndpoint;
+  secret: string;
+}
+
+export const DELIVERY_STATUSES = ["pending", "delivering", "delivered", "dead"] as const;
+
+export interface Delivery {
+  id: string;
+  event_id: string;
+  event_type: string;
+  endpoint_id: string;
+  endpoint_url: string;
+  status: string;
+  attempts: number;
+  next_attempt_at: ISODateTime | null;
+  last_status_code: number | null;
+  last_error: string | null;
+  last_duration_ms: number | null;
+  delivered_at: ISODateTime | null;
+  created_at: ISODateTime;
+}
+
+export interface DeliveryPage {
+  items: Delivery[];
+  next_cursor: string | null;
+}
+
+// ---- Signing keys -----------------------------------------------------------
+
+export interface SigningKey {
+  id: string;
+  project_id: string;
+  /** active | verify_only | retired */
+  status: string;
+  published_at: ISODateTime | null;
+  created_at: ISODateTime;
+}
+
+export interface CreateSigningKeyResponse {
+  key: SigningKey;
+  secret: string;
+}
+
+// ---- Cloud connections ------------------------------------------------------
+
+export const CLOUD_PROVIDERS = ["gdrive", "onedrive", "dropbox"] as const;
+export type CloudProvider = (typeof CLOUD_PROVIDERS)[number];
+
+export interface CloudConnection {
+  id: string;
+  project_id: string;
+  namespace: string | null;
+  provider: string;
+  account_label: string | null;
+  created_at: ISODateTime;
+}
+
+export interface CreateCloudConnectionRequest {
+  provider: CloudProvider;
+  account_label?: string;
+  namespace?: string;
+  /** rclone OAuth token JSON. */
+  token: string;
+}

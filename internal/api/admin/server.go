@@ -23,6 +23,7 @@ import (
 	"github.com/UdjinStolboviy/kadr-madia/internal/capabilities"
 	"github.com/UdjinStolboviy/kadr-madia/internal/crypto"
 	"github.com/UdjinStolboviy/kadr-madia/internal/db"
+	"github.com/UdjinStolboviy/kadr-madia/internal/edgepublish"
 	"github.com/UdjinStolboviy/kadr-madia/internal/observability"
 	"github.com/UdjinStolboviy/kadr-madia/internal/pipeline"
 	"github.com/UdjinStolboviy/kadr-madia/internal/storage"
@@ -59,6 +60,8 @@ type Config struct {
 	// Webhooks delivers test events and wakes up on manual retries
 	// (optional; the test endpoint returns 503 without it).
 	Webhooks *webhook.Dispatcher
+	// Edge publishes signing keys to kadr-edge (optional).
+	Edge *edgepublish.Publisher
 	// Playground runs presets on samples (optional; nil → 503).
 	Playground PlaygroundEngine
 	// Pipeline backs the asset explorer (optional).
@@ -206,6 +209,7 @@ func (s *Server) apiRouter() http.Handler {
 		r.Post("/projects/{id}/signing-keys", s.handleCreateSigningKey)
 		r.Delete("/signing-keys/{kid}", s.handleRetireSigningKey)
 		r.Get("/signing-keys/edge-config", s.handleEdgeConfig)
+		r.Post("/signing-keys/publish", s.handlePublishSigningKeys)
 		r.Get("/projects/{id}/cloud-connections", s.handleListCloudConnections)
 		r.Post("/projects/{id}/cloud-connections", s.handleCreateCloudConnection)
 		r.Delete("/cloud-connections/{id}", s.handleRevokeCloudConnection)

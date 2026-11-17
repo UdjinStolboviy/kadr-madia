@@ -4,8 +4,11 @@ import { ChevronLeft } from "lucide-react";
 
 import { CopyButton, PageHeader, StatusBadge } from "@/components/common";
 import { ApiKeysTab } from "@/components/project/api-keys-tab";
+import { CloudTab } from "@/components/project/cloud-tab";
 import { PresetsTab } from "@/components/project/presets-tab";
 import { SettingsTab } from "@/components/project/settings-tab";
+import { SigningKeysTab } from "@/components/project/signing-keys-tab";
+import { WebhooksTab } from "@/components/project/webhooks-tab";
 import { EnvBadge } from "@/components/project-form";
 import { ErrorState } from "@/components/states";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -81,10 +84,13 @@ export default function ProjectDetailPage() {
       </PageHeader>
 
       <Tabs value={tab} onValueChange={(v) => void navigate({ search: { tab: v as ProjectTab }, replace: true })}>
-        <TabsList variant="line" className="mb-4 w-full justify-start border-b pb-0">
+        <TabsList variant="line" className="mb-4 w-full justify-start overflow-x-auto border-b pb-0">
           <TabsTrigger className="flex-none px-3" value="settings">Settings</TabsTrigger>
           <TabsTrigger className="flex-none px-3" value="keys">API keys</TabsTrigger>
           <TabsTrigger className="flex-none px-3" value="presets">Presets</TabsTrigger>
+          <TabsTrigger className="flex-none px-3" value="webhooks">Webhooks</TabsTrigger>
+          <TabsTrigger className="flex-none px-3" value="signing">Signing keys</TabsTrigger>
+          <TabsTrigger className="flex-none px-3" value="cloud">Cloud</TabsTrigger>
         </TabsList>
         <TabsContent value="settings">
           <SettingsTab project={p} />
@@ -94,6 +100,15 @@ export default function ProjectDetailPage() {
         </TabsContent>
         <TabsContent value="presets">
           <PresetsTab projectId={p.id} />
+        </TabsContent>
+        <TabsContent value="webhooks">
+          <WebhooksTab project={p} />
+        </TabsContent>
+        <TabsContent value="signing">
+          <SigningKeysTab project={p} />
+        </TabsContent>
+        <TabsContent value="cloud">
+          <CloudTab project={p} />
         </TabsContent>
       </Tabs>
     </>

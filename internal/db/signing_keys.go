@@ -101,3 +101,9 @@ func (s *Store) ListSigningKeys(ctx context.Context, projectID string, includeRe
 func (s *Store) RetireSigningKey(ctx context.Context, id string) (bool, error) {
 	return s.execOne(ctx, `UPDATE signing_keys SET status = 'retired' WHERE id = ? AND status != 'retired'`, id)
 }
+
+// MarkSigningKeysPublished records that all non-retired keys were synced to the edge.
+func (s *Store) MarkSigningKeysPublished(ctx context.Context, now time.Time) error {
+	_, err := s.w.ExecContext(ctx, `UPDATE signing_keys SET published_at = ? WHERE status != 'retired'`, ms(now))
+	return mapErr(err)
+}

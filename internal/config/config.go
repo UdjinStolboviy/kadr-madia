@@ -35,6 +35,9 @@ type Config struct {
 	TelegramToken  string // KADR_TELEGRAM_BOT_TOKEN (alerts)
 	TelegramChatID string // KADR_TELEGRAM_CHAT_ID
 	EdgeBaseURL    string // https://media.example.com — private delivery host (kadr-edge)
+	CFAccountID    string // KADR_CF_ACCOUNT_ID
+	CFAPIToken     string // KADR_CF_API_TOKEN
+	CFWorkerName   string // KADR_CF_WORKER_NAME (default kadr-edge)
 	LogLevel       slog.Level
 	Dev            bool
 }
@@ -72,6 +75,9 @@ func Load(getenv Getenv) (*Config, error) {
 	setStr(&c.DBPath, getenv("KADR_DB_PATH"))
 	setStr(&c.TmpDir, getenv("KADR_TMP_DIR"))
 	setStr(&c.MasterKeyFile, getenv("KADR_MASTER_KEY_FILE"))
+	setStr(&c.CFAccountID, getenv("KADR_CF_ACCOUNT_ID"))
+	setStr(&c.CFAPIToken, getenv("KADR_CF_API_TOKEN"))
+	setStr(&c.CFWorkerName, getenv("KADR_CF_WORKER_NAME"))
 	setStr(&c.TelegramToken, getenv("KADR_TELEGRAM_BOT_TOKEN"))
 	setStr(&c.TelegramChatID, getenv("KADR_TELEGRAM_CHAT_ID"))
 	setStr(&c.EdgeBaseURL, strings.TrimRight(getenv("KADR_EDGE_BASE_URL"), "/"))

@@ -26,7 +26,7 @@ Estimates assume one full-time engineer working with AI agents.
 
 **Done when:** an iPhone photo (4 MB HEIC) → ≤ 20 KB AVIF in R2 with p95 < 1.5 s from complete; golden tests green.
 
-## M2 — Video (2 weeks)
+## M2 — Video (2 weeks) — done
 
 - S3 Multipart (part tickets, complete with ETags), abort.
 - `engine/video`: ffprobe validation, libx264 / VAAPI auto-detection, poster, progress.
@@ -36,7 +36,7 @@ Estimates assume one full-time engineer working with AI agents.
 
 **Done when:** a 60-second 4K 300 MB video uploads bypassing the tunnel, compresses to ≤ 5 MB 720p, and plays instantly (faststart).
 
-## M3 — Private delivery & SDKs (1–2 weeks)
+## M3 — Private delivery & SDKs (1–2 weeks) — done except visibility change
 
 - `kadr-edge` Worker: HMAC verification, Cache API, Range requests for video, `Content-Disposition`.
 - Signing keys: creation, rotation, publishing to the Worker via the Cloudflare API.
@@ -45,7 +45,7 @@ Estimates assume one full-time engineer working with AI agents.
 - OpenAPI 3.1 published; SDKs generated.
 - **Onboard two more design-partner products; integration guide validated (< 1 day per product).**
 
-## M4 — Product polish (2–3 weeks)
+## M4 — Product polish (2–3 weeks) — done except WebAuthn
 
 - Asset explorer (filters, metadata view, deletion).
 - **Playground:** upload a sample, tweak preset parameters, Before/After split view, live size/SSIM, "Save as new version".

@@ -1,16 +1,32 @@
 import type {
+  Analytics,
   ApiErrorCode,
   ApiKey,
+  Asset,
+  AssetFilters,
+  AssetPage,
   AuditPage,
+  CloudConnection,
   CreateApiKeyRequest,
   CreateApiKeyResponse,
+  CreateCloudConnectionRequest,
   CreateProjectRequest,
+  CreateSigningKeyResponse,
+  CreateWebhookRequest,
+  CreateWebhookResponse,
+  Delivery,
+  DeliveryPage,
   ItemsResponse,
+  Job,
+  JobFilters,
   LoginRequest,
+  PlaygroundResult,
   Preset,
   Problem,
   Project,
+  SavePresetVersionRequest,
   SessionResponse,
+  SigningKey,
   StorageProfile,
   StorageProfileInput,
   StorageProfilePatch,
@@ -18,6 +34,7 @@ import type {
   SystemInfo,
   TotpSetupResponse,
   UpdateProjectRequest,
+  WebhookEndpoint,
 } from "./types";
 
 export const API_BASE = "/admin/api";
@@ -91,6 +108,8 @@ const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 interface RequestOptions {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
+  /** Multipart upload. Content-Type is left to the browser (boundary); the CSRF header is still sent. */
+  form?: FormData;
   query?: Record<string, string | number | undefined | null>;
   /** Do not trigger global unauthenticated redirect (login, me). */
   skipAuthRedirect?: boolean;
@@ -127,7 +146,7 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
   }
 
   const headers: Record<string, string> = { Accept: "application/json" };
-  if (opts.body !== undefined) headers["Content-Type"] = "application/json";
+  if (opts.body !== undefined && !opts.form) headers["Content-Type"] = "application/json";
   if (MUTATING.has(method) && path !== "/auth/login" && csrfToken) {
     headers["X-CSRF-Token"] = csrfToken;
   }
@@ -138,7 +157,7 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
       method,
       headers,
       credentials: "same-origin",
-      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+      body: opts.form ?? (opts.body !== undefined ? JSON.stringify(opts.body) : undefined),
       signal: opts.signal,
     });
   } catch (e) {
@@ -203,6 +222,58 @@ export const api = {
     update: (id: string, body: UpdateProjectRequest) =>
       request<Project>(`/projects/${enc(id)}`, { method: "PATCH", body }),
     presets: (id: string) => request<ItemsResponse<Preset>>(`/projects/${enc(id)}/presets`),
+    savePresetVersion: (id: string, slug: string, body: SavePresetVersionRequest) =>
+      request<Preset>(`/projects/${enc(id)}/presets/${enc(slug)}/versions`, { method: "POST", body }),
+    analytics: (id: string, days: number) => request<Analytics>(`/projects/${enc(id)}/analytics`, { query: { days } }),
+  },
+
+  jobs: {
+    list: (f: JobFilters = {}) => request<ItemsResponse<Job>>("/jobs", { query: { ...f } }),
+    retry: (id: string) => request<Job>(`/jobs/${enc(id)}/retry`, { method: "POST" }),
+    cancel: (id: string) => request<Job>(`/jobs/${enc(id)}/cancel`, { method: "POST" }),
+  },
+
+  assets: {
+    list: (projectId: string, f: AssetFilters & { cursor?: string | null; limit?: number }) =>
+      request<AssetPage>(`/projects/${enc(projectId)}/assets`, { query: { ...f } }),
+    get: (projectId: string, assetId: string) =>
+      request<Asset>(`/projects/${enc(projectId)}/assets/${enc(assetId)}`),
+    remove: (projectId: string, assetId: string) =>
+      request<void>(`/projects/${enc(projectId)}/assets/${enc(assetId)}`, { method: "DELETE" }),
+  },
+
+  playground: {
+    run: (file: File, params: unknown, signal?: AbortSignal) => {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("params", JSON.stringify(params));
+      return request<PlaygroundResult>("/playground", { method: "POST", form, signal });
+    },
+  },
+
+  webhooks: {
+    list: (projectId: string) => request<ItemsResponse<WebhookEndpoint>>(`/projects/${enc(projectId)}/webhooks`),
+    create: (projectId: string, body: CreateWebhookRequest) =>
+      request<CreateWebhookResponse>(`/projects/${enc(projectId)}/webhooks`, { method: "POST", body }),
+    remove: (id: string) => request<void>(`/webhooks/${enc(id)}`, { method: "DELETE" }),
+    test: (id: string) => request<Delivery>(`/webhooks/${enc(id)}/test`, { method: "POST" }),
+    deliveries: (projectId: string, p: { status?: string; cursor?: string | null; limit?: number }) =>
+      request<DeliveryPage>(`/projects/${enc(projectId)}/deliveries`, { query: { ...p } }),
+    retryDelivery: (id: string) => request<Delivery>(`/deliveries/${enc(id)}/retry`, { method: "POST" }),
+  },
+
+  signingKeys: {
+    list: (projectId: string) => request<ItemsResponse<SigningKey>>(`/projects/${enc(projectId)}/signing-keys`),
+    rotate: (projectId: string) =>
+      request<CreateSigningKeyResponse>(`/projects/${enc(projectId)}/signing-keys`, { method: "POST" }),
+    retire: (kid: string) => request<void>(`/signing-keys/${enc(kid)}`, { method: "DELETE" }),
+  },
+
+  cloud: {
+    list: (projectId: string) => request<ItemsResponse<CloudConnection>>(`/projects/${enc(projectId)}/cloud-connections`),
+    create: (projectId: string, body: CreateCloudConnectionRequest) =>
+      request<CloudConnection>(`/projects/${enc(projectId)}/cloud-connections`, { method: "POST", body }),
+    revoke: (id: string) => request<void>(`/cloud-connections/${enc(id)}`, { method: "DELETE" }),
   },
 
   apiKeys: {

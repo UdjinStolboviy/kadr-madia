@@ -60,6 +60,9 @@ KADR_API_KEY_PEPPER=…
 KADR_POOL_IMAGE=2
 KADR_POOL_VIDEO=1
 KADR_VIDEO_HW=auto                       # auto | vaapi | off
+KADR_EDGE_BASE_URL=https://media.example.com   # private delivery host (kadr-edge) for POST /v1/signed-urls
+KADR_TELEGRAM_BOT_TOKEN=…                # built-in alerts (optional)
+KADR_TELEGRAM_CHAT_ID=…
 KADR_CF_ACCOUNT_ID=…                     # to publish keys to kadr-edge
 KADR_CF_API_TOKEN=…                      # scope: Workers Scripts:Edit (this Worker only)
 KADR_LOG_LEVEL=info
@@ -114,13 +117,13 @@ Migrations are forward-only and backward compatible with the previous version (e
 | Master key | Password manager + offline copy | — |
 | LXC | Weekly Proxmox vzdump (optional: everything is restorable from the binary + Litestream) | — |
 
-**Restore from scratch:** new LXC → packages → binary → `/etc/kadr/*` → `litestream restore -o /var/lib/kadr/db/kadr.db s3://kadr-system/…` → `systemctl start kadr`. Monthly test restore into staging (`make restore-drill`).
+**Restore from scratch:** new LXC → packages → binary → `/etc/kadr/*` → `litestream restore -o /var/lib/kadr/db/kadr.db s3://kadr-system/…` → `systemctl start kadr`. Monthly test restore: `make restore-drill HOST=…` runs `kadr restore-drill` (litestream restore into a scratch dir, `PRAGMA integrity_check`, migration count and table row counts compared with the live DB; exits non-zero on failure).
 
 ## 9. Monitoring
 
 - `/healthz` (alive), `/readyz` (DB + R2 + vips/ffmpeg available).
 - `/metrics` (Prometheus format, LAN only): `kadr_jobs_queued{pool}`, `kadr_job_duration_seconds{kind}`, `kadr_job_failures_total{kind,code}`, `kadr_bytes_in_total`, `kadr_bytes_stored_total`, `kadr_r2_requests_total{op,status}`, `kadr_webhook_deliveries_total{status}`, `kadr_tmp_disk_free_bytes`, `kadr_db_wal_bytes`.
-- Alerts (Grafana or built-in admin alerting → Telegram/email):
+- Built-in alerts (Telegram when `KADR_TELEGRAM_BOT_TOKEN`/`KADR_TELEGRAM_CHAT_ID` are set; checked every minute, 30 min cooldown, "recovered" message): video queue > 10, oldest queued job > 15 min, ≥ 3 dead jobs in 15 min, tmp disk < 2 GiB. Further rules via Grafana:
   - video queue > 10 jobs or oldest > 15 min;
   - failed share > 5% over 15 min;
   - tmp free space < 5 GB;

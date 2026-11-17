@@ -70,8 +70,8 @@ const projectsRoute = createRoute({
   component: lazyRouteComponent(() => import("@/routes/projects")),
 });
 
-export type ProjectTab = "settings" | "keys" | "presets";
-const TABS: ProjectTab[] = ["settings", "keys", "presets"];
+export type ProjectTab = "settings" | "keys" | "presets" | "webhooks" | "signing" | "cloud";
+const TABS: ProjectTab[] = ["settings", "keys", "presets", "webhooks", "signing", "cloud"];
 
 export const projectDetailRoute = createRoute({
   getParentRoute: () => appRoute,
@@ -100,9 +100,55 @@ const auditRoute = createRoute({
   component: lazyRouteComponent(() => import("@/routes/audit")),
 });
 
+/** Search schema shared by the pages that operate on one project. */
+function projectSearch(s: Record<string, unknown>): { project?: string } {
+  return typeof s.project === "string" && s.project ? { project: s.project } : {};
+}
+
+const jobsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/jobs",
+  component: lazyRouteComponent(() => import("@/routes/jobs")),
+});
+
+const assetsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/assets",
+  validateSearch: projectSearch,
+  component: lazyRouteComponent(() => import("@/routes/assets")),
+});
+
+const analyticsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/analytics",
+  validateSearch: (s: Record<string, unknown>): { project?: string; days?: 7 | 30 | 90 } => {
+    const days = Number(s.days);
+    return { ...projectSearch(s), ...(days === 7 || days === 90 ? { days } : {}) };
+  },
+  component: lazyRouteComponent(() => import("@/routes/analytics")),
+});
+
+const playgroundRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/playground",
+  validateSearch: projectSearch,
+  component: lazyRouteComponent(() => import("@/routes/playground")),
+});
+
 const routeTree = rootRoute.addChildren([
   loginRoute,
-  appRoute.addChildren([overviewRoute, projectsRoute, projectDetailRoute, storageRoute, systemRoute, auditRoute]),
+  appRoute.addChildren([
+    overviewRoute,
+    projectsRoute,
+    projectDetailRoute,
+    assetsRoute,
+    jobsRoute,
+    analyticsRoute,
+    playgroundRoute,
+    storageRoute,
+    systemRoute,
+    auditRoute,
+  ]),
 ]);
 
 export const router = createRouter({

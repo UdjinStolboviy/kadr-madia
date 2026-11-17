@@ -122,8 +122,8 @@ type PatchAssetInput struct {
 	Visibility *string         `json:"visibility"`
 }
 
-// PatchAsset replaces metadata. Changing visibility is not available yet
-// (501 until M3); repeating the current visibility is accepted.
+// PatchAsset replaces metadata and/or changes visibility (a copy of the
+// renditions into the other bucket); repeating the current visibility is accepted.
 func (s *Service) PatchAsset(ctx context.Context, projectID, id string, in PatchAssetInput) (*AssetView, error) {
 	a, err := s.loadAsset(ctx, projectID, id)
 	if err != nil {
@@ -133,7 +133,7 @@ func (s *Service) PatchAsset(ctx context.Context, projectID, id string, in Patch
 		if *in.Visibility != "public" && *in.Visibility != "private" {
 			return nil, validationErr(map[string]string{"visibility": `must be "public" or "private"`})
 		}
-		return nil, apiErr(http.StatusNotImplemented, CodeNotImplemented, "changing visibility is not available yet (planned for M3)")
+		return s.changeVisibility(ctx, a, *in.Visibility, in.Metadata)
 	}
 	if in.Metadata == nil {
 		return s.assetView(ctx, s.store, a)

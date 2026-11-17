@@ -17,7 +17,6 @@ import {
   ScrollText,
   ShieldCheck,
   Sun,
-  Webhook,
   type LucideIcon,
 } from "lucide-react";
 import { useState } from "react";
@@ -41,7 +40,7 @@ import { useTheme, type ThemePref } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
 interface NavItem {
-  to: "/" | "/projects" | "/storage" | "/system" | "/audit";
+  to: "/" | "/projects" | "/assets" | "/jobs" | "/analytics" | "/playground" | "/storage" | "/system" | "/audit";
   label: string;
   icon: LucideIcon;
   exact?: boolean;
@@ -50,17 +49,13 @@ interface NavItem {
 const NAV: NavItem[] = [
   { to: "/", label: "Overview", icon: LayoutDashboard, exact: true },
   { to: "/projects", label: "Projects", icon: FolderKanban },
+  { to: "/assets", label: "Assets", icon: Images },
+  { to: "/jobs", label: "Jobs", icon: ListChecks },
+  { to: "/analytics", label: "Analytics", icon: BarChart3 },
+  { to: "/playground", label: "Playground", icon: FlaskConical },
   { to: "/storage", label: "Storage", icon: HardDrive },
   { to: "/system", label: "System", icon: Activity },
   { to: "/audit", label: "Audit log", icon: ScrollText },
-];
-
-const SOON: { label: string; icon: LucideIcon; milestone: string }[] = [
-  { label: "Assets", icon: Images, milestone: "M4" },
-  { label: "Jobs", icon: ListChecks, milestone: "M2" },
-  { label: "Webhooks", icon: Webhook, milestone: "M1" },
-  { label: "Analytics", icon: BarChart3, milestone: "M4" },
-  { label: "Playground", icon: FlaskConical, milestone: "M4" },
 ];
 
 export function Logo({ className }: { className?: string }) {
@@ -92,27 +87,6 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
           </li>
         ))}
       </ul>
-      <div>
-        <p className="px-2.5 pb-1.5 text-[11px] font-medium tracking-wider text-muted-foreground/70 uppercase">
-          Coming soon
-        </p>
-        <ul className="grid gap-0.5">
-          {SOON.map((item) => (
-            <li key={item.label}>
-              <span
-                aria-disabled="true"
-                className="flex h-8 cursor-not-allowed items-center gap-2.5 rounded-md px-2.5 text-sm text-muted-foreground/60 select-none"
-              >
-                <item.icon className="size-4" />
-                <span className="flex-1">{item.label}</span>
-                <span className="rounded border px-1 font-mono text-[10px] leading-4 text-muted-foreground/70">
-                  {item.milestone}
-                </span>
-              </span>
-            </li>
-          ))}
-        </ul>
-      </div>
     </nav>
   );
 }

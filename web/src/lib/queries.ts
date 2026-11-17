@@ -4,7 +4,10 @@ import { toast } from "sonner";
 import { api, errorMessage, isApiError } from "./api";
 import type {
   CreateApiKeyRequest,
+  CreateCloudConnectionRequest,
   CreateProjectRequest,
+  CreateWebhookRequest,
+  SavePresetVersionRequest,
   StorageProfileInput,
   StorageProfilePatch,
   UpdateProjectRequest,
@@ -33,6 +36,14 @@ export const qk = {
   storage: ["storage-profiles"] as const,
   system: ["system"] as const,
   audit: ["audit"] as const,
+  jobs: ["jobs"] as const,
+  assets: (projectId: string) => ["projects", projectId, "assets"] as const,
+  asset: (projectId: string, assetId: string) => ["projects", projectId, "assets", assetId] as const,
+  analytics: (projectId: string, days: number) => ["projects", projectId, "analytics", days] as const,
+  webhooks: (projectId: string) => ["projects", projectId, "webhooks"] as const,
+  deliveries: (projectId: string) => ["projects", projectId, "deliveries"] as const,
+  signingKeys: (projectId: string) => ["projects", projectId, "signing-keys"] as const,
+  cloud: (projectId: string) => ["projects", projectId, "cloud-connections"] as const,
 };
 
 export const meQuery = queryOptions({
@@ -70,6 +81,24 @@ export const systemQuery = queryOptions({
   queryFn: () => api.system.get(),
   refetchInterval: 30_000,
 });
+
+export const analyticsQuery = (projectId: string, days: number) =>
+  queryOptions({ queryKey: qk.analytics(projectId, days), queryFn: () => api.projects.analytics(projectId, days) });
+
+export const assetQuery = (projectId: string, assetId: string) =>
+  queryOptions({ queryKey: qk.asset(projectId, assetId), queryFn: () => api.assets.get(projectId, assetId) });
+
+export const webhooksQuery = (projectId: string) =>
+  queryOptions({ queryKey: qk.webhooks(projectId), queryFn: () => api.webhooks.list(projectId).then((r) => r.items) });
+
+export const signingKeysQuery = (projectId: string) =>
+  queryOptions({
+    queryKey: qk.signingKeys(projectId),
+    queryFn: () => api.signingKeys.list(projectId).then((r) => r.items),
+  });
+
+export const cloudQuery = (projectId: string) =>
+  queryOptions({ queryKey: qk.cloud(projectId), queryFn: () => api.cloud.list(projectId).then((r) => r.items) });
 
 function onErrorToast(title: string) {
   return (e: unknown) => toast.error(title, { description: errorMessage(e) });
@@ -155,5 +184,151 @@ export function useTestStorageProfile() {
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: qk.storage });
     },
+  });
+}
+
+export function useRetryJob() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.jobs.retry(id),
+    onSuccess: () => {
+      toast.success("Job re-queued");
+      void qc.invalidateQueries({ queryKey: qk.jobs });
+      void qc.invalidateQueries({ queryKey: qk.audit });
+    },
+    onError: onErrorToast("Couldn't retry job"),
+  });
+}
+
+export function useCancelJob() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.jobs.cancel(id),
+    onSuccess: () => {
+      toast.success("Job cancelled");
+      void qc.invalidateQueries({ queryKey: qk.jobs });
+      void qc.invalidateQueries({ queryKey: qk.audit });
+    },
+    onError: onErrorToast("Couldn't cancel job"),
+  });
+}
+
+export function useDeleteAsset(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (assetId: string) => api.assets.remove(projectId, assetId),
+    onSuccess: () => {
+      toast.success("Asset deleted");
+      void qc.invalidateQueries({ queryKey: qk.assets(projectId) });
+      void qc.invalidateQueries({ queryKey: qk.audit });
+    },
+    onError: onErrorToast("Couldn't delete asset"),
+  });
+}
+
+export function useSavePresetVersion(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { slug: string } & SavePresetVersionRequest) =>
+      api.projects.savePresetVersion(projectId, v.slug, { params: v.params, description: v.description }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.presets(projectId) });
+      void qc.invalidateQueries({ queryKey: qk.audit });
+    },
+  });
+}
+
+export function useCreateWebhook(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateWebhookRequest) => api.webhooks.create(projectId, body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.webhooks(projectId) });
+      void qc.invalidateQueries({ queryKey: qk.audit });
+    },
+  });
+}
+
+export function useDeleteWebhook(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.webhooks.remove(id),
+    onSuccess: () => {
+      toast.success("Webhook endpoint deleted");
+      void qc.invalidateQueries({ queryKey: qk.webhooks(projectId) });
+      void qc.invalidateQueries({ queryKey: qk.deliveries(projectId) });
+      void qc.invalidateQueries({ queryKey: qk.audit });
+    },
+    onError: onErrorToast("Couldn't delete endpoint"),
+  });
+}
+
+export function useTestWebhook(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.webhooks.test(id),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: qk.deliveries(projectId) });
+    },
+  });
+}
+
+export function useRetryDelivery(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.webhooks.retryDelivery(id),
+    onSuccess: () => {
+      toast.success("Delivery re-queued");
+      void qc.invalidateQueries({ queryKey: qk.deliveries(projectId) });
+    },
+    onError: onErrorToast("Couldn't retry delivery"),
+  });
+}
+
+export function useRotateSigningKey(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.signingKeys.rotate(projectId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.signingKeys(projectId) });
+      void qc.invalidateQueries({ queryKey: qk.audit });
+    },
+  });
+}
+
+export function useRetireSigningKey(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (kid: string) => api.signingKeys.retire(kid),
+    onSuccess: () => {
+      toast.success("Signing key retired");
+      void qc.invalidateQueries({ queryKey: qk.signingKeys(projectId) });
+      void qc.invalidateQueries({ queryKey: qk.audit });
+    },
+    onError: onErrorToast("Couldn't retire key"),
+  });
+}
+
+export function useCreateCloudConnection(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateCloudConnectionRequest) => api.cloud.create(projectId, body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.cloud(projectId) });
+      void qc.invalidateQueries({ queryKey: qk.audit });
+    },
+  });
+}
+
+export function useRevokeCloudConnection(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.cloud.revoke(id),
+    onSuccess: () => {
+      toast.success("Connection revoked");
+      void qc.invalidateQueries({ queryKey: qk.cloud(projectId) });
+      void qc.invalidateQueries({ queryKey: qk.audit });
+    },
+    onError: onErrorToast("Couldn't revoke connection"),
   });
 }

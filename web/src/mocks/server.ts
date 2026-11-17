@@ -6,14 +6,19 @@ import type {
   ApiKey,
   ApiKeyScope,
   CreateApiKeyRequest,
+  CloudConnection,
   CreateProjectRequest,
+  Delivery,
+  Job,
   LoginRequest,
   Project,
+  SigningKey,
   StorageProfile,
   StorageProfileInput,
   StorageTestResult,
   SystemInfo,
   UpdateProjectRequest,
+  WebhookEndpoint,
 } from "@/lib/types";
 import { API_KEY_SCOPES, SLUG_RE } from "@/lib/types";
 
@@ -449,6 +454,149 @@ on("GET", "/system", () => {
   return json(200, sys);
 });
 
+// Jobs, assets, analytics, webhooks, signing keys and cloud connections: in-memory, not persisted.
+// The jobs SSE stream is not mocked; the Jobs page falls back to polling.
+const mockJobs: Job[] = [
+  { id: "job_01", kind: "process_image", pool: "image", status: "succeeded", attempts: 1, max_attempts: 5, progress: null, last_error: null, run_at: nowIso(), created_at: nowIso(), finished_at: nowIso() },
+  { id: "job_02", kind: "process_video", pool: "video", status: "running", attempts: 1, max_attempts: 3, progress: 42, last_error: null, run_at: nowIso(), created_at: nowIso(), finished_at: null },
+  { id: "job_03", kind: "process_image", pool: "image", status: "dead", attempts: 5, max_attempts: 5, progress: null, last_error: "decode failed: unsupported image format", run_at: nowIso(), created_at: nowIso(), finished_at: nowIso() },
+  { id: "job_04", kind: "gc_blob", pool: "maintenance", status: "queued", attempts: 0, max_attempts: 5, progress: null, last_error: null, run_at: nowIso(), created_at: nowIso(), finished_at: null },
+];
+on("GET", "/jobs", ({ query }) => {
+  const st = query.get("status");
+  const pool = query.get("pool");
+  return json(200, { items: mockJobs.filter((j) => (!st || j.status === st) && (!pool || j.pool === pool)) });
+});
+on("POST", "/jobs/:id/retry", ({ params }) => {
+  const j = mockJobs.find((x) => x.id === params[0]);
+  if (!j) throw new HttpError(404, "not_found", "Not found", "job not found");
+  if (j.status !== "dead" && j.status !== "cancelled")
+    throw new HttpError(409, "invalid_state", "Conflict", "only dead or cancelled jobs can be retried");
+  j.status = "queued";
+  j.finished_at = null;
+  return json(200, j);
+});
+on("POST", "/jobs/:id/cancel", ({ params }) => {
+  const j = mockJobs.find((x) => x.id === params[0]);
+  if (!j) throw new HttpError(404, "not_found", "Not found", "job not found");
+  if (j.status !== "queued" && j.status !== "running") throw new HttpError(409, "invalid_state", "Conflict", "the job already finished");
+  j.status = "cancelled";
+  j.finished_at = nowIso();
+  return json(200, j);
+});
+
+on("GET", "/projects/:id/assets", ({ params }) => {
+  findProject(params[0]!);
+  return json(200, { items: [], next_cursor: null });
+});
+on("GET", "/projects/:id/analytics", ({ params, query }) => {
+  findProject(params[0]!);
+  const n = Number(query.get("days") ?? 30);
+  const days = Array.from({ length: n }, (_, i) => {
+    const day = new Date(Date.now() - (n - 1 - i) * 86400_000).toISOString().slice(0, 10);
+    const uploads = 20 + ((i * 37) % 60);
+    const bytes_in = uploads * 2_400_000;
+    return { day, uploads, assets_ready: uploads - (i % 7 === 0 ? 2 : 0), assets_failed: i % 7 === 0 ? 2 : 0, bytes_in, bytes_stored: Math.round(bytes_in * 0.12), video_sec: i % 3 === 0 ? 90 : 0, cpu_ms: uploads * 400, dedup_hits: i % 5 };
+  });
+  const sum = (k: keyof (typeof days)[number]) => days.reduce((a, d) => a + (d[k] as number), 0);
+  const totals = { day: "", uploads: sum("uploads"), assets_ready: sum("assets_ready"), assets_failed: sum("assets_failed"), bytes_in: sum("bytes_in"), bytes_stored: sum("bytes_stored"), video_sec: sum("video_sec"), cpu_ms: sum("cpu_ms"), dedup_hits: sum("dedup_hits") };
+  return json(200, {
+    from: days[0]!.day,
+    to: days[days.length - 1]!.day,
+    days,
+    totals,
+    savings_ratio: 1 - totals.bytes_stored / totals.bytes_in,
+    failed_rate: totals.assets_failed / (totals.assets_ready + totals.assets_failed),
+  });
+});
+on("POST", "/playground", () => {
+  throw new HttpError(503, "unavailable", "Service Unavailable", "the image engine is not available in mock mode");
+});
+on("POST", "/projects/:id/presets/:slug/versions", ({ params, body }) => {
+  const list = (db.presets[findProject(params[0]!).id] ??= []);
+  const b = body as { params: Record<string, unknown>; description?: string };
+  let p = list.find((x) => x.slug === params[1]);
+  if (p) {
+    p.current_version += 1;
+    p.params = b.params;
+  } else {
+    p = { id: ulid("pst_"), slug: params[1]!, kind: "image", description: b.description ?? "", current_version: 1, params: b.params, created_at: nowIso() };
+    list.push(p);
+  }
+  audit("preset.version", p.id, params[0]!, { slug: p.slug, version: p.current_version });
+  persist();
+  return json(200, p);
+});
+
+const mockWebhooks: WebhookEndpoint[] = [];
+on("GET", "/projects/:id/webhooks", ({ params }) => json(200, { items: mockWebhooks.filter((w) => w.project_id === params[0]) }));
+on("POST", "/projects/:id/webhooks", ({ params, body }) => {
+  const b = body as { url?: string; events?: string[] };
+  if (!/^https?:\/\//.test(b.url ?? "")) throw validationError({ url: "must be an absolute http(s) URL without credentials" });
+  const w: WebhookEndpoint = { id: ulid("whe_"), project_id: findProject(params[0]!).id, url: b.url!, events: b.events?.length ? b.events : ["*"], disabled: false, created_at: nowIso() };
+  mockWebhooks.push(w);
+  return json(201, { webhook: w, secret: `whsec_${randomBase62(32)}` });
+});
+on("DELETE", "/webhooks/:id", ({ params }) => {
+  const i = mockWebhooks.findIndex((w) => w.id === params[0]);
+  if (i >= 0) mockWebhooks.splice(i, 1);
+  return noContent();
+});
+on("POST", "/webhooks/:id/test", ({ params }) => {
+  const w = mockWebhooks.find((x) => x.id === params[0]);
+  if (!w) throw new HttpError(404, "not_found", "Not found", "webhook endpoint not found");
+  const d: Delivery = { id: ulid("dlv_"), event_id: ulid("evt_"), event_type: "webhook.test", endpoint_id: w.id, endpoint_url: w.url, status: "delivered", attempts: 1, next_attempt_at: null, last_status_code: 200, last_error: null, last_duration_ms: 84, delivered_at: nowIso(), created_at: nowIso() };
+  mockDeliveries.unshift(d);
+  return json(200, d);
+});
+const mockDeliveries: Delivery[] = [];
+on("GET", "/projects/:id/deliveries", ({ params, query }) => {
+  const ids = new Set(mockWebhooks.filter((w) => w.project_id === params[0]).map((w) => w.id));
+  const st = query.get("status");
+  return json(200, { items: mockDeliveries.filter((d) => ids.has(d.endpoint_id) && (!st || d.status === st)), next_cursor: null });
+});
+on("POST", "/deliveries/:id/retry", ({ params }) => {
+  const d = mockDeliveries.find((x) => x.id === params[0]);
+  if (!d) throw new HttpError(404, "not_found", "Not found", "delivery not found");
+  d.status = "pending";
+  return json(200, d);
+});
+
+const mockSigning: SigningKey[] = [];
+on("GET", "/projects/:id/signing-keys", ({ params }) => json(200, { items: mockSigning.filter((k) => k.project_id === params[0]) }));
+on("POST", "/projects/:id/signing-keys", ({ params }) => {
+  const p = findProject(params[0]!);
+  const mine = mockSigning.filter((k) => k.project_id === p.id);
+  for (const k of mine) if (k.status === "active") k.status = "verify_only";
+  const key: SigningKey = { id: `${p.slug}-k${mine.length + 1}`, project_id: p.id, status: "active", published_at: null, created_at: nowIso() };
+  mockSigning.push(key);
+  return json(201, { key, secret: randomBase62(43) });
+});
+on("DELETE", "/signing-keys/:kid", ({ params }) => {
+  const k = mockSigning.find((x) => x.id === params[0]);
+  if (k) k.status = "retired";
+  return noContent();
+});
+
+const mockCloud: CloudConnection[] = [];
+on("GET", "/projects/:id/cloud-connections", ({ params }) => json(200, { items: mockCloud.filter((c) => c.project_id === params[0]) }));
+on("POST", "/projects/:id/cloud-connections", ({ params, body }) => {
+  const b = body as { provider: string; token: string; account_label?: string; namespace?: string };
+  try {
+    if (!(JSON.parse(b.token) as Record<string, unknown>).access_token) throw new Error();
+  } catch {
+    throw validationError({ token: "must be the rclone token JSON containing access_token" });
+  }
+  const c: CloudConnection = { id: ulid("cc_"), project_id: findProject(params[0]!).id, namespace: b.namespace ?? null, provider: b.provider, account_label: b.account_label ?? null, created_at: nowIso() };
+  mockCloud.push(c);
+  return json(201, c);
+});
+on("DELETE", "/cloud-connections/:id", ({ params }) => {
+  const i = mockCloud.findIndex((c) => c.id === params[0]);
+  if (i >= 0) mockCloud.splice(i, 1);
+  return noContent();
+});
+
 // Audit
 on("GET", "/audit", ({ query }) => {
   const limit = Math.min(200, Math.max(1, Number(query.get("limit") ?? 50)));
@@ -482,7 +630,9 @@ async function handle(req: Request): Promise<Response> {
         throw new HttpError(403, "csrf_failed", "CSRF token mismatch");
     }
     const text = await req.text();
-    const body = text ? (JSON.parse(text) as unknown) : undefined;
+    // Multipart bodies (playground) are not parsed by the mock.
+    const isJson = (req.headers.get("Content-Type") ?? "").includes("json");
+    const body = text && isJson ? (JSON.parse(text) as unknown) : undefined;
     return await match.r.handler({ params: match.m!.slice(1), body, query: url.searchParams });
   } catch (e) {
     if (e instanceof HttpError) return problem(e);

@@ -24,6 +24,7 @@ import (
 	"github.com/UdjinStolboviy/kadr-madia/internal/crypto"
 	"github.com/UdjinStolboviy/kadr-madia/internal/db"
 	"github.com/UdjinStolboviy/kadr-madia/internal/devstorage"
+	"github.com/UdjinStolboviy/kadr-madia/internal/edgepublish"
 	"github.com/UdjinStolboviy/kadr-madia/internal/pipeline"
 	"github.com/UdjinStolboviy/kadr-madia/internal/queue"
 	"github.com/UdjinStolboviy/kadr-madia/internal/sdnotify"
@@ -151,7 +152,7 @@ func cmdServe(ctx context.Context, args []string, stderr io.Writer) error {
 	adminSrv := admin.New(admin.Config{
 		Store: store, Keyring: keyring, Logger: log, Metrics: set, Dev: cfg.Dev, Pepper: cfg.APIKeyPepper,
 		Build: admin.BuildInfo{Version: version, Commit: commit, StartedAt: started},
-		Caps:  caps, TmpDir: cfg.TmpDir, Pipeline: svc, Wake: q.Notify, Playground: playground, UI: ui, FallbackHTML: web.FallbackHTML(), Webhooks: dispatcher,
+		Caps:  caps, TmpDir: cfg.TmpDir, Pipeline: svc, Wake: q.Notify, Edge: &edgepublish.Publisher{AccountID: cfg.CFAccountID, APIToken: cfg.CFAPIToken, WorkerName: cfg.CFWorkerName}, Playground: playground, UI: ui, FallbackHTML: web.FallbackHTML(), Webhooks: dispatcher,
 	})
 	publicHandler := public.Handler(public.Config{
 		Store: store, Logger: log, Metrics: set, Pipeline: svc, TmpDir: cfg.TmpDir,
