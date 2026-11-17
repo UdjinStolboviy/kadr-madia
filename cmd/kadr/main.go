@@ -35,6 +35,8 @@ Commands:
   migrate status              list migrations and their state
   admin create --email EMAIL  create an administrator (password prompted, or --password-stdin)
   doctor                      check external tools, directories, database and keys
+  restore-drill [--config F | --replica URL] [--keep]
+                              restore the newest Litestream replica to a scratch dir and verify it
   version                     print version information
 
 Configuration is read from KADR_* environment variables (see docs/OPERATIONS.md).
@@ -70,6 +72,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		if err == nil && !ok {
 			return 1
 		}
+	case "restore-drill":
+		err = cmdRestoreDrill(ctx, args[1:], stdout)
 	case "version", "--version", "-v":
 		fmt.Fprintf(stdout, "kadr %s (commit %s, %s, %s/%s)\n", version, commit, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 	case "help", "--help", "-h":

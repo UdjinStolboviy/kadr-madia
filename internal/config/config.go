@@ -23,18 +23,20 @@ const MinPepperLen = 32
 
 // Config is the fully resolved runtime configuration.
 type Config struct {
-	PublicAddr    string // /v1, /metrics — LAN only
-	AdminAddr     string // /admin + embedded UI
-	DBPath        string
-	TmpDir        string
-	MasterKeyFile string
-	APIKeyPepper  []byte
-	PoolImage     int
-	PoolVideo     int
-	VideoHW       string // auto | vaapi | off
-	EdgeBaseURL   string // https://media.example.com — private delivery host (kadr-edge)
-	LogLevel      slog.Level
-	Dev           bool
+	PublicAddr     string // /v1, /metrics — LAN only
+	AdminAddr      string // /admin + embedded UI
+	DBPath         string
+	TmpDir         string
+	MasterKeyFile  string
+	APIKeyPepper   []byte
+	PoolImage      int
+	PoolVideo      int
+	VideoHW        string // auto | vaapi | off
+	TelegramToken  string // KADR_TELEGRAM_BOT_TOKEN (alerts)
+	TelegramChatID string // KADR_TELEGRAM_CHAT_ID
+	EdgeBaseURL    string // https://media.example.com — private delivery host (kadr-edge)
+	LogLevel       slog.Level
+	Dev            bool
 }
 
 // Getenv abstracts os.Getenv for tests.
@@ -70,6 +72,8 @@ func Load(getenv Getenv) (*Config, error) {
 	setStr(&c.DBPath, getenv("KADR_DB_PATH"))
 	setStr(&c.TmpDir, getenv("KADR_TMP_DIR"))
 	setStr(&c.MasterKeyFile, getenv("KADR_MASTER_KEY_FILE"))
+	setStr(&c.TelegramToken, getenv("KADR_TELEGRAM_BOT_TOKEN"))
+	setStr(&c.TelegramChatID, getenv("KADR_TELEGRAM_CHAT_ID"))
 	setStr(&c.EdgeBaseURL, strings.TrimRight(getenv("KADR_EDGE_BASE_URL"), "/"))
 
 	if p := getenv("KADR_API_KEY_PEPPER"); p != "" {

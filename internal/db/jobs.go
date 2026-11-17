@@ -241,3 +241,24 @@ func (s *Store) ListJobs(ctx context.Context, f JobFilter) ([]*Job, error) {
 	args = append(args, f.Limit)
 	return scanJobs(s.r.QueryContext(ctx, q, args...))
 }
+
+// OldestQueuedAge returns how long the oldest runnable queued job of pool has
+// been waiting (0 when the queue is empty).
+func (s *Store) OldestQueuedAge(ctx context.Context, pool string, now time.Time) (time.Duration, error) {
+	var runAt *int64
+	err := s.r.QueryRowContext(ctx, `SELECT min(run_at) FROM jobs WHERE pool = ? AND status = 'queued' AND run_at <= ?`, pool, ms(now)).Scan(&runAt)
+	if err != nil {
+		return 0, mapErr(err)
+	}
+	if runAt == nil {
+		return 0, nil
+	}
+	return now.Sub(fromMs(*runAt)), nil
+}
+
+// CountFinishedJobsSince counts jobs of pool that ended in status since t.
+func (s *Store) CountFinishedJobsSince(ctx context.Context, pool, status string, since time.Time) (int64, error) {
+	var n int64
+	err := s.r.QueryRowContext(ctx, `SELECT count(*) FROM jobs WHERE pool = ? AND status = ? AND finished_at >= ?`, pool, status, ms(since)).Scan(&n)
+	return n, mapErr(err)
+}

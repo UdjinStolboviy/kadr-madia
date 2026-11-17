@@ -16,6 +16,7 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 
+	"github.com/UdjinStolboviy/kadr-madia/internal/alerts"
 	"github.com/UdjinStolboviy/kadr-madia/internal/api/admin"
 	"github.com/UdjinStolboviy/kadr-madia/internal/api/public"
 	"github.com/UdjinStolboviy/kadr-madia/internal/auth"
@@ -128,6 +129,14 @@ func cmdServe(ctx context.Context, args []string, stderr io.Writer) error {
 	})
 	if err := svc.CleanStaleWorkDirs(ctx); err != nil {
 		log.Warn("clean stale work dirs", "err", err)
+	}
+	if cfg.TelegramToken != "" && cfg.TelegramChatID != "" {
+		host, _ := os.Hostname()
+		mon := alerts.New(store, &alerts.Telegram{Token: cfg.TelegramToken, ChatID: cfg.TelegramChatID}, alerts.Thresholds{
+			DiskFree: func() (uint64, error) { return capabilities.DiskFree(cfg.TmpDir) },
+		}, host, log)
+		go mon.Run(ctx)
+		log.Info("alerting enabled", "channel", "telegram")
 	}
 	runner := queue.NewRunner(q, queue.RunnerConfig{
 		Pools:  map[string]int{queue.PoolImage: cfg.PoolImage, queue.PoolVideo: cfg.PoolVideo, queue.PoolMaintenance: 1},

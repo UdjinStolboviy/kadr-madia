@@ -15,7 +15,9 @@ import (
 
 type fakePlayground struct{ *fakeimage.Engine }
 
-func (fakePlayground) SSIM(context.Context, string, string, string) (float64, error) { return 0.97, nil }
+func (fakePlayground) SSIM(context.Context, string, string, string) (float64, error) {
+	return 0.97, nil
+}
 
 func TestValidateImageParams(t *testing.T) {
 	var p preset.ImageParams

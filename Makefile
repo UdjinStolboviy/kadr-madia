@@ -11,7 +11,7 @@ REMOTE_ROOT ?= /opt/kadr
 SSH         ?= ssh
 SCP         ?= scp
 
-.PHONY: help dev test test-race lint web build build-local release deploy rollback clean
+.PHONY: restore-drill help dev test test-race lint web build build-local release deploy rollback clean
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -61,3 +61,7 @@ rollback: ## Switch to the previous release: make rollback HOST=kadr.internal
 
 clean: ## Remove build outputs
 	rm -rf bin dist
+
+restore-drill: ## Verify the newest Litestream replica on the host: make restore-drill HOST=kadr.internal
+	@if [ -z "$(HOST)" ]; then echo "usage: make restore-drill HOST=host"; exit 2; fi
+	$(SSH) $(HOST) 'sudo -u kadr bash -c "set -a; . /etc/kadr/env; set +a; $(REMOTE_ROOT)/current/kadr restore-drill"'
