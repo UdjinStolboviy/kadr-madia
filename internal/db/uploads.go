@@ -32,8 +32,9 @@ const (
 
 // Upload methods (uploads.method).
 const (
-	UploadMethodPut    = "PUT"
-	UploadMethodServer = "SERVER"
+	UploadMethodPut       = "PUT"
+	UploadMethodMultipart = "MULTIPART"
+	UploadMethodServer    = "SERVER"
 )
 
 // Upload is an upload ticket and the source of an asset.
@@ -46,6 +47,7 @@ type Upload struct {
 	Visibility     string
 	Method         string
 	TmpKey         *string
+	MultipartID    *string // S3 multipart upload id (method MULTIPART)
 	Filename       *string
 	ContentType    *string
 	DeclaredBytes  int64
@@ -68,20 +70,21 @@ func (u *Upload) Active() bool {
 	return false
 }
 
-const uploadCols = `id, project_id, ns, preset_id, preset_version, visibility, method, tmp_key, filename, content_type,
+const uploadCols = `id, project_id, ns, preset_id, preset_version, visibility, method, tmp_key, multipart_id, filename, content_type,
 	declared_bytes, declared_sha256, source_ref, metadata_json, status, asset_id, expires_at, created_at, updated_at`
 
 func scanUpload(row interface{ Scan(...any) error }) (*Upload, error) {
 	var u Upload
-	var tmpKey, filename, ctype, sourceRef, assetID sql.NullString
+	var tmpKey, mpID, filename, ctype, sourceRef, assetID sql.NullString
 	var declared sql.NullInt64
 	var meta string
 	var expires, created, updated int64
-	if err := row.Scan(&u.ID, &u.ProjectID, &u.NS, &u.PresetID, &u.PresetVersion, &u.Visibility, &u.Method, &tmpKey,
+	if err := row.Scan(&u.ID, &u.ProjectID, &u.NS, &u.PresetID, &u.PresetVersion, &u.Visibility, &u.Method, &tmpKey, &mpID,
 		&filename, &ctype, &declared, &u.DeclaredSHA256, &sourceRef, &meta, &u.Status, &assetID, &expires, &created, &updated); err != nil {
 		return nil, mapErr(err)
 	}
 	u.TmpKey, u.Filename, u.ContentType = fromNullStr(tmpKey), fromNullStr(filename), fromNullStr(ctype)
+	u.MultipartID = fromNullStr(mpID)
 	u.SourceRef, u.AssetID = fromNullStr(sourceRef), fromNullStr(assetID)
 	u.DeclaredBytes = declared.Int64
 	u.Metadata = json.RawMessage(meta)
@@ -96,10 +99,10 @@ func (s *Store) CreateUpload(ctx context.Context, u *Upload) error {
 		meta = "{}"
 	}
 	_, err := s.w.ExecContext(ctx,
-		`INSERT INTO uploads (id, project_id, ns, preset_id, preset_version, visibility, method, tmp_key, filename,
+		`INSERT INTO uploads (id, project_id, ns, preset_id, preset_version, visibility, method, tmp_key, multipart_id, filename,
 		  content_type, declared_bytes, declared_sha256, source_ref, metadata_json, status, asset_id, expires_at, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		u.ID, u.ProjectID, u.NS, u.PresetID, u.PresetVersion, u.Visibility, u.Method, nullStr(u.TmpKey), nullStr(u.Filename),
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		u.ID, u.ProjectID, u.NS, u.PresetID, u.PresetVersion, u.Visibility, u.Method, nullStr(u.TmpKey), nullStr(u.MultipartID), nullStr(u.Filename),
 		nullStr(u.ContentType), u.DeclaredBytes, u.DeclaredSHA256, nullStr(u.SourceRef), meta, u.Status, nullStr(u.AssetID),
 		ms(u.ExpiresAt), ms(u.CreatedAt), ms(u.UpdatedAt))
 	if err != nil {

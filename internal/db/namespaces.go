@@ -152,3 +152,26 @@ func (s *Store) SumVideoSec(ctx context.Context, projectID, ns, fromDay, toDay s
 		projectID, ns, fromDay, toDay).Scan(&n)
 	return n, mapErr(err)
 }
+
+// ListUsageByDay returns usage summed over namespaces for each day in
+// [fromDay, toDay] (YYYY-MM-DD), oldest first. Days without activity are absent.
+func (s *Store) ListUsageByDay(ctx context.Context, projectID, fromDay, toDay string) ([]UsageDailyRow, error) {
+	rows, err := s.r.QueryContext(ctx,
+		`SELECT day, sum(uploads), sum(assets_ready), sum(assets_failed), sum(bytes_in), sum(bytes_stored), sum(video_sec),
+		        sum(cpu_ms), sum(dedup_hits)
+		 FROM usage_daily WHERE project_id = ? AND day BETWEEN ? AND ? GROUP BY day ORDER BY day`, projectID, fromDay, toDay)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer rows.Close()
+	var out []UsageDailyRow
+	for rows.Next() {
+		var r UsageDailyRow
+		if err := rows.Scan(&r.Day, &r.Uploads, &r.AssetsReady, &r.AssetsFailed, &r.BytesIn, &r.BytesStored, &r.VideoSec,
+			&r.CPUMillis, &r.DedupHits); err != nil {
+			return nil, mapErr(err)
+		}
+		out = append(out, r)
+	}
+	return out, mapErr(rows.Err())
+}

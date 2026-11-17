@@ -24,6 +24,7 @@ import (
 	"github.com/UdjinStolboviy/kadr-madia/internal/crypto"
 	"github.com/UdjinStolboviy/kadr-madia/internal/db"
 	"github.com/UdjinStolboviy/kadr-madia/internal/observability"
+	"github.com/UdjinStolboviy/kadr-madia/internal/pipeline"
 	"github.com/UdjinStolboviy/kadr-madia/internal/storage"
 	"github.com/UdjinStolboviy/kadr-madia/internal/webhook"
 )
@@ -58,8 +59,19 @@ type Config struct {
 	// Webhooks delivers test events and wakes up on manual retries
 	// (optional; the test endpoint returns 503 without it).
 	Webhooks *webhook.Dispatcher
+	// Pipeline backs the asset explorer (optional).
+	Pipeline AssetService
+	// Wake nudges the job pool of a requeued job (optional).
+	Wake func(pool string)
 	// Now overrides the clock (tests).
 	Now func() time.Time
+}
+
+// AssetService is the part of the media pipeline used by the asset explorer.
+type AssetService interface {
+	ListAssets(ctx context.Context, projectID string, in pipeline.ListAssetsInput) (*pipeline.AssetPage, error)
+	GetAsset(ctx context.Context, projectID, id string) (*pipeline.AssetView, error)
+	DeleteAsset(ctx context.Context, projectID, id string) error
 }
 
 // Server is the admin HTTP handler.
@@ -179,6 +191,19 @@ func (s *Server) apiRouter() http.Handler {
 		r.Patch("/storage-profiles/{id}", s.handlePatchStorageProfile)
 		r.Delete("/storage-profiles/{id}", s.handleDeleteStorageProfile)
 		r.Post("/storage-profiles/{id}/test", s.handleTestStorageProfile)
+
+		r.Get("/projects/{id}/assets", s.handleListAssets)
+		r.Get("/projects/{id}/assets/{asset_id}", s.handleGetAsset)
+		r.Delete("/projects/{id}/assets/{asset_id}", s.handleDeleteAsset)
+		r.Get("/projects/{id}/analytics", s.handleAnalytics)
+		r.Get("/projects/{id}/signing-keys", s.handleListSigningKeys)
+		r.Post("/projects/{id}/signing-keys", s.handleCreateSigningKey)
+		r.Delete("/signing-keys/{kid}", s.handleRetireSigningKey)
+		r.Get("/signing-keys/edge-config", s.handleEdgeConfig)
+		r.Get("/jobs", s.handleListJobs)
+		r.Get("/jobs/stream", s.handleJobsStream)
+		r.Post("/jobs/{id}/retry", s.handleRetryJob)
+		r.Post("/jobs/{id}/cancel", s.handleCancelJob)
 
 		r.Get("/system", s.handleSystem)
 		r.Get("/audit", s.handleListAudit)

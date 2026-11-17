@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -151,23 +152,59 @@ func (d *S3) PresignGet(ctx context.Context, bucket, key string, ttl time.Durati
 	return toPresigned(req.Method, req.URL, req.SignedHeader, ttl), nil
 }
 
-// CreateMultipart is planned for M2.
-func (d *S3) CreateMultipart(context.Context, string, string, string) (MultipartUpload, error) {
-	return MultipartUpload{}, ErrNotImplemented
+// CreateMultipart starts a multipart upload.
+func (d *S3) CreateMultipart(ctx context.Context, bucket, key, contentType string) (MultipartUpload, error) {
+	in := &s3.CreateMultipartUploadInput{Bucket: &bucket, Key: &key}
+	if contentType != "" {
+		in.ContentType = aws.String(contentType)
+	}
+	out, err := d.client.CreateMultipartUpload(ctx, in)
+	if err != nil {
+		return MultipartUpload{}, fmt.Errorf("storage: create multipart %s/%s: %w", bucket, key, err)
+	}
+	return MultipartUpload{Bucket: bucket, Key: key, UploadID: aws.ToString(out.UploadId)}, nil
 }
 
-// PresignUploadPart is planned for M2.
-func (d *S3) PresignUploadPart(context.Context, MultipartUpload, int32, time.Duration) (PresignedRequest, error) {
-	return PresignedRequest{}, ErrNotImplemented
+// PresignUploadPart returns a presigned PUT URL for one part.
+func (d *S3) PresignUploadPart(ctx context.Context, u MultipartUpload, part int32, ttl time.Duration) (PresignedRequest, error) {
+	if ttl <= 0 {
+		ttl = 15 * time.Minute
+	}
+	req, err := d.presign.PresignUploadPart(ctx, &s3.UploadPartInput{
+		Bucket: &u.Bucket, Key: &u.Key, UploadId: &u.UploadID, PartNumber: aws.Int32(part),
+	}, s3.WithPresignExpires(ttl))
+	if err != nil {
+		return PresignedRequest{}, fmt.Errorf("storage: presign part %d of %s/%s: %w", part, u.Bucket, u.Key, err)
+	}
+	return toPresigned(req.Method, req.URL, req.SignedHeader, ttl), nil
 }
 
-// CompleteMultipart is planned for M2.
-func (d *S3) CompleteMultipart(context.Context, MultipartUpload, []CompletedPart) error {
-	return ErrNotImplemented
+// CompleteMultipart assembles the uploaded parts (sorted by number).
+func (d *S3) CompleteMultipart(ctx context.Context, u MultipartUpload, parts []CompletedPart) error {
+	sorted := append([]CompletedPart(nil), parts...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Number < sorted[j].Number })
+	cp := make([]types.CompletedPart, len(sorted))
+	for i, p := range sorted {
+		cp[i] = types.CompletedPart{PartNumber: aws.Int32(p.Number), ETag: aws.String(p.ETag)}
+	}
+	_, err := d.client.CompleteMultipartUpload(ctx, &s3.CompleteMultipartUploadInput{
+		Bucket: &u.Bucket, Key: &u.Key, UploadId: &u.UploadID, MultipartUpload: &types.CompletedMultipartUpload{Parts: cp},
+	})
+	if err != nil {
+		return fmt.Errorf("storage: complete multipart %s/%s: %w", u.Bucket, u.Key, err)
+	}
+	return nil
 }
 
-// AbortMultipart is planned for M2.
-func (d *S3) AbortMultipart(context.Context, MultipartUpload) error { return ErrNotImplemented }
+// AbortMultipart discards the uploaded parts; aborting an unknown upload is not an error.
+func (d *S3) AbortMultipart(ctx context.Context, u MultipartUpload) error {
+	_, err := d.client.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{Bucket: &u.Bucket, Key: &u.Key, UploadId: &u.UploadID})
+	var nsu *types.NoSuchUpload
+	if err != nil && !errors.As(err, &nsu) {
+		return fmt.Errorf("storage: abort multipart %s/%s: %w", u.Bucket, u.Key, err)
+	}
+	return nil
+}
 
 func toPresigned(method, u string, signed http.Header, ttl time.Duration) PresignedRequest {
 	h := http.Header{}

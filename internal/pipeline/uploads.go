@@ -188,6 +188,9 @@ func (s *Service) CreateUpload(ctx context.Context, projectID string, in CreateU
 	}
 	key := "tmp/" + project.Slug + "/" + u.ID
 	u.TmpKey = &key
+	if c.kind == "video" && in.Size > s.mpThreshold {
+		return s.createMultipartTicket(ctx, tgt, u, c, key, ct, in.Size)
+	}
 	pr, err := tgt.driver.PresignPut(ctx, tgt.profile.PrivateBucket, key, storage.PresignPutOptions{
 		ContentType: ct, ContentLength: in.Size, TTL: s.uploadTTL,
 	})
@@ -274,13 +277,18 @@ func (s *Service) loadUpload(ctx context.Context, projectID, id string) (*db.Upl
 
 // CompleteUpload verifies the uploaded object, starts processing and waits
 // up to wait for the asset to become ready or failed. Idempotent.
-func (s *Service) CompleteUpload(ctx context.Context, projectID, uploadID string, wait time.Duration) (*AssetView, error) {
+func (s *Service) CompleteUpload(ctx context.Context, projectID, uploadID string, parts []CompletedPartInput, wait time.Duration) (*AssetView, error) {
 	u, err := s.loadUpload(ctx, projectID, uploadID)
 	if err != nil {
 		return nil, err
 	}
 	switch u.Status {
 	case db.UploadPending:
+		if u.Method == db.UploadMethodMultipart {
+			if err := s.finishMultipart(ctx, u, parts); err != nil {
+				return nil, err
+			}
+		}
 		assetID, err := s.promote(ctx, u, true)
 		if err != nil {
 			return nil, err
@@ -424,6 +432,7 @@ func (s *Service) AbortUpload(ctx context.Context, projectID, uploadID string) e
 	}
 	if project, err := s.store.GetProject(ctx, u.ProjectID); err == nil {
 		if tgt, err := s.storageFor(ctx, project); err == nil {
+			s.abortMultipart(ctx, u, tgt)
 			if err := tgt.driver.Delete(ctx, tgt.profile.PrivateBucket, deref(u.TmpKey)); err != nil {
 				s.log.WarnContext(ctx, "delete aborted upload object", "upload_id", u.ID, "err", err)
 			}
@@ -665,4 +674,90 @@ func (c *common) acceptedDesc() string {
 		return "accepted: video/*"
 	}
 	return "accepted formats: " + strings.Join(c.params.Limits.Accept, ", ")
+}
+
+const maxParts = 10000
+
+// createMultipartTicket starts an S3 multipart upload and presigns every part.
+func (s *Service) createMultipartTicket(ctx context.Context, tgt *target, u *db.Upload, c *common, key, ct string, size int64) (*CreateUploadResult, error) {
+	partSize := s.partSize
+	if min := (size + maxParts - 1) / maxParts; min > partSize {
+		partSize = (min + (1 << 20) - 1) &^ ((1 << 20) - 1) // round up to MB
+	}
+	n := int((size + partSize - 1) / partSize)
+	mp, err := tgt.driver.CreateMultipart(ctx, tgt.profile.PrivateBucket, key, ct)
+	if err != nil {
+		return nil, apiErr(http.StatusBadGateway, CodeStorageError, "could not start a multipart upload: %v", err)
+	}
+	u.Method, u.MultipartID = db.UploadMethodMultipart, &mp.UploadID
+	// Multipart uploads of large files get a longer ticket.
+	u.ExpiresAt = u.CreatedAt.Add(max(s.uploadTTL, time.Hour))
+	ttl := u.ExpiresAt.Sub(s.now())
+	parts := make([]PartTicket, n)
+	for i := range parts {
+		pr, err := tgt.driver.PresignUploadPart(ctx, mp, int32(i+1), ttl)
+		if err != nil {
+			_ = tgt.driver.AbortMultipart(context.WithoutCancel(ctx), mp)
+			return nil, fmt.Errorf("presign part: %w", err)
+		}
+		parts[i] = PartTicket{PartNumber: i + 1, URL: pr.URL}
+	}
+	err = s.store.InTx(ctx, func(tx *db.Store) error {
+		if err := s.reserve(ctx, tx, u.ProjectID, c.ns, size); err != nil {
+			return err
+		}
+		return tx.CreateUpload(ctx, u)
+	})
+	if err != nil {
+		_ = tgt.driver.AbortMultipart(context.WithoutCancel(ctx), mp)
+		return nil, err
+	}
+	return &CreateUploadResult{Ticket: &UploadTicket{
+		UploadID: u.ID, Method: db.UploadMethodMultipart, ExpiresAt: rfc3339(u.ExpiresAt), PartSize: partSize, Parts: parts,
+	}}, nil
+}
+
+// finishMultipart assembles the parts of a pending multipart upload. When the
+// assembly already happened (a retried complete) it succeeds if the object exists.
+func (s *Service) finishMultipart(ctx context.Context, u *db.Upload, parts []CompletedPartInput) error {
+	project, err := s.store.GetProject(ctx, u.ProjectID)
+	if err != nil {
+		return err
+	}
+	tgt, err := s.storageFor(ctx, project)
+	if err != nil {
+		return err
+	}
+	if len(parts) == 0 {
+		if _, herr := tgt.driver.Head(ctx, tgt.profile.PrivateBucket, deref(u.TmpKey)); herr == nil {
+			return nil // already assembled
+		}
+		return apiErr(http.StatusUnprocessableEntity, "validation_failed", "parts are required to complete a multipart upload")
+	}
+	cp := make([]storage.CompletedPart, 0, len(parts))
+	for _, p := range parts {
+		if p.PartNumber < 1 || p.PartNumber > maxParts || p.ETag == "" {
+			return apiErr(http.StatusUnprocessableEntity, "validation_failed", "each part needs part_number (1–%d) and etag", maxParts)
+		}
+		cp = append(cp, storage.CompletedPart{Number: int32(p.PartNumber), ETag: p.ETag})
+	}
+	mp := storage.MultipartUpload{Bucket: tgt.profile.PrivateBucket, Key: deref(u.TmpKey), UploadID: deref(u.MultipartID)}
+	if err := tgt.driver.CompleteMultipart(ctx, mp, cp); err != nil {
+		if _, herr := tgt.driver.Head(ctx, mp.Bucket, mp.Key); herr == nil {
+			return nil // retry of a complete that already succeeded
+		}
+		return apiErr(http.StatusUnprocessableEntity, CodeUploadIncomplete, "could not assemble the uploaded parts: %v", err)
+	}
+	return nil
+}
+
+// abortMultipart discards the parts of a multipart upload (best effort).
+func (s *Service) abortMultipart(ctx context.Context, u *db.Upload, tgt *target) {
+	if u.MultipartID == nil || tgt == nil {
+		return
+	}
+	mp := storage.MultipartUpload{Bucket: tgt.profile.PrivateBucket, Key: deref(u.TmpKey), UploadID: *u.MultipartID}
+	if err := tgt.driver.AbortMultipart(context.WithoutCancel(ctx), mp); err != nil {
+		s.log.WarnContext(ctx, "abort multipart upload", "upload_id", u.ID, "err", err)
+	}
 }

@@ -1,0 +1,25 @@
+name = "kadr-edge"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+workers_dev = false
+
+# Serve on the private delivery host. Replace <domain>.
+routes = [{ pattern = "media.<domain>", custom_domain = true }]
+
+# Read-only use of the private bucket. The Worker code only calls head()/get().
+[[r2_buckets]]
+binding = "PRIVATE"
+bucket_name = "kadr-private"
+
+# Optional: signing keys as individual KV entries (key = kid, value = secret).
+# Uncomment after `wrangler kv namespace create KEYS` and paste the id.
+# [[kv_namespaces]]
+# binding = "KEYS"
+# id = "<kv-namespace-id>"
+
+[vars]
+# Optional path prefix of the delivery host that is not part of the storage key.
+# PATH_PREFIX = ""
+
+# Signing secrets: `wrangler secret put SIGNING_KEYS` with a JSON map of
+# kid -> secret, e.g. {"k3":"...","k2":"..."} (all active + verify-only kids).

@@ -200,7 +200,7 @@ func (s *Service) runProcessImage(ctx context.Context, j *queue.Job) error {
 			return errAssetSettled
 		}
 		if err := s.settleReady(ctx, tx, pc, blob.TotalBytes, db.UsageDelta{
-			AssetsReady: 1, BytesIn: size, BytesStored: blob.TotalBytes, CPUMillis: out.cpuMillis,
+			AssetsReady: 1, BytesIn: size, BytesStored: blob.TotalBytes, CPUMillis: out.cpuMillis, VideoSec: out.durationMs / 1000,
 		}); err != nil {
 			return err
 		}

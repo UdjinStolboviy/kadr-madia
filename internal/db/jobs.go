@@ -215,3 +215,29 @@ func (s *Store) execOne(ctx context.Context, q string, args ...any) (bool, error
 	n, _ := res.RowsAffected()
 	return n == 1, nil
 }
+
+// JobFilter selects jobs for the admin console.
+type JobFilter struct {
+	Status string // empty = any
+	Pool   string
+	Kind   string
+	Limit  int
+}
+
+// ListJobs returns jobs newest first (running jobs are not special-cased).
+func (s *Store) ListJobs(ctx context.Context, f JobFilter) ([]*Job, error) {
+	q := `SELECT ` + jobCols + ` FROM jobs WHERE 1=1`
+	var args []any
+	for col, v := range map[string]string{"status": f.Status, "pool": f.Pool, "kind": f.Kind} {
+		if v != "" {
+			q += ` AND ` + col + ` = ?`
+			args = append(args, v)
+		}
+	}
+	if f.Limit <= 0 || f.Limit > 200 {
+		f.Limit = 50
+	}
+	q += ` ORDER BY created_at DESC, id DESC LIMIT ?`
+	args = append(args, f.Limit)
+	return scanJobs(s.r.QueryContext(ctx, q, args...))
+}

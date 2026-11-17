@@ -88,23 +88,31 @@ type Config struct {
 	UploadTTL  time.Duration
 	SweepGrace time.Duration
 	Now        func() time.Time
+	// MultipartThreshold: video uploads larger than this use S3 multipart
+	// (default 64 MB). PartSize is the minimum part size (default 16 MB).
+	MultipartThreshold int64
+	// EdgeBaseURL is the private delivery host used by SignURLs.
+	EdgeBaseURL string
+	PartSize    int64
 }
 
 // Service is the pipeline.
 type Service struct {
-	store     *db.Store
-	queue     *queue.Queue
-	engine    image.Engine
-	video     video.Engine
-	keyring   *crypto.Keyring
-	log       *slog.Logger
-	metrics   *metrics.Set
-	tmpDir    string
-	webhooks  Notifier
-	newDriver func(storage.Config) (storage.Driver, error)
-	uploadTTL time.Duration
-	grace     time.Duration
-	now       func() time.Time
+	store                 *db.Store
+	queue                 *queue.Queue
+	engine                image.Engine
+	video                 video.Engine
+	keyring               *crypto.Keyring
+	log                   *slog.Logger
+	metrics               *metrics.Set
+	tmpDir                string
+	webhooks              Notifier
+	newDriver             func(storage.Config) (storage.Driver, error)
+	uploadTTL             time.Duration
+	grace                 time.Duration
+	mpThreshold, partSize int64
+	edgeBaseURL           string
+	now                   func() time.Time
 
 	drivers  drivers
 	notifier *notifier
@@ -129,13 +137,19 @@ func New(cfg Config) *Service {
 	if cfg.SweepGrace <= 0 {
 		cfg.SweepGrace = DefaultSweepGrace
 	}
+	if cfg.MultipartThreshold <= 0 {
+		cfg.MultipartThreshold = MaxPutBytes
+	}
+	if cfg.PartSize <= 0 {
+		cfg.PartSize = 16 << 20
+	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
 	return &Service{
 		store: cfg.Store, queue: cfg.Queue, engine: cfg.Engine, video: cfg.Video, keyring: cfg.Keyring, log: cfg.Logger,
 		metrics: cfg.Metrics, tmpDir: cfg.TmpDir, webhooks: cfg.Webhooks, newDriver: cfg.NewDriver,
-		uploadTTL: cfg.UploadTTL, grace: cfg.SweepGrace, now: cfg.Now,
+		uploadTTL: cfg.UploadTTL, grace: cfg.SweepGrace, mpThreshold: cfg.MultipartThreshold, edgeBaseURL: cfg.EdgeBaseURL, partSize: cfg.PartSize, now: cfg.Now,
 		drivers:     drivers{cache: map[string]cachedDriver{}},
 		notifier:    newNotifier(),
 		bytesIn:     cfg.Metrics.GetOrCreateCounter("kadr_bytes_in_total"),

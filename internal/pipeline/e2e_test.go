@@ -94,6 +94,7 @@ type env struct {
 	endpoint string
 	clock    *clock
 	metrics  *metrics.Set
+	kr       *crypto.Keyring
 }
 
 func newEnv(t *testing.T) *env {
@@ -140,7 +141,7 @@ func newEnv(t *testing.T) *env {
 	set := metrics.NewSet()
 	eng := fakeimage.New()
 	svc := pipeline.New(pipeline.Config{
-		Store: store, Queue: q, Engine: eng, Video: videoEngine(), Keyring: kr, Logger: log, Metrics: set, TmpDir: t.TempDir(), Now: clk.Now,
+		Store: store, Queue: q, Engine: eng, Video: videoEngine(), MultipartThreshold: 8 << 20, PartSize: 5 << 20, EdgeBaseURL: "https://media.example.com", Keyring: kr, Logger: log, Metrics: set, TmpDir: t.TempDir(), Now: clk.Now,
 		NewDriver: func(c storage.Config) (storage.Driver, error) {
 			d, err := storage.NewS3(c)
 			if err != nil {
@@ -160,7 +161,7 @@ func newEnv(t *testing.T) *env {
 		TmpDir: t.TempDir(), Verifier: &auth.KeyVerifier{Store: store, Pepper: pepper}}))
 	t.Cleanup(api.Close)
 	return &env{t: t, ctx: ctx, store: store, svc: svc, queue: q, engine: eng, driver: rec, api: api, key: gen.Secret,
-		project: p, endpoint: epID, clock: clk, metrics: set}
+		project: p, endpoint: epID, clock: clk, metrics: set, kr: kr}
 }
 
 func must(t *testing.T, err error) {

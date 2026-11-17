@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -66,8 +67,42 @@ func TestS3DriverBasics(t *testing.T) {
 	if err != nil || pg.URL == "" {
 		t.Fatalf("presign get: %v", err)
 	}
-	if _, err := d.CreateMultipart(ctx, "priv", "x", ""); !errors.Is(err, ErrNotImplemented) {
-		t.Fatalf("multipart: %v", err)
+}
+
+func TestMultipartRoundTrip(t *testing.T) {
+	_, d := newFake(t, "priv")
+	ctx := context.Background()
+	u, err := d.CreateMultipart(ctx, "priv", "big.bin", "video/mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sizes := []int{5 << 20, 5 << 20, 1 << 20}
+	var parts []CompletedPart
+	total := 0
+	for i, n := range sizes {
+		pr, err := d.PresignUploadPart(ctx, u, int32(i+1), 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req, _ := http.NewRequest(pr.Method, pr.URL, bytes.NewReader(make([]byte, n)))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil || resp.StatusCode != 200 {
+			t.Fatalf("part %d: %v %v", i+1, err, resp)
+		}
+		resp.Body.Close()
+		parts = append(parts, CompletedPart{Number: int32(i + 1), ETag: resp.Header.Get("ETag")})
+		total += n
+	}
+	if err := d.CompleteMultipart(ctx, u, parts); err != nil {
+		t.Fatal(err)
+	}
+	info, err := d.Head(ctx, "priv", "big.bin")
+	if err != nil || info.Size != int64(total) {
+		t.Fatalf("head: %+v %v", info, err)
+	}
+	u2, _ := d.CreateMultipart(ctx, "priv", "gone.bin", "")
+	if err := d.AbortMultipart(ctx, u2); err != nil {
+		t.Fatal(err)
 	}
 }
 

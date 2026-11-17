@@ -37,6 +37,8 @@ func (h *handlers) routes(r chi.Router) {
 	r.With(auth.RequireScope(auth.ScopeAssetsWrite)).Patch("/assets/{id}", h.patchAsset)
 	r.With(auth.RequireScope(auth.ScopeAssetsDelete)).Delete("/assets/{id}", h.deleteAsset)
 
+	r.With(auth.RequireScope(auth.ScopeURLsSign)).Post("/signed-urls", h.signURLs)
+
 	r.Get("/presets", h.listPresets)
 	r.Get("/presets/{slug}", h.getPreset)
 
@@ -123,7 +125,16 @@ func (h *handlers) completeUpload(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	a, err := h.svc.CompleteUpload(r.Context(), projectID(r), chi.URLParam(r, "id"), wait)
+	var body struct {
+		Parts []pipeline.CompletedPartInput `json:"parts"`
+	}
+	if r.ContentLength != 0 {
+		if err := httpx.DecodeJSON(w, r, &body); err != nil && !errors.Is(err, io.EOF) {
+			badJSON(w, err)
+			return
+		}
+	}
+	a, err := h.svc.CompleteUpload(r.Context(), projectID(r), chi.URLParam(r, "id"), body.Parts, wait)
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -317,4 +328,21 @@ func (h *handlers) setQuota(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, u)
+}
+
+// signURLs handles POST /v1/signed-urls.
+func (h *handlers) signURLs(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Items []pipeline.SignItem `json:"items"`
+	}
+	if err := httpx.DecodeJSON(w, r, &in); err != nil {
+		badJSON(w, err)
+		return
+	}
+	out, err := h.svc.SignURLs(r.Context(), projectID(r), in.Items)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": out})
 }

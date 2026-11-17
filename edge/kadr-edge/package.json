@@ -1,0 +1,20 @@
+{
+  "name": "kadr-edge",
+  "version": "0.1.0",
+  "description": "Cloudflare Worker serving private Kadr files behind HMAC-signed URLs",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "typescript": "~6.0.3",
+    "vitest": "^5.1.0",
+    "wrangler": "^4.0.0"
+  }
+}

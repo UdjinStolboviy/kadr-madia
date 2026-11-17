@@ -190,7 +190,22 @@ type UsageView struct {
 type UploadTicket struct {
 	UploadID  string            `json:"upload_id"`
 	Method    string            `json:"method"`
-	URL       string            `json:"url"`
-	Headers   map[string]string `json:"headers"`
+	URL       string            `json:"url,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"`
 	ExpiresAt string            `json:"expires_at"`
+	// Multipart tickets: upload each part with PUT, then complete with the ETags.
+	PartSize int64        `json:"part_size,omitempty"`
+	Parts    []PartTicket `json:"parts,omitempty"`
+}
+
+// PartTicket is the presigned URL of one multipart part.
+type PartTicket struct {
+	PartNumber int    `json:"part_number"`
+	URL        string `json:"url"`
+}
+
+// CompletedPartInput is a part reported by the client on complete.
+type CompletedPartInput struct {
+	PartNumber int    `json:"part_number"`
+	ETag       string `json:"etag"`
 }

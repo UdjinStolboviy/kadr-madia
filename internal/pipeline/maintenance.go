@@ -100,6 +100,13 @@ func (s *Service) expireUpload(ctx context.Context, u *db.Upload) error {
 	})
 	if err == nil {
 		s.afterCommit("")
+		if u.MultipartID != nil {
+			if project, perr := s.store.GetProject(ctx, u.ProjectID); perr == nil {
+				if tgt, terr := s.storageFor(ctx, project); terr == nil {
+					s.abortMultipart(ctx, u, tgt)
+				}
+			}
+		}
 	}
 	return err
 }

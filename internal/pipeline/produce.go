@@ -85,7 +85,11 @@ func (s *Service) produceVideo(ctx context.Context, pc *processCtx, srcPath, out
 		return nil, classifyEngineError(err)
 	}
 	vo, err := s.video.Transcode(ctx, info, pc.vparams, outDir, func(pct int) {
-		s.log.Debug("transcode progress", "job_id", pc.job.ID, "pct", pct)
+		if pc.job.WorkerID != nil {
+			if err := s.store.SetJobProgress(ctx, pc.job.ID, *pc.job.WorkerID, pct); err != nil {
+				s.log.Debug("record job progress", "job_id", pc.job.ID, "err", err)
+			}
+		}
 	})
 	if err != nil {
 		return nil, classifyEngineError(err)
