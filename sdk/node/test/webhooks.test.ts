@@ -87,4 +87,39 @@ describe("verifyWebhook", () => {
     }
     expect(event.id).toBe("msg_1");
   });
+
+  it("maps upload.expired and quota payloads to their camelCased types", () => {
+    const secret = "whsec_" + Buffer.from("k".repeat(32)).toString("base64");
+    const ts = Math.floor(Date.now() / 1000);
+    const verify = (payload: unknown) => {
+      const body = JSON.stringify(payload);
+      const sig = signWebhook(secret, { id: MSG_ID, timestamp: ts, body });
+      return verifyWebhook(body, headers(sig, ts), secret);
+    };
+    const expired = verify({
+      type: "upload.expired",
+      timestamp: "2026-11-16T21:15:00Z",
+      data: {
+        upload_id: "upl_1",
+        namespace: "org_8f2c",
+        preset: "photo-lite",
+        visibility: "private",
+        filename: null,
+        expires_at: "2026-11-16T21:15:00Z",
+        metadata: { entity_id: "x" },
+      },
+    });
+    if (expired.type !== "upload.expired") throw new Error("wrong type");
+    expect(expired.data.uploadId).toBe("upl_1");
+    expect(expired.data.expiresAt).toBe("2026-11-16T21:15:00Z");
+    expect(expired.data.metadata).toEqual({ entity_id: "x" });
+
+    const quota = verify({
+      type: "quota.warning",
+      timestamp: "2026-11-16T21:15:00Z",
+      data: { namespace: "org_8f2c", used_bytes: 850, quota_bytes: 1000, ratio: 0.85 },
+    });
+    if (quota.type !== "quota.warning") throw new Error("wrong type");
+    expect(quota.data).toEqual({ namespace: "org_8f2c", usedBytes: 850, quotaBytes: 1000, ratio: 0.85 });
+  });
 });

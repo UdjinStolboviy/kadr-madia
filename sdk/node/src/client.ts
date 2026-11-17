@@ -13,16 +13,16 @@ import type {
   CreateUploadInput,
   CreateUploadResult,
   ListAssetsParams,
-  NamespaceQuota,
+  NamespaceQuotaInput,
   NamespaceUsage,
   Page,
+  PingResult,
   Preset,
-  ReprocessAssetInput,
   UpdateAssetInput,
   UploadAssetInput,
-  UploadPartUrl,
   UploadTicket,
 } from "./types.js";
+import type { ApiPath, PathParamNames } from "./wire.js";
 import { Webhooks } from "./webhooks.js";
 
 /** Maximum size of a server-side upload via `POST /v1/assets` (25 MB). */
@@ -57,26 +57,40 @@ export type UploadFile =
   | ReadableStream<Uint8Array>
   | AsyncIterable<Uint8Array>;
 
-const seg = encodeURIComponent;
+/**
+ * Builds a request path from an OpenAPI path template. Only paths that exist
+ * in `api/openapi.yaml` type-check, and every `{param}` must be supplied.
+ */
+function route<P extends ApiPath>(
+  template: P,
+  ...params: [PathParamNames<P>] extends [never] ? [] : [Record<PathParamNames<P>, string>]
+): string {
+  const values: Record<string, string> = params[0] ?? {};
+  return template
+    .replace(/^\/v1/, "")
+    .replace(/\{(\w+)\}/g, (_, name: string) => encodeURIComponent(values[name] ?? ""));
+}
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === "object" && !Array.isArray(v);
 }
 
-/** Accepts either a bare asset or an `{ asset: {...} }` wrapper. */
-function toAsset(body: unknown): Asset {
-  if (isRecord(body) && isRecord(body.asset) && !("id" in body)) return fromWire<Asset>(body.asset);
-  return fromWire<Asset>(body);
+function unexpected(what: string, body: unknown): KadrError {
+  return new KadrError(`Unexpected response body for ${what}`, {
+    status: 0,
+    code: "invalid_response",
+    detail: (typeof body === "string" ? body : (JSON.stringify(body) as string | undefined) ?? "").slice(0, 1000),
+  });
 }
 
-/** Accepts `{ data: [...] }`, `{ items: [...] }` or a bare array. */
-function toList(body: unknown): unknown[] {
-  if (Array.isArray(body)) return body;
-  if (isRecord(body)) {
-    if (Array.isArray(body.data)) return body.data;
-    if (Array.isArray(body.items)) return body.items;
-  }
-  return [];
+/** Parses a `{ items: [...], next_cursor? }` list envelope. */
+function toPage<T>(what: string, body: unknown): Page<T> {
+  if (!isRecord(body) || !Array.isArray(body.items)) throw unexpected(what, body);
+  const next = body.next_cursor;
+  return {
+    items: body.items.map((item) => fromWire<T>(item)),
+    nextCursor: typeof next === "string" && next !== "" ? next : null,
+  };
 }
 
 function formatWait(wait: number | string | undefined): string | undefined {
@@ -130,8 +144,10 @@ class Uploads {
 
   /**
    * Creates an upload ticket (`POST /v1/uploads`).
-   * Returns `{ kind: "upload", ...ticket }` (201) or `{ kind: "asset", asset }`
-   * when the file was deduplicated by `sha256` (200).
+   *
+   * Returns `{ kind: "upload", ...ticket }` (201), or `{ kind: "asset", asset }`
+   * (200) when `sha256` matched content already stored for the same project,
+   * visibility and preset version.
    */
   async create(
     input: CreateUploadInput,
@@ -139,56 +155,46 @@ class Uploads {
   ): Promise<CreateUploadResult> {
     const res = await this.http.request({
       method: "POST",
-      path: "/uploads",
+      path: route("/v1/uploads"),
       json: input,
       ...options,
     });
     const body = res.body;
-    const looksLikeTicket = isRecord(body) && typeof body.upload_id === "string";
-    if (res.status === 201 || looksLikeTicket) {
+    if (res.status === 201 && isRecord(body) && typeof body.upload_id === "string") {
       return { kind: "upload", ...fromWire<UploadTicket>(body) };
     }
-    return { kind: "asset", asset: toAsset(body) };
-  }
-
-  /** Requests more multipart part URLs (`POST /v1/uploads/{id}/parts`). */
-  async parts(
-    uploadId: string,
-    partNumbers: number[],
-    options: IdempotentRequestOptions = {},
-  ): Promise<UploadPartUrl[]> {
-    const res = await this.http.request({
-      method: "POST",
-      path: `/uploads/${seg(uploadId)}/parts`,
-      json: { partNumbers },
-      ...options,
-    });
-    const body = fromWire<{ parts?: UploadPartUrl[] }>(res.body);
-    return body.parts ?? [];
+    if (res.status === 200 && isRecord(body) && isRecord(body.asset)) {
+      return { kind: "asset", asset: fromWire<Asset>(body.asset) };
+    }
+    throw unexpected("POST /v1/uploads", body);
   }
 
   /**
-   * Completes an upload (`POST /v1/uploads/{id}/complete?wait=…`) and returns
-   * the asset (`status: "ready"` or `"processing"`).
+   * Completes an upload (`POST /v1/uploads/{id}/complete?wait=…`) after the
+   * file was PUT to the ticket URL, and returns the asset (`ready`, `failed`
+   * or still `processing`). Idempotent on the server.
    */
   async complete(
     uploadId: string,
     input: CompleteUploadInput & IdempotentRequestOptions = {},
   ): Promise<Asset> {
-    const { parts, wait, ...options } = input;
+    const { wait, ...options } = input;
     const res = await this.http.request({
       method: "POST",
-      path: `/uploads/${seg(uploadId)}/complete`,
+      path: route("/v1/uploads/{upload_id}/complete", { upload_id: uploadId }),
       query: { wait: formatWait(wait) },
-      json: parts ? { parts } : {},
       ...options,
     });
-    return toAsset(res.body);
+    return fromWire<Asset>(res.body);
   }
 
-  /** Cancels an upload (`DELETE /v1/uploads/{id}`). */
+  /** Cancels a pending upload (`DELETE /v1/uploads/{id}`). Cancelling twice is a no-op. */
   async abort(uploadId: string, options: RequestOptions = {}): Promise<void> {
-    await this.http.request({ method: "DELETE", path: `/uploads/${seg(uploadId)}`, ...options });
+    await this.http.request({
+      method: "DELETE",
+      path: route("/v1/uploads/{upload_id}", { upload_id: uploadId }),
+      ...options,
+    });
   }
 }
 
@@ -197,23 +203,23 @@ class Assets {
 
   /** `GET /v1/assets/{id}` */
   async get(id: string, options: RequestOptions = {}): Promise<Asset> {
-    const res = await this.http.request({ method: "GET", path: `/assets/${seg(id)}`, ...options });
-    return toAsset(res.body);
+    const res = await this.http.request({
+      method: "GET",
+      path: route("/v1/assets/{asset_id}", { asset_id: id }),
+      ...options,
+    });
+    return fromWire<Asset>(res.body);
   }
 
-  /** Fetches a single page of assets (`GET /v1/assets`). */
+  /** Fetches a single page of assets, newest first (`GET /v1/assets`). */
   async listPage(params: ListAssetsParams = {}, options: RequestOptions = {}): Promise<Page<Asset>> {
     const res = await this.http.request({
       method: "GET",
-      path: "/assets",
+      path: route("/v1/assets"),
       query: { ...params },
       ...options,
     });
-    const nextCursor =
-      isRecord(res.body) && typeof res.body.next_cursor === "string" && res.body.next_cursor !== ""
-        ? res.body.next_cursor
-        : null;
-    return { data: toList(res.body).map((a) => fromWire<Asset>(a)), nextCursor };
+    return toPage<Asset>("GET /v1/assets", res.body);
   }
 
   /**
@@ -227,50 +233,46 @@ class Assets {
     let cursor = params.cursor;
     for (;;) {
       const page = await this.listPage({ ...params, cursor }, options);
-      yield* page.data;
+      yield* page.items;
       if (!page.nextCursor) return;
       cursor = page.nextCursor;
     }
   }
 
-  /** `PATCH /v1/assets/{id}` — not retried automatically. */
+  /**
+   * `PATCH /v1/assets/{id}` — replaces `metadata` and emits `asset.updated`.
+   * Changing `visibility` answers `501 not_implemented` for now. Not retried.
+   */
   async update(id: string, input: UpdateAssetInput, options: RequestOptions = {}): Promise<Asset> {
     const res = await this.http.request({
       method: "PATCH",
-      path: `/assets/${seg(id)}`,
+      path: route("/v1/assets/{asset_id}", { asset_id: id }),
       json: input,
       ...options,
     });
-    return toAsset(res.body);
+    return fromWire<Asset>(res.body);
   }
 
-  /** `DELETE /v1/assets/{id}` — not retried automatically. */
+  /**
+   * `DELETE /v1/assets/{id}` — fails with `409 asset_processing` while the
+   * asset is processing. Not retried automatically.
+   */
   async delete(id: string, options: RequestOptions = {}): Promise<void> {
-    await this.http.request({ method: "DELETE", path: `/assets/${seg(id)}`, ...options });
-  }
-
-  /** `POST /v1/assets/{id}/reprocess` */
-  async reprocess(
-    id: string,
-    input: ReprocessAssetInput = {},
-    options: IdempotentRequestOptions = {},
-  ): Promise<Asset> {
-    const res = await this.http.request({
-      method: "POST",
-      path: `/assets/${seg(id)}/reprocess`,
-      json: input,
+    await this.http.request({
+      method: "DELETE",
+      path: route("/v1/assets/{asset_id}", { asset_id: id }),
       ...options,
     });
-    return toAsset(res.body);
   }
 
   /**
    * Server-side upload (`POST /v1/assets`, multipart/form-data) for files up
-   * to 25 MB. Streams are buffered into memory first.
+   * to 25 MB. Streams are buffered into memory first. The server computes
+   * the SHA-256 itself (deduplicated content returns a ready asset).
    */
   async upload(
     file: UploadFile,
-    input: UploadAssetInput,
+    input: UploadAssetInput & { wait?: number | string },
     options: IdempotentRequestOptions = {},
   ): Promise<Asset> {
     const blob = await toBlob(file, input.contentType);
@@ -279,28 +281,36 @@ class Assets {
     form.append("namespace", input.namespace);
     form.append("visibility", input.visibility);
     if (input.filename !== undefined) form.append("filename", input.filename);
-    if (input.contentType !== undefined) form.append("content_type", input.contentType);
-    if (input.sha256 !== undefined) form.append("sha256", input.sha256);
     if (input.metadata !== undefined) form.append("metadata", JSON.stringify(input.metadata));
     form.append("file", blob, input.filename ?? "file");
 
-    const res = await this.http.request({ method: "POST", path: "/assets", form, ...options });
-    return toAsset(res.body);
+    const res = await this.http.request({
+      method: "POST",
+      path: route("/v1/assets"),
+      query: { wait: formatWait(input.wait) },
+      form,
+      ...options,
+    });
+    return fromWire<Asset>(res.body);
   }
 }
 
 class Presets {
   constructor(private readonly http: HttpClient) {}
 
-  /** `GET /v1/presets` */
+  /** `GET /v1/presets` — the project's active presets. */
   async list(options: RequestOptions = {}): Promise<Preset[]> {
-    const res = await this.http.request({ method: "GET", path: "/presets", ...options });
-    return toList(res.body).map((p) => fromWire<Preset>(p));
+    const res = await this.http.request({ method: "GET", path: route("/v1/presets"), ...options });
+    return toPage<Preset>("GET /v1/presets", res.body).items;
   }
 
   /** `GET /v1/presets/{slug}` */
   async get(slug: string, options: RequestOptions = {}): Promise<Preset> {
-    const res = await this.http.request({ method: "GET", path: `/presets/${seg(slug)}`, ...options });
+    const res = await this.http.request({
+      method: "GET",
+      path: route("/v1/presets/{slug}", { slug }),
+      ...options,
+    });
     return fromWire<Preset>(res.body);
   }
 }
@@ -308,37 +318,33 @@ class Presets {
 class Namespaces {
   constructor(private readonly http: HttpClient) {}
 
-  /** `GET /v1/namespaces/{ns}/usage` */
+  /** `GET /v1/namespaces/{ns}/usage` — unknown namespaces report zero usage. */
   async usage(namespace: string, options: RequestOptions = {}): Promise<NamespaceUsage> {
     const res = await this.http.request({
       method: "GET",
-      path: `/namespaces/${seg(namespace)}/usage`,
+      path: route("/v1/namespaces/{namespace}/usage", { namespace }),
       ...options,
     });
     return fromWire<NamespaceUsage>(res.body);
   }
 
-  /** `PUT /v1/namespaces/{ns}/quota` — not retried automatically. */
+  /**
+   * `PUT /v1/namespaces/{ns}/quota` — replaces **all** limits (an omitted
+   * field means unlimited) and returns the usage after the change. Not
+   * retried automatically. Requires the `namespaces:admin` scope.
+   */
   async setQuota(
     namespace: string,
-    quota: NamespaceQuota,
+    quota: NamespaceQuotaInput,
     options: RequestOptions = {},
-  ): Promise<NamespaceQuota> {
+  ): Promise<NamespaceUsage> {
     const res = await this.http.request({
       method: "PUT",
-      path: `/namespaces/${seg(namespace)}/quota`,
+      path: route("/v1/namespaces/{namespace}/quota", { namespace }),
       json: quota,
       ...options,
     });
-    return res.body === undefined ? quota : fromWire<NamespaceQuota>(res.body);
-  }
-
-  /**
-   * `DELETE /v1/namespaces/{ns}` — deletes all namespace data asynchronously;
-   * a `namespace.purged` webhook follows. Not retried automatically.
-   */
-  async purge(namespace: string, options: RequestOptions = {}): Promise<void> {
-    await this.http.request({ method: "DELETE", path: `/namespaces/${seg(namespace)}`, ...options });
+    return fromWire<NamespaceUsage>(res.body);
   }
 }
 
@@ -349,6 +355,7 @@ export class Kadr {
   readonly presets: Presets;
   readonly namespaces: Namespaces;
   readonly webhooks: Webhooks;
+  private readonly http: HttpClient;
   private readonly signing: SigningConfig | undefined;
 
   constructor(options: KadrOptions) {
@@ -357,7 +364,7 @@ export class Kadr {
     const fetchImpl = options.fetch ?? (globalThis as { fetch?: FetchLike }).fetch;
     if (!fetchImpl) throw new TypeError("Kadr: no global fetch available; pass options.fetch");
 
-    const http = new HttpClient({
+    this.http = new HttpClient({
       baseUrl: options.baseUrl,
       apiKey: options.apiKey,
       timeoutMs: options.timeoutMs ?? 30_000,
@@ -368,11 +375,17 @@ export class Kadr {
       userAgent: options.userAgent,
     });
     this.signing = options.signing;
-    this.uploads = new Uploads(http);
-    this.assets = new Assets(http);
-    this.presets = new Presets(http);
-    this.namespaces = new Namespaces(http);
+    this.uploads = new Uploads(this.http);
+    this.assets = new Assets(this.http);
+    this.presets = new Presets(this.http);
+    this.namespaces = new Namespaces(this.http);
     this.webhooks = new Webhooks();
+  }
+
+  /** `GET /v1/ping` — verifies the API key and returns its project and scopes. */
+  async ping(options: RequestOptions = {}): Promise<PingResult> {
+    const res = await this.http.request({ method: "GET", path: route("/v1/ping"), ...options });
+    return fromWire<PingResult>(res.body);
   }
 
   /**

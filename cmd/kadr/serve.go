@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -18,7 +20,9 @@ import (
 	"github.com/UdjinStolboviy/kadr-madia/internal/api/public"
 	"github.com/UdjinStolboviy/kadr-madia/internal/auth"
 	"github.com/UdjinStolboviy/kadr-madia/internal/capabilities"
+	"github.com/UdjinStolboviy/kadr-madia/internal/crypto"
 	"github.com/UdjinStolboviy/kadr-madia/internal/db"
+	"github.com/UdjinStolboviy/kadr-madia/internal/devstorage"
 	"github.com/UdjinStolboviy/kadr-madia/internal/pipeline"
 	"github.com/UdjinStolboviy/kadr-madia/internal/queue"
 	"github.com/UdjinStolboviy/kadr-madia/internal/sdnotify"
@@ -38,6 +42,7 @@ func cmdServe(ctx context.Context, args []string, stderr io.Writer) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fakeEngine := fs.Bool("fake-engine", false, "use a fake image engine that writes placeholder files (development without libvips)")
+	devStorage := fs.Bool("dev-storage", false, "run an in-process S3-compatible server and a \"Dev storage\" platform profile (requires KADR_DEV=1; address: KADR_DEV_STORAGE_ADDR, default "+devstorage.DefaultAddr+")")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("%w: %v", errUsage, err)
 	}
@@ -47,6 +52,9 @@ func cmdServe(ctx context.Context, args []string, stderr io.Writer) error {
 	cfg, err := loadConfig()
 	if err != nil {
 		return err
+	}
+	if *devStorage && !cfg.Dev {
+		return fmt.Errorf("%w: --dev-storage is a development tool and requires KADR_DEV=1", errUsage)
 	}
 	log := newLogger(cfg, stderr)
 	slog.SetDefault(log)
@@ -79,6 +87,18 @@ func cmdServe(ctx context.Context, args []string, stderr io.Writer) error {
 		return fmt.Errorf("database has %d pending migration(s); run `kadr migrate up` first", pending)
 	}
 	store := db.NewStore(database)
+
+	if *devStorage {
+		ds, err := startDevStorage(ctx, cfg.DBPath, store, keyring, log)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			shCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = ds.Shutdown(shCtx)
+		}()
+	}
 
 	// Probe external tools in the background; /admin/api/system shows
 	// "probe in progress" until it finishes.
@@ -246,4 +266,28 @@ func sessionJanitor(ctx context.Context, store *db.Store, log *slog.Logger) {
 		case <-t.C:
 		}
 	}
+}
+
+// startDevStorage starts the in-process S3 server (data next to the database
+// in devstorage/) and makes sure the "Dev storage" profile points at it.
+func startDevStorage(ctx context.Context, dbPath string, store *db.Store, kr *crypto.Keyring, log *slog.Logger) (*devstorage.Server, error) {
+	ds, err := devstorage.Start(devstorage.Config{
+		Addr:   os.Getenv("KADR_DEV_STORAGE_ADDR"),
+		Dir:    filepath.Join(filepath.Dir(dbPath), "devstorage"),
+		Logger: log,
+	})
+	if err != nil {
+		return nil, err
+	}
+	p, created, err := devstorage.EnsureProfile(ctx, store, kr, ds.Endpoint, time.Now())
+	if err != nil {
+		_ = ds.Shutdown(context.Background())
+		return nil, err
+	}
+	if created && !p.IsPlatform {
+		log.Warn("another platform storage profile exists; assign \"Dev storage\" to projects explicitly", "profile_id", p.ID)
+	}
+	log.Warn("dev storage running (no authentication, development only)", "endpoint", ds.Endpoint,
+		"public_base_url", ds.PublicBaseURL(), "profile_id", p.ID, "profile_created", created)
+	return ds, nil
 }

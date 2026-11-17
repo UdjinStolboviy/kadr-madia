@@ -83,6 +83,28 @@ kadr/
 └── docs/
 ```
 
+## Local development
+
+No cloud account, libvips or MinIO needed:
+
+```sh
+KADR_DEV=1 go run ./cmd/kadr migrate up
+KADR_DEV=1 go run ./cmd/kadr admin create --email admin@example.com
+KADR_DEV=1 go run ./cmd/kadr serve --dev-storage --fake-engine
+```
+
+- `KADR_DEV=1` uses `./var/` for the database, temp files and a generated master key; the public API listens on `127.0.0.1:8080`, the admin console on `127.0.0.1:8081`.
+- `--dev-storage` (refused without `KADR_DEV=1`) starts an in-process S3-compatible server on `127.0.0.1:9000` (override with `KADR_DEV_STORAGE_ADDR`, loopback only) with the buckets `kadr-public` and `kadr-private`, stored in `var/devstorage/`. On first start it creates a platform storage profile named "Dev storage" pointing at it (credentials encrypted like any other profile; its address is updated if `KADR_DEV_STORAGE_ADDR` changes). Public renditions are served at `http://127.0.0.1:9000/kadr-public/<key>`, and presigned PUTs work from browsers (CORS allows any origin). It has no authentication — development only.
+- `--fake-engine` replaces libvips with a deterministic engine that writes placeholder renditions. With libvips installed (`vips --version`), drop it to get real images: `KADR_DEV=1 go run ./cmd/kadr serve --dev-storage`.
+
+Then create a project and an API key in the admin console and call the API, e.g. with `@kadr/node` (`sdk/node`).
+
+Contract tests of the Node SDK against a real server (builds kadr, runs it in a temp dir with `--dev-storage --fake-engine`, exercises uploads, listing, presets, quotas, deletes and webhooks):
+
+```sh
+scripts/e2e-sdk.sh
+```
+
 ## Status
 
 M0 Foundation in progress (see [ROADMAP](docs/ROADMAP.md)).

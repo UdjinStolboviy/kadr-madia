@@ -27,7 +27,10 @@ var (
 const usage = `Usage: kadr <command> [arguments]
 
 Commands:
-  serve [--fake-engine]       run the API and admin servers (--fake-engine: no libvips needed)
+  serve [--fake-engine] [--dev-storage]
+                              run the API and admin servers (--fake-engine: no libvips
+                              needed; --dev-storage: in-process S3 on 127.0.0.1:9000,
+                              KADR_DEV=1 only)
   migrate up                  apply pending database migrations
   migrate status              list migrations and their state
   admin create --email EMAIL  create an administrator (password prompted, or --password-stdin)

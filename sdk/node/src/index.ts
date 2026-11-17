@@ -27,3 +27,4 @@ export type {
   SignWebhookInput,
 } from "./webhooks.js";
 export type * from "./types.js";
+export type { Camelize, components, operations, paths } from "./wire.js";

@@ -6,6 +6,7 @@ import {
   KadrTimeoutError,
   type FetchLike,
   type KadrOptions,
+  type components,
 } from "../src/index.js";
 
 interface Call {
@@ -52,7 +53,7 @@ function client(fetch: FetchLike, extra: Partial<KadrOptions> = {}) {
   });
 }
 
-const wireAsset = (id: string) => ({
+const wireAsset = (id: string): components["schemas"]["Asset"] => ({
   id,
   status: "ready",
   kind: "image",
@@ -149,73 +150,46 @@ describe("case conversion", () => {
 });
 
 describe("uploads", () => {
-  it("returns a multipart ticket", async () => {
-    const { fetch } = mockFetch(
-      json(
-        {
-          upload_id: "upl_2",
-          method: "MULTIPART",
-          part_size: 16777216,
-          parts: [
-            { number: 1, url: "https://storage.example.com/p1" },
-            { number: 2, url: "https://storage.example.com/p2" },
-          ],
-          expires_at: "2026-11-16T21:15:00Z",
-        },
-        201,
-      ),
-    );
-    const res = await client(fetch).uploads.create({
-      preset: "video-720p",
-      namespace: "org_8f2c",
-      visibility: "public",
-      contentType: "video/mp4",
-      size: 100 * 1024 * 1024,
-    });
-    expect(res.kind).toBe("upload");
-    if (res.kind === "upload" && res.method === "MULTIPART") {
-      expect(res.partSize).toBe(16777216);
-      expect(res.parts).toHaveLength(2);
-    } else {
-      throw new Error("expected a multipart ticket");
-    }
+  it("rejects a 200 without an asset wrapper", async () => {
+    const { fetch } = mockFetch(json(wireAsset("ast_bare")));
+    await expect(
+      client(fetch).uploads.create({
+        preset: "photo-lite",
+        namespace: "org_8f2c",
+        visibility: "public",
+        contentType: "image/jpeg",
+        size: 1,
+      }),
+    ).rejects.toMatchObject({ code: "invalid_response" });
   });
 
-  it("returns a deduplicated asset on 200 (bare or wrapped)", async () => {
-    const { fetch } = mockFetch(json(wireAsset("ast_d1")), json({ asset: wireAsset("ast_d2") }));
-    const kadr = client(fetch);
-    const input = {
+  it("returns a deduplicated asset on 200 {asset}", async () => {
+    const { fetch } = mockFetch(json({ asset: wireAsset("ast_d1") }));
+    const res = await client(fetch).uploads.create({
       preset: "photo-lite",
       namespace: "org_8f2c",
-      visibility: "private" as const,
+      visibility: "private",
       contentType: "image/jpeg",
       size: 1,
       sha256: "ab",
-    };
-    const a = await kadr.uploads.create(input);
-    const b = await kadr.uploads.create(input);
-    expect(a.kind === "asset" && a.asset.id).toBe("ast_d1");
-    expect(b.kind === "asset" && b.asset.id).toBe("ast_d2");
+    });
+    expect(res.kind === "asset" && res.asset.id).toBe("ast_d1");
   });
 
-  it("completes with parts and wait, requests parts and aborts", async () => {
+  it("completes with wait and aborts", async () => {
     const { fetch, calls } = mockFetch(
       json(wireAsset("ast_1")),
-      json({ parts: [{ number: 21, url: "https://storage.example.com/p21" }] }),
+      json(wireAsset("ast_1")),
       new Response(null, { status: 204 }),
     );
     const kadr = client(fetch);
-    const asset = await kadr.uploads.complete("upl_1", {
-      parts: [{ number: 1, etag: '"abc"' }],
-      wait: "5s",
-    });
+    const asset = await kadr.uploads.complete("upl_1", { wait: "5s" });
     expect(asset.id).toBe("ast_1");
     expect(calls[0]!.url).toBe("http://kadr.internal:8080/v1/uploads/upl_1/complete?wait=5s");
-    expect(JSON.parse(calls[0]!.init.body as string)).toEqual({ parts: [{ number: 1, etag: '"abc"' }] });
+    expect(calls[0]!.init.body).toBeUndefined();
 
-    const parts = await kadr.uploads.parts("upl_1", [21]);
-    expect(parts).toEqual([{ number: 21, url: "https://storage.example.com/p21" }]);
-    expect(JSON.parse(calls[1]!.init.body as string)).toEqual({ part_numbers: [21] });
+    await kadr.uploads.complete("upl_1", { wait: 10 });
+    expect(calls[1]!.url).toBe("http://kadr.internal:8080/v1/uploads/upl_1/complete?wait=10s");
 
     await kadr.uploads.abort("upl_1");
     expect(calls[2]!.init.method).toBe("DELETE");
@@ -226,9 +200,9 @@ describe("uploads", () => {
 describe("pagination", () => {
   it("iterates across 3 pages", async () => {
     const { fetch, calls } = mockFetch(
-      json({ data: [wireAsset("ast_1"), wireAsset("ast_2")], next_cursor: "c2" }),
-      json({ data: [wireAsset("ast_3")], next_cursor: "c3" }),
-      json({ data: [wireAsset("ast_4")], next_cursor: null }),
+      json({ items: [wireAsset("ast_1"), wireAsset("ast_2")], next_cursor: "c2" }),
+      json({ items: [wireAsset("ast_3")], next_cursor: "c3" }),
+      json({ items: [wireAsset("ast_4")], next_cursor: null }),
     );
     const ids: string[] = [];
     for await (const asset of client(fetch).assets.list({ namespace: "org_8f2c", limit: 2 })) {
@@ -245,8 +219,13 @@ describe("pagination", () => {
   it("listPage returns one page with nextCursor", async () => {
     const { fetch } = mockFetch(json({ items: [wireAsset("ast_1")], next_cursor: "c2" }));
     const page = await client(fetch).assets.listPage({ status: "ready" });
-    expect(page.data.map((a) => a.id)).toEqual(["ast_1"]);
+    expect(page.items.map((a) => a.id)).toEqual(["ast_1"]);
     expect(page.nextCursor).toBe("c2");
+  });
+
+  it("rejects a list body without items", async () => {
+    const { fetch } = mockFetch(json({ data: [wireAsset("ast_1")], next_cursor: null }));
+    await expect(client(fetch).assets.listPage()).rejects.toMatchObject({ code: "invalid_response" });
   });
 });
 
@@ -260,7 +239,7 @@ describe("errors", () => {
           status: 402,
           detail: "Namespace org_8f2c has reached its storage limit",
           code: "quota_exceeded",
-          errors: [{ field: "size", message: "too big" }],
+          errors: { size: "too big", content_type: "required" },
           instance: "/v1/uploads",
         },
         402,
@@ -278,7 +257,7 @@ describe("errors", () => {
     expect(e.detail).toBe("Namespace org_8f2c has reached its storage limit");
     expect(e.type).toBe("https://kadr.dev/problems/quota-exceeded");
     expect(e.instance).toBe("/v1/uploads");
-    expect(e.errors).toEqual([{ field: "size", message: "too big" }]);
+    expect(e.errors).toEqual({ size: "too big", content_type: "required" });
     expect(e.requestId).toBe("req_123");
     expect(e.message).toContain("quota_exceeded");
   });
@@ -345,17 +324,31 @@ describe("retries", () => {
 
   it("does not retry POST without an idempotency key", async () => {
     const { fetch } = mockFetch(problem({ code: "unavailable" }, 503), json(wireAsset("ast_1")));
-    await expect(client(fetch).assets.reprocess("ast_1")).rejects.toMatchObject({ status: 503 });
+    await expect(client(fetch).uploads.complete("upl_1")).rejects.toMatchObject({ status: 503 });
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it("retries POST with an idempotency key", async () => {
     const { fetch, calls } = mockFetch(problem({ code: "unavailable" }, 503), json(wireAsset("ast_1")));
-    await client(fetch).assets.reprocess("ast_1", { preset: "photo-lite" }, { idempotencyKey: "k1" });
+    await client(fetch).uploads.complete("upl_1", { wait: 5, idempotencyKey: "k1" });
     expect(fetch).toHaveBeenCalledTimes(2);
     for (const c of calls) {
       expect((c.init.headers as Record<string, string>)["Idempotency-Key"]).toBe("k1");
     }
+  });
+
+  it("retries a keyed POST on 409 idempotency_in_progress only", async () => {
+    const { fetch } = mockFetch(
+      problem({ code: "idempotency_in_progress" }, 409),
+      json(wireAsset("ast_1")),
+      problem({ code: "upload_aborted" }, 409),
+    );
+    const kadr = client(fetch);
+    await expect(kadr.uploads.complete("upl_1", { idempotencyKey: "k1" })).resolves.toMatchObject({ id: "ast_1" });
+    await expect(kadr.uploads.complete("upl_2", { idempotencyKey: "k2" })).rejects.toMatchObject({
+      code: "upload_aborted",
+    });
+    expect(fetch).toHaveBeenCalledTimes(3);
   });
 
   it("does not retry PATCH, PUT or DELETE", async () => {
@@ -366,7 +359,7 @@ describe("retries", () => {
     );
     const kadr = client(fetch);
     await expect(kadr.assets.update("ast_1", { visibility: "public" })).rejects.toMatchObject({ status: 503 });
-    await expect(kadr.namespaces.setQuota("org_8f2c", { maxBytes: 1 })).rejects.toMatchObject({ status: 503 });
+    await expect(kadr.namespaces.setQuota("org_8f2c", { quotaBytes: 1 })).rejects.toMatchObject({ status: 503 });
     await expect(kadr.assets.delete("ast_1")).rejects.toBeInstanceOf(KadrNetworkError);
     expect(fetch).toHaveBeenCalledTimes(3);
   });
@@ -385,12 +378,13 @@ describe("assets.upload (multipart/form-data)", () => {
       preset: "doc-lite",
       namespace: "org_8f2c",
       visibility: "private",
-      filename: "scan.pdf",
-      contentType: "application/pdf",
+      filename: "scan.jpg",
+      contentType: "image/jpeg",
       metadata: { entity: "receipt", entityId: "rcp_1" },
+      wait: 5,
     });
     const { url, init } = calls[0]!;
-    expect(url).toBe("http://kadr.internal:8080/v1/assets");
+    expect(url).toBe("http://kadr.internal:8080/v1/assets?wait=5s");
     expect(init.method).toBe("POST");
     expect((init.headers as Record<string, string>)["Content-Type"]).toBeUndefined();
     const form = init.body as FormData;
@@ -398,12 +392,13 @@ describe("assets.upload (multipart/form-data)", () => {
     expect(form.get("preset")).toBe("doc-lite");
     expect(form.get("namespace")).toBe("org_8f2c");
     expect(form.get("visibility")).toBe("private");
-    expect(form.get("filename")).toBe("scan.pdf");
-    expect(form.get("content_type")).toBe("application/pdf");
+    expect(form.get("filename")).toBe("scan.jpg");
+    expect(form.get("content_type")).toBeNull();
+    expect(form.get("sha256")).toBeNull();
     expect(JSON.parse(form.get("metadata") as string)).toEqual({ entity: "receipt", entityId: "rcp_1" });
     const file = form.get("file") as File;
-    expect(file.name).toBe("scan.pdf");
-    expect(file.type).toBe("application/pdf");
+    expect(file.name).toBe("scan.jpg");
+    expect(file.type).toBe("image/jpeg");
     expect(await file.text()).toBe("hello");
   });
 
@@ -435,28 +430,73 @@ describe("assets.upload (multipart/form-data)", () => {
   });
 });
 
-describe("presets and namespaces", () => {
-  it("calls the right endpoints", async () => {
+describe("presets, namespaces and ping", () => {
+  it("calls the right endpoints and maps the wire shapes", async () => {
+    const wirePreset = {
+      slug: "photo-lite",
+      kind: "image",
+      description: "Cards",
+      version: 3,
+      params: { kind: "image", limits: { maxInputBytes: 1000, snake_key: 1 } },
+      created_at: "2026-01-01T00:00:00Z",
+    };
+    const wireUsage = {
+      namespace: "org_8f2c",
+      used_bytes: 10,
+      reserved_bytes: 5,
+      asset_count: 2,
+      video_sec_month: 90,
+      quota_bytes: 1000,
+      quota_assets: null,
+      quota_video_sec_month: null,
+    };
     const { fetch, calls } = mockFetch(
-      json({ data: [{ slug: "photo-lite", version: 3 }] }),
-      json({ slug: "photo-lite", version: 3, created_at: "2026-01-01T00:00:00Z" }),
-      json({ namespace: "org_8f2c", bytes: 10, count: 2, video_minutes_this_month: 1.5 }),
-      json({ max_bytes: 1000 }),
-      new Response(null, { status: 202 }),
+      json({ items: [wirePreset] }),
+      json(wirePreset),
+      json(wireUsage),
+      json(wireUsage),
+      json({
+        ok: true,
+        project: "acme",
+        project_id: "prj_1",
+        environment: "test",
+        key_id: "key_1",
+        scopes: ["assets:read"],
+      }),
     );
     const kadr = client(fetch);
-    expect(await kadr.presets.list()).toEqual([{ slug: "photo-lite", version: 3 }]);
+    const presets = await kadr.presets.list();
+    expect(presets).toHaveLength(1);
+    // params are passed through verbatim
+    expect(presets[0]!.params).toEqual({ kind: "image", limits: { maxInputBytes: 1000, snake_key: 1 } });
     expect((await kadr.presets.get("photo-lite")).createdAt).toBe("2026-01-01T00:00:00Z");
-    expect((await kadr.namespaces.usage("org_8f2c")).videoMinutesThisMonth).toBe(1.5);
-    expect(await kadr.namespaces.setQuota("org_8f2c", { maxBytes: 1000 })).toEqual({ maxBytes: 1000 });
-    await kadr.namespaces.purge("org_8f2c");
+    const usage = await kadr.namespaces.usage("org_8f2c");
+    expect(usage).toEqual({
+      namespace: "org_8f2c",
+      usedBytes: 10,
+      reservedBytes: 5,
+      assetCount: 2,
+      videoSecMonth: 90,
+      quotaBytes: 1000,
+      quotaAssets: null,
+      quotaVideoSecMonth: null,
+    });
+    expect((await kadr.namespaces.setQuota("org_8f2c", { quotaBytes: 1000 })).quotaBytes).toBe(1000);
+    expect(await kadr.ping()).toEqual({
+      ok: true,
+      project: "acme",
+      projectId: "prj_1",
+      environment: "test",
+      keyId: "key_1",
+      scopes: ["assets:read"],
+    });
     expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual([
       "GET http://kadr.internal:8080/v1/presets",
       "GET http://kadr.internal:8080/v1/presets/photo-lite",
       "GET http://kadr.internal:8080/v1/namespaces/org_8f2c/usage",
       "PUT http://kadr.internal:8080/v1/namespaces/org_8f2c/quota",
-      "DELETE http://kadr.internal:8080/v1/namespaces/org_8f2c",
+      "GET http://kadr.internal:8080/v1/ping",
     ]);
-    expect(JSON.parse(calls[3]!.init.body as string)).toEqual({ max_bytes: 1000 });
+    expect(JSON.parse(calls[3]!.init.body as string)).toEqual({ quota_bytes: 1000 });
   });
 });

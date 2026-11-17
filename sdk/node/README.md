@@ -10,10 +10,9 @@ The official Node.js SDK for **Kadr**, a self-hosted media platform.
 
 ## Install
 
-```sh
-pnpm add @kadr/node
-# or: npm install @kadr/node
-```
+The package is not published yet (`"private": true`, `"license": "UNLICENSED"`
+until the distribution model is decided). Use it from this repository, e.g. a
+workspace or `file:` dependency on `sdk/node`.
 
 ## Quick start
 
@@ -36,10 +35,11 @@ if (ticket.kind === "asset") {
   // Deduplicated by sha256: the file already exists, no upload needed.
   return ticket.asset;
 }
-// ticket.kind === "upload": hand ticket.url / ticket.headers (or ticket.parts) to the client.
+// ticket.kind === "upload": hand ticket.url / ticket.method / ticket.headers to the client,
+// which PUTs the file directly to storage with exactly those headers.
 
 // 2) Complete after the browser has uploaded to storage
-const asset = await kadr.uploads.complete(ticket.uploadId, { parts, wait: "5s" });
+const asset = await kadr.uploads.complete(ticket.uploadId, { wait: "5s" });
 
 // 3) Private link — signed locally, no request to Kadr
 const key = asset.renditions[0]?.key;
@@ -80,8 +80,7 @@ as the `Idempotency-Key` header.
 | Method | HTTP |
 |---|---|
 | `uploads.create(input, { idempotencyKey? }): Promise<CreateUploadResult>` | `POST /v1/uploads` |
-| `uploads.parts(uploadId, partNumbers, opts?): Promise<UploadPartUrl[]>` | `POST /v1/uploads/{id}/parts` |
-| `uploads.complete(uploadId, { parts?, wait?, idempotencyKey? }): Promise<Asset>` | `POST /v1/uploads/{id}/complete?wait=…` |
+| `uploads.complete(uploadId, { wait?, idempotencyKey? }): Promise<Asset>` | `POST /v1/uploads/{id}/complete?wait=…` |
 | `uploads.abort(uploadId, opts?): Promise<void>` | `DELETE /v1/uploads/{id}` |
 
 `CreateUploadResult` is a discriminated union:
@@ -91,15 +90,15 @@ type CreateUploadResult =
   | ({ kind: "upload" } & UploadTicket)   // 201 — upload the file
   | { kind: "asset"; asset: Asset };      // 200 — deduplicated by sha256, asset is ready
 
-type UploadTicket =
-  | { method: "PUT"; uploadId; url; headers; expiresAt }
-  | { method: "MULTIPART"; uploadId; partSize; parts: { number; url }[]; expiresAt };
+type UploadTicket = { uploadId; method: "PUT"; url; headers; expiresAt };
 ```
 
-For `MULTIPART` tickets the first 20 part URLs are included; get more with
-`uploads.parts(id, [21, 22, …])`. Upload each part, collect the `ETag`
-response headers and pass `{ number, etag }[]` to `uploads.complete()`.
-`wait` may be a string sent verbatim (`"5s"`) or a number of seconds.
+`headers` always contains `Content-Type` and `Content-Length`; both are part of
+the presigned signature, so send them unchanged (with `fetch`, let the body set
+`Content-Length`). Files over 64 MB need multipart uploads, which the server
+does not implement yet (`413 too_large`). `wait` may be a string sent verbatim
+(`"5s"`) or a number of seconds (max 30 s); without it `complete()` returns the
+asset in `processing` and an `asset.ready` / `asset.failed` webhook follows.
 
 ### Assets
 
@@ -108,10 +107,9 @@ response headers and pass `{ number, etag }[]` to `uploads.complete()`.
 | `assets.get(id, opts?): Promise<Asset>` | `GET /v1/assets/{id}` |
 | `assets.listPage(params?, opts?): Promise<Page<Asset>>` | `GET /v1/assets?…` (one page) |
 | `assets.list(params?, opts?): AsyncGenerator<Asset>` | follows `next_cursor` across all pages |
-| `assets.update(id, { metadata?, visibility? }, opts?): Promise<Asset>` | `PATCH /v1/assets/{id}` |
-| `assets.delete(id, opts?): Promise<void>` | `DELETE /v1/assets/{id}` |
-| `assets.reprocess(id, { preset? }?, { idempotencyKey? }?): Promise<Asset>` | `POST /v1/assets/{id}/reprocess` |
-| `assets.upload(file, input, { idempotencyKey? }?): Promise<Asset>` | `POST /v1/assets` (multipart/form-data) |
+| `assets.update(id, { metadata?, visibility? }, opts?): Promise<Asset>` | `PATCH /v1/assets/{id}` (visibility changes: `501` for now) |
+| `assets.delete(id, opts?): Promise<void>` | `DELETE /v1/assets/{id}` (`409 asset_processing` while processing) |
+| `assets.upload(file, input, { idempotencyKey? }?): Promise<Asset>` | `POST /v1/assets?wait=…` (multipart/form-data) |
 
 ```ts
 for await (const asset of kadr.assets.list({ namespace: "org_8f2c", status: "ready", limit: 100 })) {
@@ -119,7 +117,7 @@ for await (const asset of kadr.assets.list({ namespace: "org_8f2c", status: "rea
 }
 
 const page = await kadr.assets.listPage({ namespace: "org_8f2c" });
-// page.data: Asset[], page.nextCursor: string | null
+// page.items: Asset[], page.nextCursor: string | null
 ```
 
 `assets.upload()` is for backend jobs on the private network. `file` may be a
@@ -128,28 +126,35 @@ const page = await kadr.assets.listPage({ namespace: "org_8f2c" });
 buffered into memory first and rejected with `code: "too_large"` once they
 exceed **25 MB** (`MAX_SERVER_UPLOAD_BYTES`), which is the server-side upload
 limit. Larger files must use `uploads.create()` instead. The form contains the
-fields `preset`, `namespace`, `visibility`, `filename`, `content_type`,
-`sha256`, `metadata` (JSON-encoded) and `file`.
+fields `preset`, `namespace`, `visibility`, `filename`, `metadata`
+(JSON-encoded) and `file` (with `contentType` as its part type). The server
+hashes the file itself and deduplicates; `wait` works like in `complete()`.
 
 ```ts
 import { readFile } from "node:fs/promises";
 
-const asset = await kadr.assets.upload(await readFile("scan.pdf"), {
+const asset = await kadr.assets.upload(await readFile("scan.jpg"), {
   preset: "doc-lite", namespace: "org_8f2c", visibility: "private",
-  filename: "scan.pdf", contentType: "application/pdf",
-  metadata: { entity: "receipt", entityId: "rcp_123" },
+  filename: "scan.jpg", contentType: "image/jpeg",
+  metadata: { entity: "receipt", entityId: "rcp_123" }, wait: 10,
 });
 ```
 
-### Presets and namespaces
+### Presets, namespaces, ping
 
 | Method | HTTP |
 |---|---|
 | `presets.list(opts?): Promise<Preset[]>` | `GET /v1/presets` |
 | `presets.get(slug, opts?): Promise<Preset>` | `GET /v1/presets/{slug}` |
 | `namespaces.usage(ns, opts?): Promise<NamespaceUsage>` | `GET /v1/namespaces/{ns}/usage` |
-| `namespaces.setQuota(ns, quota, opts?): Promise<NamespaceQuota>` | `PUT /v1/namespaces/{ns}/quota` |
-| `namespaces.purge(ns, opts?): Promise<void>` | `DELETE /v1/namespaces/{ns}` |
+| `namespaces.setQuota(ns, quota, opts?): Promise<NamespaceUsage>` | `PUT /v1/namespaces/{ns}/quota` |
+| `ping(opts?): Promise<PingResult>` | `GET /v1/ping` |
+
+`NamespaceUsage` is `{ namespace, usedBytes, reservedBytes, assetCount,
+videoSecMonth, quotaBytes, quotaAssets, quotaVideoSecMonth }` (`null` limits =
+unlimited). `setQuota(ns, { quotaBytes?, quotaAssets?, quotaVideoSecMonth? })`
+replaces **all** limits — an omitted field becomes `null` — and returns the
+usage after the change.
 
 ### Standalone helpers
 
@@ -167,14 +172,16 @@ import { signUrl, verifySignedUrl, verifyWebhook, signWebhook } from "@kadr/node
 The wire format is snake_case; the SDK is camelCase in both directions:
 
 - Request bodies are converted recursively (`contentType` → `content_type`,
-  `partNumbers` → `part_numbers`, `maxBytes` → `max_bytes`).
+  `quotaBytes` → `quota_bytes`).
 - Responses and webhook payloads are converted recursively
   (`upload_id` → `uploadId`, `preset_version` → `presetVersion`).
-- **Exceptions:** the values of `metadata` keys (your data) and `headers` keys
-  (e.g. `Content-Type` in upload tickets) are passed through untouched in both
-  directions. `metadata: { entityId: "rcp_1" }` is stored exactly like that.
+- **Exceptions:** the values of `metadata` keys (your data), `headers` keys
+  (e.g. `Content-Type` in upload tickets) and preset `params` are passed
+  through untouched in both directions. `metadata: { entityId: "rcp_1" }` is
+  stored exactly like that.
 - Query parameters are sent as written (`namespace`, `kind`, `status`, `limit`, `cursor`).
-- Problem details keep the raw `errors` array; top-level problem keys are camelCased in `err.problem`.
+- Problem details keep the raw `errors` map (wire field name → message, e.g.
+  `{ content_type: "required" }`); top-level problem keys are camelCased in `err.problem`.
 
 ## Errors
 
@@ -193,7 +200,7 @@ try {
 | Field | Source |
 |---|---|
 | `status` | HTTP status, `0` when no response was received |
-| `code` | problem `code` (e.g. `quota_exceeded`, `unsupported_media`, `too_large`, `preset_not_found`); `http_<status>` when the body has no code or is not JSON |
+| `code` | problem `code` (see `docs/API.md` → Errors, e.g. `quota_exceeded`, `validation_failed`, `upload_incomplete`, `asset_processing`); `http_<status>` when the body has no code or is not JSON; `invalid_response` when a 2xx body does not have the documented shape |
 | `title`, `detail`, `type`, `instance`, `errors` | RFC 9457 problem fields |
 | `requestId` | `x-request-id` (or `request-id`) response header |
 | `problem` | the full problem document |
@@ -210,8 +217,10 @@ with the body text as `detail`.
   not guaranteed idempotent at the HTTP layer (PATCH can trigger a
   cross-bucket copy; a retried DELETE may return `404` after a lost success
   response), so the caller decides.
-- Retry triggers: network errors, timeouts, HTTP `429` and `5xx` (except `501`).
-  Other `4xx` responses are never retried.
+- Retry triggers: network errors, timeouts, HTTP `429` and `5xx` (except `501`),
+  and — for keyed POSTs — `409 idempotency_in_progress` (the first request with
+  that key is still running; the retry replays its stored response). Other
+  `4xx` responses are never retried.
 - Delay: exponential backoff with equal jitter (`retryBaseDelayMs * 2^attempt`,
   capped at `maxRetryDelayMs`). A `Retry-After` header (seconds or HTTP date)
   takes precedence, also capped at `maxRetryDelayMs`.
@@ -224,7 +233,8 @@ an `idempotencyKey` (e.g. `` `complete:${uploadId}` ``) to get automatic retries
 ## Signed URL canonical form
 
 This is the exact contract the edge Worker must implement to verify URLs
-produced by `signUrl()`.
+produced by `signUrl()`. The Worker and signing-key management are not part of
+this repository yet; the format below is the SDK's side of the contract.
 
 **URL format**
 
@@ -324,32 +334,39 @@ app.post("/internal/kadr/webhook", express.raw({ type: "application/json" }), (r
 
 The result is a `WebhookEvent` discriminated union on `type`
 (`asset.ready`, `asset.failed`, `asset.updated`, `asset.deleted`,
-`upload.expired`, `quota.warning`, `quota.exceeded`, `namespace.purged`),
-camelCased like API responses, with `id` set to the `webhook-id` header.
+`upload.expired`, `quota.warning`, `quota.exceeded`, and `webhook.test` from
+the admin console's "Send test"), camelCased like API responses, with `id` set
+to the `webhook-id` header. Payloads (all typed from `api/openapi.yaml`):
 
-## Assumptions
+| `type` | `data` |
+|---|---|
+| `asset.ready`, `asset.deleted` | `{ asset, metadata }` (`asset.status` is `deleted` in `asset.deleted`) |
+| `asset.failed` | `{ asset, metadata, error: { code, detail? } }` |
+| `asset.updated` | `{ asset, metadata, changes: ["metadata"] }` |
+| `upload.expired` | `{ uploadId, namespace, preset, visibility, filename, expiresAt, metadata }` |
+| `quota.warning`, `quota.exceeded` | `{ namespace, usedBytes, quotaBytes, ratio }` (namespace byte quota) |
+| `webhook.test` | `{ endpointId, message }` |
 
-These points are not yet fixed by `docs/API.md` (there is no `openapi.yaml`
-yet); the SDK is tolerant where it can be:
+## Contract with the API
 
-- **List envelope:** `{ "data": [...], "next_cursor": string | null }`. An
-  `items` array or a bare array is also accepted; an empty or missing
-  `next_cursor` ends iteration. The same envelope is assumed for `GET /v1/presets`.
-- **Dedup response (200 from `POST /v1/uploads`):** either the asset object
-  itself or `{ "asset": {...} }`. A body containing `upload_id` is always
-  treated as a ticket.
-- **Asset endpoints** return the bare asset (an `{ "asset": … }` wrapper is also accepted).
-- `uploads.parts()` returns `{ "parts": [...] }`; the SDK returns the array.
-- `namespaces.setQuota()` returns the stored quota; on an empty body the input is returned.
-  Quota and usage field names (`max_bytes`, `max_assets`,
-  `max_video_minutes_per_month`, `video_minutes_this_month`) are provisional.
-- Webhook `data` shapes other than `asset.*` (`upload.expired`, `quota.*`,
-  `namespace.purged`) are provisional and typed loosely.
-- `DELETE` endpoints may answer `204` or `202`; bodies are ignored.
+The public types are derived from `src/generated/openapi.ts`, which
+`pnpm gen` generates from `api/openapi.yaml` (the API's source of truth after
+the Go implementation). Request paths are checked against the generated
+`paths`, and `test/contract.test.ts` pins the endpoint and event lists, so a
+spec change that the SDK does not follow fails `pnpm typecheck`. CI runs
+`pnpm gen:check` to make sure the committed file matches the spec.
+
+Not wrapped because the server does not implement them yet (they answer
+`501 not_implemented`): multipart uploads (`POST /v1/uploads/{id}/parts`),
+`POST /v1/assets/{id}/reprocess`, `DELETE /v1/namespaces/{ns}` (and the
+`namespace.purged` event), `POST /v1/signed-urls`, `/v1/imports/*` and
+`PUT /v1/presets/{slug}`.
 
 ## Development
 
 ```sh
 pnpm install
+pnpm gen          # regenerate src/generated/openapi.ts after editing api/openapi.yaml
 pnpm typecheck && pnpm lint && pnpm test && pnpm build
+../../scripts/e2e-sdk.sh   # contract tests against a real server (pnpm test:e2e)
 ```

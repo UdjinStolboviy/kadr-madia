@@ -19,6 +19,11 @@ info:
       The request hash covers the raw body, so a retried multipart request
       must resend identical bytes (same boundary).
     - IDs are prefixed ULIDs: `upl_…`, `ast_…`, `blb_…`, `evt_…`.
+    - Lists return `{ "items": [...], "next_cursor": string | null }`.
+    - Any other `/v1` path or method answers `501 not_implemented` (planned
+      endpoints such as `POST /v1/signed-urls`, `/v1/imports/*`,
+      `POST /v1/assets/{id}/reprocess`, `DELETE /v1/namespaces/{ns}` and
+      multipart uploads are not available yet).
   license:
     name: Proprietary
 servers:
@@ -133,7 +138,7 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409":
-          description: "`upload_incomplete` (the object is not uploaded yet), `upload_aborted`."
+          description: "`upload_incomplete` (the object is not uploaded yet), `upload_aborted`, `upload_not_pending` (verification failed concurrently), `storage_not_configured`, `idempotency_in_progress`."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
@@ -222,8 +227,13 @@ paths:
         "402": { $ref: "#/components/responses/QuotaExceeded" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/PresetNotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
         "413": { $ref: "#/components/responses/TooLarge" }
-        "415": { $ref: "#/components/responses/UnsupportedMedia" }
+        "415":
+          description: "`unsupported_media` (non-image preset) or `unsupported_content_type` (the body is not multipart/form-data)."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
     get:
       tags: [assets]
@@ -484,7 +494,7 @@ webhooks:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/QuotaEvent" }
+            schema: { $ref: "#/components/schemas/QuotaWarningEvent" }
       responses: *webhookResponses
   quota.exceeded:
     post:
@@ -495,7 +505,18 @@ webhooks:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/QuotaEvent" }
+            schema: { $ref: "#/components/schemas/QuotaExceededEvent" }
+      responses: *webhookResponses
+  webhook.test:
+    post:
+      summary: Test delivery triggered from the admin console
+      operationId: onWebhookTest
+      parameters: *webhookHeaders
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookTestEvent" }
       responses: *webhookResponses
 
 components:
@@ -567,7 +588,7 @@ components:
 
   responses:
     BadRequest:
-      description: "`invalid_json`, `invalid_multipart`, `invalid_idempotency_key`."
+      description: "`invalid_json`, `invalid_multipart`, `invalid_idempotency_key`, `invalid_body`."
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
@@ -592,7 +613,7 @@ components:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
     Conflict:
-      description: "`asset_processing`, `storage_not_configured`, `idempotency_in_progress`."
+      description: "`asset_processing` (DELETE of a processing asset), `storage_not_configured` (no storage profile for the project), `idempotency_in_progress` (POST with an Idempotency-Key whose first request is still running)."
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
@@ -701,7 +722,10 @@ components:
         duration_sec, poster, metadata, savings_ratio, created_at, ready_at]
       properties:
         id: { type: string, examples: [ast_01jd8x3k2m4n5p6q7r8s9t0v1w] }
-        status: { type: string, enum: [processing, ready, failed] }
+        status:
+          type: string
+          description: "`deleted` appears only in `asset.deleted` webhook payloads."
+          enum: [processing, ready, failed, deleted]
         kind: { $ref: "#/components/schemas/Kind" }
         namespace: { $ref: "#/components/schemas/Namespace" }
         visibility: { $ref: "#/components/schemas/Visibility" }
@@ -821,96 +845,116 @@ components:
         quota_assets: { type: [integer, "null"], minimum: 0 }
         quota_video_sec_month: { type: [integer, "null"], minimum: 0 }
 
-    EventEnvelope:
+    # Webhook payloads. Every body is {type, timestamp, data}; the event id is
+    # the `webhook-id` header, not part of the body.
+    AssetEventData:
+      type: object
+      required: [asset, metadata]
+      properties:
+        asset: { $ref: "#/components/schemas/Asset" }
+        metadata: { $ref: "#/components/schemas/Metadata" }
+    AssetReadyEvent:
       type: object
       required: [type, timestamp, data]
       properties:
-        type: { type: string }
+        type: { type: string, const: asset.ready }
         timestamp: { type: string, format: date-time }
-        data: { type: object }
-
-    AssetReadyEvent:
-      allOf:
-        - $ref: "#/components/schemas/EventEnvelope"
-        - type: object
-          properties:
-            type: { const: asset.ready }
-            data:
-              type: object
-              required: [asset, metadata]
-              properties:
-                asset: { $ref: "#/components/schemas/Asset" }
-                metadata: { $ref: "#/components/schemas/Metadata" }
+        data: { $ref: "#/components/schemas/AssetEventData" }
     AssetFailedEvent:
-      allOf:
-        - $ref: "#/components/schemas/EventEnvelope"
-        - type: object
+      type: object
+      required: [type, timestamp, data]
+      properties:
+        type: { type: string, const: asset.failed }
+        timestamp: { type: string, format: date-time }
+        data:
+          type: object
+          required: [asset, metadata, error]
           properties:
-            type: { const: asset.failed }
-            data:
-              type: object
-              required: [asset, metadata, error]
-              properties:
-                asset: { $ref: "#/components/schemas/Asset" }
-                metadata: { $ref: "#/components/schemas/Metadata" }
-                error: { $ref: "#/components/schemas/AssetError" }
+            asset: { $ref: "#/components/schemas/Asset" }
+            metadata: { $ref: "#/components/schemas/Metadata" }
+            error: { $ref: "#/components/schemas/AssetError" }
     AssetUpdatedEvent:
-      allOf:
-        - $ref: "#/components/schemas/EventEnvelope"
-        - type: object
+      type: object
+      required: [type, timestamp, data]
+      properties:
+        type: { type: string, const: asset.updated }
+        timestamp: { type: string, format: date-time }
+        data:
+          type: object
+          required: [asset, metadata, changes]
           properties:
-            type: { const: asset.updated }
-            data:
-              type: object
-              required: [asset, metadata, changes]
-              properties:
-                asset: { $ref: "#/components/schemas/Asset" }
-                metadata: { $ref: "#/components/schemas/Metadata" }
-                changes:
-                  type: array
-                  items: { type: string, enum: [metadata, visibility] }
+            asset: { $ref: "#/components/schemas/Asset" }
+            metadata: { $ref: "#/components/schemas/Metadata" }
+            changes:
+              type: array
+              description: Changed fields. Only `metadata` until visibility changes arrive (M3).
+              items: { type: string, enum: [metadata, visibility] }
     AssetDeletedEvent:
-      allOf:
-        - $ref: "#/components/schemas/EventEnvelope"
-        - type: object
+      type: object
+      required: [type, timestamp, data]
+      properties:
+        type: { type: string, const: asset.deleted }
+        timestamp: { type: string, format: date-time }
+        data:
+          type: object
+          required: [asset, metadata]
           properties:
-            type: { const: asset.deleted }
-            data:
-              type: object
-              required: [asset, metadata]
-              properties:
-                asset:
-                  description: The asset as it was, with `status` set to `deleted`.
-                  $ref: "#/components/schemas/Asset"
-                metadata: { $ref: "#/components/schemas/Metadata" }
+            asset:
+              description: The asset as it was, with `status` set to `deleted`.
+              $ref: "#/components/schemas/Asset"
+            metadata: { $ref: "#/components/schemas/Metadata" }
     UploadExpiredEvent:
-      allOf:
-        - $ref: "#/components/schemas/EventEnvelope"
-        - type: object
+      type: object
+      required: [type, timestamp, data]
+      properties:
+        type: { type: string, const: upload.expired }
+        timestamp: { type: string, format: date-time }
+        data:
+          type: object
+          required: [upload_id, namespace, preset, visibility, filename, expires_at, metadata]
           properties:
-            type: { const: upload.expired }
-            data:
-              type: object
-              required: [upload_id, namespace, preset, visibility, filename, expires_at, metadata]
-              properties:
-                upload_id: { type: string }
-                namespace: { $ref: "#/components/schemas/Namespace" }
-                preset: { type: string }
-                visibility: { $ref: "#/components/schemas/Visibility" }
-                filename: { type: [string, "null"] }
-                expires_at: { type: string, format: date-time }
-                metadata: { $ref: "#/components/schemas/Metadata" }
-    QuotaEvent:
-      allOf:
-        - $ref: "#/components/schemas/EventEnvelope"
-        - type: object
+            upload_id: { type: string }
+            namespace: { $ref: "#/components/schemas/Namespace" }
+            preset:
+              type: string
+              description: Preset slug (empty when the preset version no longer exists).
+            visibility: { $ref: "#/components/schemas/Visibility" }
+            filename: { type: [string, "null"] }
+            expires_at: { type: string, format: date-time }
+            metadata: { $ref: "#/components/schemas/Metadata" }
+    QuotaEventData:
+      type: object
+      description: Byte quota of one namespace. Project-level quotas do not emit events.
+      required: [namespace, used_bytes, quota_bytes, ratio]
+      properties:
+        namespace: { $ref: "#/components/schemas/Namespace" }
+        used_bytes: { type: integer }
+        quota_bytes: { type: integer }
+        ratio: { type: number, description: "used / quota, 3 decimals (truncated)." }
+    QuotaWarningEvent:
+      type: object
+      required: [type, timestamp, data]
+      properties:
+        type: { type: string, const: quota.warning }
+        timestamp: { type: string, format: date-time }
+        data: { $ref: "#/components/schemas/QuotaEventData" }
+    QuotaExceededEvent:
+      type: object
+      required: [type, timestamp, data]
+      properties:
+        type: { type: string, const: quota.exceeded }
+        timestamp: { type: string, format: date-time }
+        data: { $ref: "#/components/schemas/QuotaEventData" }
+    WebhookTestEvent:
+      type: object
+      description: Sent only by the admin console's "Send test" action, regardless of the endpoint's event filter.
+      required: [type, timestamp, data]
+      properties:
+        type: { type: string, const: webhook.test }
+        timestamp: { type: string, format: date-time }
+        data:
+          type: object
+          required: [endpoint_id, message]
           properties:
-            type: { enum: [quota.warning, quota.exceeded] }
-            data:
-              type: object
-              required: [namespace, used_bytes, quota_bytes, ratio]
-              properties:
-                namespace: { $ref: "#/components/schemas/Namespace" }
-                used_bytes: { type: integer }
-                quota_bytes: { type: integer }
-                ratio: { type: number, description: used / quota, 3 decimals (truncated). }
+            endpoint_id: { type: string }
+            message: { type: string }

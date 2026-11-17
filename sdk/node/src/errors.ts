@@ -8,7 +8,7 @@ export interface KadrErrorInit {
   detail?: string | undefined;
   type?: string | undefined;
   instance?: string | undefined;
-  errors?: unknown[] | undefined;
+  errors?: Record<string, string> | undefined;
   requestId?: string | undefined;
   problem?: ProblemDetails | undefined;
   cause?: unknown;
@@ -32,8 +32,11 @@ export class KadrError extends Error {
   /** Problem type URI. */
   readonly type: string | undefined;
   readonly instance: string | undefined;
-  /** Field-level validation errors, passed through as sent by the server. */
-  readonly errors: unknown[] | undefined;
+  /**
+   * Field-level validation errors of `validation_failed`: wire field name
+   * (e.g. `content_type`) → message, passed through as sent by the server.
+   */
+  readonly errors: Record<string, string> | undefined;
   /** Value of the `x-request-id` (or `request-id`) response header, when present. */
   readonly requestId: string | undefined;
   /** The full problem document (camelCased top-level keys), when the body was JSON. */
@@ -90,6 +93,15 @@ function str(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined;
 }
 
+function fieldErrors(v: unknown): Record<string, string> | undefined {
+  if (v === null || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, msg] of Object.entries(v)) {
+    if (typeof msg === "string") out[k] = msg;
+  }
+  return out;
+}
+
 /** Builds a `KadrError` from an HTTP error response. Never throws. */
 export async function errorFromResponse(res: Response): Promise<KadrError> {
   const requestId =
@@ -127,7 +139,7 @@ export async function errorFromResponse(res: Response): Promise<KadrError> {
       detail,
       type: str(raw.type),
       instance: str(raw.instance),
-      errors: Array.isArray(raw.errors) ? (raw.errors as unknown[]) : undefined,
+      errors: fieldErrors(raw.errors),
       requestId,
       problem,
     });

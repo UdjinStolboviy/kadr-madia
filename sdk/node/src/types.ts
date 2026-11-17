@@ -1,121 +1,81 @@
 /**
- * Hand-written types for the Kadr API v1 (see docs/API.md).
+ * Public types of the Kadr API v1, derived from the generated OpenAPI types
+ * (`src/generated/openapi.ts`, produced from `api/openapi.yaml` by `pnpm gen`).
  *
- * All types here describe the SDK-facing shape, which is camelCase. The wire
- * format is snake_case; the SDK converts keys in both directions (see
- * `case.ts`). User-defined `metadata` objects and upload `headers` are passed
- * through untouched.
- *
- * String unions are open (`(string & {})`) where the server may add new values
- * without a breaking change.
+ * The wire format is snake_case; the SDK surface is camelCase and the SDK
+ * converts keys in both directions (see `case.ts`). The values of `metadata`
+ * (your data), upload `headers` and preset `params` are passed through
+ * verbatim.
  */
+import type { Camelize, JsonResponse, Schemas, operations } from "./wire.js";
 
-/** A string union that still accepts unknown future values. */
-export type OpenString<T extends string> = T | (string & {});
+export type Visibility = Schemas["Visibility"];
 
-export type Visibility = "public" | "private";
+/** `"image"` or `"video"` (only image presets can be processed in this version). */
+export type AssetKind = Schemas["Kind"];
 
-export type AssetStatus = OpenString<"processing" | "ready" | "failed">;
+/**
+ * `processing` → `ready` | `failed`. `deleted` appears only in
+ * `asset.deleted` webhook payloads.
+ */
+export type AssetStatus = Asset["status"];
 
-export type AssetKind = OpenString<"image" | "video" | "audio" | "document" | "other">;
+export type Scope = Schemas["Scope"];
 
-/** Free-form metadata attached by your product. Never key-converted. */
-export type Metadata = Record<string, unknown>;
+/** Free-form metadata attached by your product (≤ 16 KB). Never key-converted. */
+export type Metadata = Schemas["Metadata"];
 
 // ---------------------------------------------------------------------------
 // Assets
 // ---------------------------------------------------------------------------
 
-export interface AssetOriginal {
-  filename: string;
-  contentType: string;
-  bytes: number;
-  width?: number | null;
-  height?: number | null;
-}
-
-export interface Rendition {
-  name: string;
-  format: string;
-  bytes: number;
-  width?: number | null;
-  height?: number | null;
-  /** Permanent CDN URL. Present for `public` assets only. */
-  url?: string;
-  /** Storage key to sign with `kadr.signUrl()`. Present for `private` assets only. */
-  key?: string;
-}
-
-export interface AssetPlaceholder {
-  thumbhash?: string | null;
-  dominantColor?: string | null;
-}
-
-export interface AssetError {
-  code: OpenString<"unsupported_media" | "too_long" | "corrupt" | "timeout">;
-  message?: string;
-}
-
-export interface Asset {
-  id: string;
-  status: AssetStatus;
-  kind: AssetKind;
-  namespace: string;
-  visibility: Visibility;
-  preset: string;
-  presetVersion: number;
-  original: AssetOriginal;
-  renditions: Rendition[];
-  placeholder?: AssetPlaceholder | null;
-  durationSec?: number | null;
-  poster?: Rendition | null;
-  metadata: Metadata;
-  savingsRatio?: number | null;
-  createdAt: string;
-  readyAt?: string | null;
-  /** Present when `status === "failed"`. */
-  error?: AssetError | null;
-}
-
-export interface ListAssetsParams {
-  namespace?: string;
-  kind?: AssetKind;
-  status?: AssetStatus;
-  /** Page size (server default applies when omitted). */
-  limit?: number;
-  /** Cursor from a previous page's `nextCursor`. */
-  cursor?: string;
-}
+/** The source file. `filename` and `contentType` may be `null`. */
+export type AssetOriginal = Camelize<Schemas["Original"]>;
 
 /**
- * One page of a cursor-paginated list.
- *
- * ASSUMPTION: the wire envelope is `{ "data": [...], "next_cursor": string | null }`.
- * An `items` array is accepted as a fallback.
+ * One stored file. Public renditions carry a permanent `url`; private ones
+ * carry a storage `key` to sign with `kadr.signUrl()`.
  */
+export type Rendition = Camelize<Schemas["Rendition"]>;
+
+/** Base64 ThumbHash and dominant color (`#rrggbb`). */
+export type AssetPlaceholder = Camelize<Schemas["Placeholder"]>;
+
+/** Why processing failed (`asset.error`, `asset.failed` webhook). */
+export type AssetError = Camelize<Schemas["AssetError"]>;
+
+export type AssetErrorCode = AssetError["code"];
+
+export type Asset = Camelize<Schemas["Asset"]>;
+
+/** Filters of `GET /v1/assets`. Use `assets.list()` to iterate over all pages. */
+export type ListAssetsParams = Camelize<NonNullable<operations["listAssets"]["parameters"]["query"]>>;
+
+/** One page of a cursor-paginated list (`{ items, next_cursor }` on the wire). */
 export interface Page<T> {
-  data: T[];
+  items: T[];
+  /** Pass as `cursor` to fetch the next page; `null` on the last page. */
   nextCursor: string | null;
 }
 
-export interface UpdateAssetInput {
-  metadata?: Metadata;
-  /** Changing visibility triggers a cross-bucket copy on the server. */
-  visibility?: Visibility;
-}
+/**
+ * Body of `PATCH /v1/assets/{id}`. `metadata` replaces the stored object.
+ * Changing `visibility` is not implemented yet (the server answers
+ * `501 not_implemented`); sending the current visibility is accepted.
+ */
+export type UpdateAssetInput = Camelize<
+  operations["updateAsset"]["requestBody"]["content"]["application/json"]
+>;
 
-export interface ReprocessAssetInput {
-  /** Preset slug to reprocess with. Defaults to the latest version of the current preset. */
-  preset?: string;
-}
-
+/** Fields of a server-side upload (`POST /v1/assets`, multipart/form-data). */
 export interface UploadAssetInput {
-  preset: string;
-  namespace: string;
-  visibility: Visibility;
+  preset: CreateUploadInput["preset"];
+  namespace: CreateUploadInput["namespace"];
+  visibility: CreateUploadInput["visibility"];
+  /** File name stored with the asset (also used as the file part name). */
   filename?: string;
+  /** Content-Type of the file part. The server detects the real type from the bytes. */
   contentType?: string;
-  sha256?: string;
   metadata?: Metadata;
 }
 
@@ -123,169 +83,78 @@ export interface UploadAssetInput {
 // Uploads
 // ---------------------------------------------------------------------------
 
-export interface CreateUploadInput {
-  preset: string;
-  namespace: string;
-  visibility: Visibility;
-  filename?: string;
-  contentType: string;
-  size: number;
-  /** Hex-encoded SHA-256 of the file. Enables deduplication. */
-  sha256?: string;
-  metadata?: Metadata;
-}
-
-export interface UploadPartUrl {
-  number: number;
-  url: string;
-}
-
-interface UploadTicketBase {
-  uploadId: string;
-  /** ISO 8601 timestamp after which the ticket is no longer valid. */
-  expiresAt: string;
-}
-
-/** Single-request upload: `PUT` the file to `url` with exactly `headers`. */
-export interface SingleUploadTicket extends UploadTicketBase {
-  method: "PUT";
-  url: string;
-  /** HTTP headers to send verbatim with the PUT. Never key-converted. */
-  headers: Record<string, string>;
-}
+/** Body of `POST /v1/uploads`. `size` must be exact; `sha256` enables dedup. */
+export type CreateUploadInput = Camelize<Schemas["CreateUploadRequest"]>;
 
 /**
- * Multipart upload (files > 64 MB): upload each part to its URL, collect the
- * `ETag` response headers and pass them to `uploads.complete()`.
- * `parts` contains the first 20 parts; request more via `uploads.parts()`.
+ * Single-request upload ticket: `PUT` the file to `url` with exactly
+ * `headers` (Content-Type and Content-Length are signed), then call
+ * `uploads.complete(uploadId)`. Multipart uploads (> 64 MB) are not
+ * implemented yet.
  */
-export interface MultipartUploadTicket extends UploadTicketBase {
-  method: "MULTIPART";
-  partSize: number;
-  parts: UploadPartUrl[];
-  headers?: Record<string, string>;
-}
-
-export type UploadTicket = SingleUploadTicket | MultipartUploadTicket;
+export type UploadTicket = Camelize<Schemas["UploadTicket"]>;
 
 /**
  * Result of `uploads.create()`.
  *
  * - `kind: "upload"` (HTTP 201): a ticket; the client must upload the file.
  *   The ticket fields are flattened onto the result (`result.uploadId`, ...).
- * - `kind: "asset"` (HTTP 200): the file was deduplicated by `sha256`; the
- *   ready asset is returned immediately and no upload is needed.
+ * - `kind: "asset"` (HTTP 200): the content was deduplicated by `sha256`;
+ *   a new ready asset is returned and no upload is needed.
  */
-export type CreateUploadResult =
-  | ({ kind: "upload" } & UploadTicket)
-  | { kind: "asset"; asset: Asset };
-
-export interface CompletedPart {
-  number: number;
-  etag: string;
-}
+export type CreateUploadResult = ({ kind: "upload" } & UploadTicket) | { kind: "asset"; asset: Asset };
 
 export interface CompleteUploadInput {
-  /** Required for multipart uploads. */
-  parts?: CompletedPart[];
   /**
-   * How long the server may wait for processing to finish before returning.
+   * How long the server may wait for processing before returning (max 30 s).
    * A number is interpreted as seconds; a string is sent verbatim (e.g. `"5s"`).
    */
   wait?: number | string;
 }
 
 // ---------------------------------------------------------------------------
-// Presets
+// Presets, namespaces, ping
 // ---------------------------------------------------------------------------
 
-export interface Preset {
-  slug: string;
-  version: number;
-  name?: string;
-  kind?: AssetKind;
-  /** Processing parameters. Shape depends on the preset kind. */
-  params?: Record<string, unknown>;
-  createdAt?: string;
-  updatedAt?: string;
-  [key: string]: unknown;
-}
+/** A preset with the parameters of its current version (`params` is not key-converted). */
+export type Preset = Camelize<Schemas["Preset"]>;
 
-// ---------------------------------------------------------------------------
-// Namespaces
-// ---------------------------------------------------------------------------
+/** Usage and limits of a namespace. `null` limits mean unlimited. */
+export type NamespaceUsage = Camelize<Schemas["NamespaceUsage"]>;
 
-export interface NamespaceQuota {
-  /** Maximum stored bytes. `null` means unlimited. */
-  maxBytes?: number | null;
-  /** Maximum number of assets. `null` means unlimited. */
-  maxAssets?: number | null;
-  /** Maximum processed video minutes per calendar month. `null` means unlimited. */
-  maxVideoMinutesPerMonth?: number | null;
-  [key: string]: unknown;
-}
+/**
+ * Body of `PUT /v1/namespaces/{ns}/quota`. Replaces **all** limits: an
+ * omitted field is stored as `null` (unlimited).
+ */
+export type NamespaceQuotaInput = Camelize<Schemas["QuotaInput"]>;
 
-export interface NamespaceUsage {
-  namespace: string;
-  bytes: number;
-  count: number;
-  videoMinutesThisMonth?: number;
-  limits?: NamespaceQuota;
-  [key: string]: unknown;
-}
+/** Result of `GET /v1/ping`: the project and scopes of the API key. */
+export type PingResult = Camelize<JsonResponse<"ping", 200>>;
 
 // ---------------------------------------------------------------------------
 // Webhooks
 // ---------------------------------------------------------------------------
 
-export type WebhookEventType =
-  | "asset.ready"
-  | "asset.failed"
-  | "asset.updated"
-  | "asset.deleted"
-  | "upload.expired"
-  | "quota.warning"
-  | "quota.exceeded"
-  | "namespace.purged";
-
-interface WebhookEventBase<T extends WebhookEventType, D> {
-  /** Value of the `webhook-id` header. Use it to deduplicate deliveries. */
+/** Adds the `webhook-id` header value (the event id, `evt_…`) to a payload. */
+type WithId<E> = E & {
+  /** Value of the `webhook-id` header. Identical across retries; deduplicate on it. */
   id: string;
-  type: T;
-  /** ISO 8601 timestamp from the payload. */
-  timestamp: string;
-  data: D;
-}
+};
 
-export interface AssetEventData {
-  asset: Asset;
-  metadata?: Metadata;
-  [key: string]: unknown;
-}
+export type AssetReadyEvent = WithId<Camelize<Schemas["AssetReadyEvent"]>>;
+export type AssetFailedEvent = WithId<Camelize<Schemas["AssetFailedEvent"]>>;
+export type AssetUpdatedEvent = WithId<Camelize<Schemas["AssetUpdatedEvent"]>>;
+export type AssetDeletedEvent = WithId<Camelize<Schemas["AssetDeletedEvent"]>>;
+export type UploadExpiredEvent = WithId<Camelize<Schemas["UploadExpiredEvent"]>>;
+export type QuotaWarningEvent = WithId<Camelize<Schemas["QuotaWarningEvent"]>>;
+export type QuotaExceededEvent = WithId<Camelize<Schemas["QuotaExceededEvent"]>>;
+/** Sent only by the admin console's "Send test" action. */
+export type WebhookTestEvent = WithId<Camelize<Schemas["WebhookTestEvent"]>>;
 
-export type AssetReadyEvent = WebhookEventBase<"asset.ready", AssetEventData>;
-export type AssetFailedEvent = WebhookEventBase<
-  "asset.failed",
-  AssetEventData & { error: AssetError }
->;
-export type AssetUpdatedEvent = WebhookEventBase<"asset.updated", AssetEventData>;
-export type AssetDeletedEvent = WebhookEventBase<"asset.deleted", AssetEventData>;
-export type UploadExpiredEvent = WebhookEventBase<
-  "upload.expired",
-  { uploadId: string; namespace?: string; metadata?: Metadata; [key: string]: unknown }
->;
-export interface QuotaEventData {
-  namespace: string;
-  usage?: NamespaceUsage;
-  [key: string]: unknown;
-}
-export type QuotaWarningEvent = WebhookEventBase<"quota.warning", QuotaEventData>;
-export type QuotaExceededEvent = WebhookEventBase<"quota.exceeded", QuotaEventData>;
-export type NamespacePurgedEvent = WebhookEventBase<
-  "namespace.purged",
-  { namespace: string; [key: string]: unknown }
->;
+export type AssetEventData = Camelize<Schemas["AssetEventData"]>;
+export type QuotaEventData = Camelize<Schemas["QuotaEventData"]>;
 
+/** Every webhook Kadr sends, discriminated by `type`. */
 export type WebhookEvent =
   | AssetReadyEvent
   | AssetFailedEvent
@@ -294,20 +163,16 @@ export type WebhookEvent =
   | UploadExpiredEvent
   | QuotaWarningEvent
   | QuotaExceededEvent
-  | NamespacePurgedEvent;
+  | WebhookTestEvent;
+
+export type WebhookEventType = WebhookEvent["type"];
 
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
 
-/** RFC 9457 problem details as returned by the API (camelCased). */
-export interface ProblemDetails {
-  type?: string;
-  title?: string;
-  status?: number;
-  detail?: string;
-  instance?: string;
-  code?: string;
-  errors?: unknown[];
-  [key: string]: unknown;
-}
+/**
+ * RFC 9457 problem details as returned by the API (top-level keys camelCased).
+ * `errors` maps wire field names (e.g. `content_type`) to messages.
+ */
+export type ProblemDetails = Partial<Camelize<Schemas["Problem"]>> & Record<string, unknown>;

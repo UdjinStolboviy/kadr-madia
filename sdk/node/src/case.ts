@@ -3,11 +3,17 @@
  *
  * Conversion is recursive over plain objects and arrays, except for the values
  * of keys listed in `OPAQUE_KEYS`: those values are copied verbatim, because
- * they contain user data (`metadata`) or protocol data (`headers`, e.g.
- * `Content-Type`) whose keys must not change.
+ * they contain user data (`metadata`), protocol data (`headers`, e.g.
+ * `Content-Type`) or preset parameters (`params`, already camelCase on the
+ * wire) whose keys must not change. Keep in sync with `OpaqueKey` in
+ * `wire.ts`.
  */
 
-const OPAQUE_KEYS = new Set(["metadata", "headers"]);
+import type { OpaqueKey } from "./wire.js";
+
+// A Record (not an array) so adding a key to `OpaqueKey` fails typecheck here.
+const OPAQUE: Record<OpaqueKey, true> = { metadata: true, headers: true, params: true };
+const OPAQUE_KEYS = new Set<string>(Object.keys(OPAQUE));
 
 export function camelToSnake(key: string): string {
   return key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);

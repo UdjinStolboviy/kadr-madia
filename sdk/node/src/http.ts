@@ -96,7 +96,8 @@ export class HttpClient {
 
   /**
    * Retry policy: only GET requests and POST requests carrying an
-   * `Idempotency-Key` are retried. PUT/PATCH/DELETE are never retried.
+   * `Idempotency-Key` are retried (on network errors, 429, 5xx except 501,
+   * and `409 idempotency_in_progress`). PUT/PATCH/DELETE are never retried.
    */
   private isRetryable(spec: RequestSpec): boolean {
     return spec.method === "GET" || (spec.method === "POST" && !!spec.idempotencyKey);
@@ -155,6 +156,13 @@ export class HttpClient {
       if (!(res instanceof Response)) return res;
 
       // Error response.
+      if (res.status === 409 && spec.idempotencyKey) {
+        // The first request with this key is still running: wait and replay.
+        const err = await errorFromResponse(res);
+        if (err.code !== "idempotency_in_progress" || attempt >= maxRetries) throw err;
+        await sleep(this.backoff(attempt));
+        continue;
+      }
       const transient = res.status === 429 || (res.status >= 500 && res.status !== 501);
       if (transient && attempt < maxRetries) {
         const retryAfter = parseRetryAfter(res.headers.get("retry-after"));

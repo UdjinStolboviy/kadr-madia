@@ -1,6 +1,6 @@
 # Kadr API v1
 
-The source of truth is `api/openapi.yaml` (OpenAPI 3.1). `@kadr/node`, `@kadr/web` and the admin client are generated from it. This document is an overview.
+The source of truth is `api/openapi.yaml` (OpenAPI 3.1), kept in sync with the implementation in `internal/api/public` and `internal/pipeline`. The types of `@kadr/node` are generated from it (`sdk/node`, `pnpm gen`). This document is an overview; where it is less precise than the spec, the spec wins.
 
 ## General
 
@@ -8,20 +8,37 @@ The source of truth is `api/openapi.yaml` (OpenAPI 3.1). `@kadr/node`, `@kadr/we
 |---|---|
 | Base URL | `http://kadr.internal:8080/v1` (LAN only) |
 | Authentication | `Authorization: Bearer kd_live_…` or `kd_test_…` |
-| Format | JSON, `snake_case` fields |
-| Idempotency | `Idempotency-Key` on every POST (kept for 24 h) |
-| Errors | RFC 9457 `application/problem+json` with a `code` field |
-| Pagination | cursor-based: `?limit=50&cursor=…` → `next_cursor` |
-| IDs | prefixed ULIDs: `ast_…`, `upl_…`, `blb_…`, `prj_…` |
+| Format | JSON, `snake_case` fields, RFC 3339 UTC timestamps |
+| Idempotency | `Idempotency-Key` on every POST (kept for 24 h), see below |
+| Errors | RFC 9457 `application/problem+json` with a `code` field, see [Errors](#errors) |
+| Pagination | cursor-based: `?limit=50&cursor=…` → `{ "items": [...], "next_cursor": "…" \| null }` |
+| IDs | prefixed ULIDs: `ast_…`, `upl_…`, `blb_…`, `evt_…`, `prj_…` |
 | Versioning | in the path (`/v1`); adding fields is not a breaking change |
+| Not yet implemented | any other `/v1` path or method answers `501 not_implemented` |
 
 ### Key scopes
 
 `uploads:write` · `assets:read` · `assets:write` · `assets:delete` · `urls:sign` · `namespaces:admin` · `imports:write`
 
+`urls:sign` and `imports:write` can be granted but no endpoint uses them yet. Presets are readable with any valid key.
+
+### Idempotency
+
+- Applies to POST requests with an `Idempotency-Key` header (1–255 printable ASCII characters; otherwise `400 invalid_idempotency_key`).
+- Only `2xx` responses are stored and replayed, with the header `Idempotent-Replayed: true`. Any other outcome releases the key, so the request can be retried with the same key.
+- Same key while the first request is still running → `409 idempotency_in_progress`.
+- Same key with a different method, path, query or body → `422 idempotency_mismatch`.
+- The request hash covers the raw body bytes: a retried multipart request must resend the identical body (same boundary).
+
+### `GET /v1/ping`
+
+Verifies a key: `200 { "ok": true, "project": "acme", "project_id": "prj_…", "environment": "live" | "test", "key_id": "…", "scopes": [...] }`.
+
 ## Uploads
 
 ### `POST /v1/uploads` — create a ticket
+
+Scope `uploads:write`.
 
 ```json
 {
@@ -36,50 +53,64 @@ The source of truth is `api/openapi.yaml` (OpenAPI 3.1). `@kadr/node`, `@kadr/we
 }
 ```
 
-**201** — upload required:
+`preset`, `namespace`, `visibility`, `content_type` and `size` (exact bytes) are required. `namespace`: 1–128 characters of `[A-Za-z0-9._:@-]`, starting with a letter or digit. `metadata`: a JSON object of at most 16 KB. `content_type` must map to a format accepted by the preset (`limits.accept`); only image presets can be used in this version.
+
+**201** — upload required. The client PUTs the file to `url` with exactly `headers` (Content-Type and Content-Length are signed); the ticket is valid for 15 minutes and reserves `size` bytes of the project and namespace quota.
 
 ```json
 {
-  "upload_id": "upl_01JD…",
+  "upload_id": "upl_01jd…",
   "method": "PUT",
-  "url": "https://<acc>.r2.cloudflarestorage.com/kadr-private/tmp/acme/upl_01JD…?X-Amz-…",
+  "url": "https://<acc>.r2.cloudflarestorage.com/kadr-private/tmp/acme/upl_01jd…?X-Amz-…",
   "headers": { "Content-Type": "image/jpeg", "Content-Length": "384211" },
   "expires_at": "2026-11-16T21:15:00Z"
 }
 ```
 
-For `size` > 64 MB: `"method": "MULTIPART"`, `"part_size": 16777216`, `"parts": [{ "number": 1, "url": "…" }, …]` (first 20 parts; the rest via `POST /v1/uploads/{id}/parts`).
+Files larger than 64 MB need multipart uploads, which are not available yet (planned for M2): such requests get `413 too_large`.
 
-**200** — deduplicated (`sha256` already known within `project + visibility + preset_version`): returns the ready `asset` immediately, no upload needed.
+**200** — deduplicated: `sha256` matches a ready blob within the same project, visibility and preset version. A new ready asset referencing it is created (and `asset.ready` is emitted); no upload is needed:
 
-**Errors:** `quota_exceeded` (402), `unsupported_media` (415), `too_large` (413), `preset_not_found` (404).
+```json
+{ "asset": { "id": "ast_…", "status": "ready", … } }
+```
 
-### `POST /v1/uploads/{id}/parts` — get more part URLs
-
-`{ "part_numbers": [21, 22, 23] }` → `{ "parts": [...] }`
+**Errors:** `validation_failed` (422), `preset_not_found` (404), `unsupported_media` (415), `too_large` (413), `quota_exceeded` (402), `storage_not_configured` (409).
 
 ### `POST /v1/uploads/{id}/complete?wait=5s`
 
-Body for multipart: `{ "parts": [{ "number": 1, "etag": "…" }, …] }`.
+Scope `uploads:write`. No body.
 
-- Returns the `asset`. If processing finishes within `wait` (typical for photos) — `status: "ready"`, otherwise `status: "processing"` followed later by an `asset.ready` webhook.
-- Idempotent.
+- Verifies the uploaded object (exact size), creates the asset and enqueues processing.
+- `wait`: a duration (`5s`, `1500ms`) or seconds (`5`); default `0`, capped at `30s`. If processing finishes within `wait` (typical for photos) the asset is returned with `status: "ready"` (or `"failed"`), otherwise with `status: "processing"`, followed by an `asset.ready` / `asset.failed` webhook.
+- Idempotent: repeated calls return the same asset.
+
+**Errors:** `upload_incomplete` (409, the file has not been PUT yet), `upload_aborted` (409), `upload_not_pending` (409), `upload_expired` (410), `size_mismatch` (422 — the object size differs from the ticket; the upload is failed and its reservation released), `storage_error` (502), `not_found` (404).
 
 ### `DELETE /v1/uploads/{id}` — cancel
 
-Aborts the multipart upload, deletes the tmp object and releases the quota reservation.
+Scope `uploads:write`. Deletes the temporary object and releases the quota reservation: `204`. Cancelling twice is a no-op; `409 upload_not_pending` once `complete` was called.
 
 ### `POST /v1/assets` — server-side upload (multipart/form-data)
 
-For backend processes (receipt scanner, imports): files ≤ 25 MB go to Kadr directly over the LAN, bypassing R2 tmp.
+Scope `uploads:write`. For backend processes (scanners, imports): files ≤ 25 MB go to Kadr directly over the LAN, are staged on local disk and processed through the same queue as ticket uploads. Parts may come in any order:
 
-### `POST /v1/imports/url`
+| Field | |
+|---|---|
+| `preset`, `namespace`, `visibility` | required, as for tickets |
+| `metadata` | JSON object serialized as a string (≤ 16 KB) |
+| `filename` | overrides the file name of the `file` part |
+| `file` | the file (exactly one) |
 
-`{ "url": "https://…", "preset": "photo-lite", "namespace": "org_8f2c", "visibility": "public" }` → `202 { asset (processing) }`
+`?wait=` works as for `complete`. The server hashes the file; deduplicated content returns a ready asset immediately. Response: **201** with the asset.
 
-### `POST /v1/imports/cloud`
+**Errors:** as for tickets, plus `too_large` (413, over 25 MB), `unsupported_content_type` (415, the body is not multipart/form-data), `invalid_multipart` (400).
 
-`{ "connection_id": "con_…", "file_id": "…", "preset": "…", "namespace": "…", "visibility": "…" }` → `202`
+### Planned (not implemented yet, `501`)
+
+- `POST /v1/uploads/{id}/parts` and multipart tickets (`"method": "MULTIPART"`) for files over 64 MB (M2).
+- `POST /v1/imports/url` — `{ "url": "https://…", "preset": "photo-lite", "namespace": "org_8f2c", "visibility": "public" }` → `202 { asset (processing) }`.
+- `POST /v1/imports/cloud` — `{ "connection_id": "con_…", "file_id": "…", "preset": "…", "namespace": "…", "visibility": "…" }` → `202`.
 
 ## Assets
 
@@ -87,7 +118,7 @@ For backend processes (receipt scanner, imports): files ≤ 25 MB go to Kadr dir
 
 ```json
 {
-  "id": "ast_01JD…",
+  "id": "ast_01jd…",
   "status": "ready",
   "kind": "image",
   "namespace": "org_8f2c",
@@ -96,8 +127,8 @@ For backend processes (receipt scanner, imports): files ≤ 25 MB go to Kadr dir
   "preset_version": 3,
   "original": { "filename": "IMG_2231.HEIC", "content_type": "image/heic", "bytes": 4382110, "width": 4032, "height": 3024 },
   "renditions": [
-    { "name": "main", "format": "avif", "bytes": 19422, "width": 800, "height": 600, "url": "https://cdn.example.com/acme/blb_01JD…/main.avif" },
-    { "name": "main", "format": "webp", "bytes": 20110, "width": 800, "height": 600, "url": "https://cdn.example.com/acme/blb_01JD…/main.webp" }
+    { "name": "main", "format": "avif", "bytes": 19422, "width": 800, "height": 600, "url": "https://cdn.example.com/acme/blb_01jd…/main.avif" },
+    { "name": "main", "format": "webp", "bytes": 20110, "width": 800, "height": 600, "url": "https://cdn.example.com/acme/blb_01jd…/main.webp" }
   ],
   "placeholder": { "thumbhash": "1QcSHQRnh493V4dIh4eXh1h4kJUI", "dominant_color": "#a3866c" },
   "duration_sec": null,
@@ -109,15 +140,20 @@ For backend processes (receipt scanner, imports): files ≤ 25 MB go to Kadr dir
 }
 ```
 
-For `visibility: "private"` there is no `url`; instead there is a `key`, signed via the SDK or `POST /v1/signed-urls`.
+- `status`: `processing` → `ready` | `failed`. `deleted` appears only in `asset.deleted` webhook payloads.
+- `kind`: `image` or `video` (only image presets are processed in this version).
+- `original.filename`, `original.content_type`, `width`, `height`, `placeholder` (and its fields), `duration_sec`, `poster`, `savings_ratio` and `ready_at` may be `null`. `content_type` is the declared type until processing detects the real one.
+- `renditions` is empty unless the asset is `ready`.
+- `error`: present only on failed assets — `{ "code": "corrupt", "detail": "…" }`, codes as in [`asset.failed`](#webhooks).
+- For `visibility: "private"` renditions carry no `url`; instead they carry a `key`, to be signed with the SDK (`kadr.signUrl`).
 
-| Method | Path | Description |
-|---|---|---|
-| GET | `/v1/assets/{id}` | Get |
-| GET | `/v1/assets?namespace=&kind=&status=&cursor=` | List |
-| PATCH | `/v1/assets/{id}` | `metadata`, `visibility` (triggers a cross-bucket copy) |
-| DELETE | `/v1/assets/{id}` | Delete (R2 objects are removed by refcount GC) |
-| POST | `/v1/assets/{id}/reprocess` | Reprocess with another/new preset version |
+| Method | Path | Scope | Description |
+|---|---|---|---|
+| GET | `/v1/assets/{id}` | `assets:read` | Get (deleted assets: `404 not_found`) |
+| GET | `/v1/assets?namespace=&kind=&status=&limit=&cursor=` | `assets:read` | List, newest first. `status`: `processing`, `ready` or `failed`; `limit` 1–200 (default 50). Returns `{ "items": [...], "next_cursor": … }` |
+| PATCH | `/v1/assets/{id}` | `assets:write` | `{ "metadata": {…} }` replaces the metadata and emits `asset.updated`. Changing `visibility` (a cross-bucket copy) is planned for M3 and answers `501 not_implemented`; sending the current visibility is accepted |
+| DELETE | `/v1/assets/{id}` | `assets:delete` | `204`. Soft delete, releases quota, emits `asset.deleted`; stored files are removed by refcount GC. `409 asset_processing` while the asset is processing |
+| POST | `/v1/assets/{id}/reprocess` | | Planned (`501`) |
 
 ## Signed URLs (private files)
 
@@ -128,42 +164,96 @@ const url = kadr.signUrl(asset.renditions[0].key, { ttl: 3600, download: "receip
 // https://media.example.com/acme/blb_…/main.avif?exp=1763330400&kid=k3&sig=Base64Url(HMAC-SHA256(secret, "GET\n/acme/blb_…/main.avif\n1763330400\nreceipt.avif"))
 ```
 
-### Via the API
+The canonical form is specified in `sdk/node/README.md`. The edge Worker that verifies these URLs and signing-key management are not implemented yet.
+
+### Via the API (planned, `501`)
 
 `POST /v1/signed-urls` `{ "items": [{ "asset_id": "ast_…", "rendition": "main", "ttl": 3600 }] }` → `{ "items": [{ "url": "…", "expires_at": "…" }] }`
 
 ## Namespaces and quotas
 
-| Method | Path | Description |
-|---|---|---|
-| GET | `/v1/namespaces/{ns}/usage` | Bytes, count, video minutes this month, limits |
-| PUT | `/v1/namespaces/{ns}/quota` | Set limits (the organization's plan in the product) |
-| DELETE | `/v1/namespaces/{ns}` | Delete all namespace data (GDPR), async, `namespace.purged` event |
+| Method | Path | Scope | Description |
+|---|---|---|---|
+| GET | `/v1/namespaces/{ns}/usage` | `assets:read` or `namespaces:admin` | Usage and limits (unknown namespaces report zeros) |
+| PUT | `/v1/namespaces/{ns}/quota` | `namespaces:admin` | Replace all limits; returns the usage |
+| DELETE | `/v1/namespaces/{ns}` | | Planned (`501`): delete all namespace data (GDPR), async, `namespace.purged` event |
+
+Usage:
+
+```json
+{
+  "namespace": "org_8f2c",
+  "used_bytes": 1834221,
+  "reserved_bytes": 0,
+  "asset_count": 42,
+  "video_sec_month": 0,
+  "quota_bytes": 10737418240,
+  "quota_assets": null,
+  "quota_video_sec_month": null
+}
+```
+
+`used_bytes` counts the stored renditions of the namespace's assets (a deduplicated asset counts its blob again); `reserved_bytes` is the declared size of uploads in flight; `video_sec_month` covers the current calendar month (UTC). `null` limits mean unlimited.
+
+Quota body: `{ "quota_bytes": 10737418240, "quota_assets": null, "quota_video_sec_month": null }` — every field is replaced; an omitted field is stored as `null`. Values must be `>= 0`. Exceeding a project or namespace limit makes uploads fail with `402 quota_exceeded`.
 
 ## Presets
 
-`GET /v1/presets` · `GET /v1/presets/{slug}` (managed via the admin console or `PUT /v1/presets/{slug}` with the `namespaces:admin` scope).
+`GET /v1/presets` → `{ "items": [Preset] }` · `GET /v1/presets/{slug}` → `Preset` (`404 preset_not_found`). Any valid key.
+
+`Preset`: `{ "slug": "photo-lite", "kind": "image", "description": "…", "version": 3, "params": { … }, "created_at": "…" }` — `params` are the parameters of the current version (docs/PIPELINES.md §1).
+
+Presets are managed in the admin console; `PUT /v1/presets/{slug}` is planned (`501`).
 
 ## Webhooks
 
-Format: [Standard Webhooks](https://www.standardwebhooks.com/) — headers `webhook-id`, `webhook-timestamp`, `webhook-signature: v1,<base64 HMAC-SHA256>`.
+Format: [Standard Webhooks](https://www.standardwebhooks.com/) — headers `webhook-id` (the event id `evt_…`, identical across retries), `webhook-timestamp` (unix seconds of the attempt), `webhook-signature: v1,<base64 HMAC-SHA256>` over `{webhook-id}.{webhook-timestamp}.{raw body}`, keyed with the base64-decoded part of the endpoint secret after `whsec_`.
+
+Body: `{ "type": "…", "timestamp": "…", "data": { … } }`.
+
+| Event | When | `data` |
+|---|---|---|
+| `asset.ready` | Processing finished, or a deduplicated asset was created | `{ asset, metadata }` |
+| `asset.failed` | Processing failed | `{ asset, metadata, error: { code, detail? } }` |
+| `asset.updated` | Metadata changed (later also visibility) | `{ asset, metadata, changes: ["metadata"] }` |
+| `asset.deleted` | Deleted | `{ asset, metadata }`, `asset.status` is `deleted` |
+| `upload.expired` | Ticket expired without a file | `{ upload_id, namespace, preset, visibility, filename, expires_at, metadata }` |
+| `quota.warning` | Namespace byte usage crossed 80 % of its `quota_bytes` | `{ namespace, used_bytes, quota_bytes, ratio }` |
+| `quota.exceeded` | Namespace byte usage reached 100 % | same as `quota.warning` |
+| `webhook.test` | "Send test" in the admin console (ignores the endpoint's filter) | `{ endpoint_id, message }` |
+
+- `error.code` of `asset.failed`: `unsupported_media`, `too_large`, `too_many_pixels`, `corrupt`, `timeout`, `engine_failure` (from the image engine) and `source_missing`, `checksum_mismatch`, `internal` (from the pipeline).
+- Quota events are emitted per namespace only (not for the project quota), once per upward crossing; the level resets when usage drops.
+- `namespace.purged` can be subscribed to but is not emitted until namespace deletion exists.
+
+Retries: 10 s, 30 s, 2 min, 10 min, 30 min, 1 h, 3 h, 6 h, 12 h (~24 h total), then `dead` + manual re-send from the admin console. Receivers must answer `2xx` within 10 s and be idempotent by `webhook-id`.
+
+## Errors
+
+`application/problem+json`:
 
 ```json
-{ "type": "asset.ready", "timestamp": "2026-11-16T20:59:13Z", "data": { "asset": { … }, "metadata": { … } } }
+{ "type": "about:blank", "title": "Unprocessable Entity", "status": 422, "code": "validation_failed",
+  "detail": "request validation failed", "errors": { "size": "required; the exact file size in bytes" } }
 ```
 
-| Event | When |
-|---|---|
-| `asset.ready` | Processing finished |
-| `asset.failed` | Error (`error.code`: `unsupported_media`, `too_long`, `corrupt`, `timeout`, …) |
-| `asset.updated` | Visibility or metadata changed |
-| `asset.deleted` | Deleted |
-| `upload.expired` | Ticket expired without a file |
-| `quota.warning` | Namespace reached ≥ 80% |
-| `quota.exceeded` | Limit reached |
-| `namespace.purged` | Namespace deletion finished |
+`errors` (field → message) is present only for `validation_failed`.
 
-Retries: 10 s, 30 s, 2 min, 10 min, 30 min, 1 h, 3 h, 6 h, 12 h (~24 h total), then `dead` + manual re-send from the admin console. Receivers must be idempotent by `webhook-id`.
+| Status | Codes |
+|---|---|
+| 400 | `invalid_json`, `invalid_multipart`, `invalid_idempotency_key`, `invalid_body` |
+| 401 | `unauthenticated` |
+| 402 | `quota_exceeded` |
+| 403 | `insufficient_scope`, `project_disabled` |
+| 404 | `not_found`, `preset_not_found` |
+| 409 | `upload_incomplete`, `upload_aborted`, `upload_not_pending`, `asset_processing`, `storage_not_configured`, `idempotency_in_progress` |
+| 410 | `upload_expired` |
+| 413 | `too_large` |
+| 415 | `unsupported_media`, `unsupported_content_type` |
+| 422 | `validation_failed`, `size_mismatch`, `idempotency_mismatch` |
+| 500 | `internal` |
+| 501 | `not_implemented` |
+| 502 | `storage_error` |
 
 ## Admin API
 

@@ -41,12 +41,14 @@ const ticket = await kadr.uploads.create({
   preset: "photo-lite", namespace: orgId, visibility: "private",
   contentType, size, sha256, metadata: { entity: "receipt", entityId },
 }, { idempotencyKey: `${userId}:${clientUploadId}` });
+if (ticket.kind === "asset") return ticket.asset; // deduplicated by sha256: already stored
+// otherwise hand ticket.url / ticket.method / ticket.headers to the client
 
 // 2) Complete after the browser has uploaded to storage
-const asset = await kadr.uploads.complete(ticket.uploadId, { parts, wait: "5s" });
+const asset = await kadr.uploads.complete(ticket.uploadId, { wait: "5s" });
 
 // 3) Private link — signed locally, no request to Kadr
-const url = kadr.signUrl(asset.renditions[0].key, { ttl: 3600 });
+const url = kadr.signUrl(asset.renditions[0].key!, { ttl: 3600 });
 
 // 4) Webhook receiver
 const event = kadr.webhooks.verify(rawBody, headers, process.env.KADR_WEBHOOK_SECRET!);
@@ -63,11 +65,11 @@ const event = kadr.webhooks.verify(rawBody, headers, process.env.KADR_WEBHOOK_SE
 
 ### Deleting data
 
-When an entity in your product is deleted, call `kadr.assets.delete(id)` (ideally from an outbox/background job). For tenant offboarding or GDPR erasure, call `DELETE /v1/namespaces/{ns}`.
+When an entity in your product is deleted, call `kadr.assets.delete(id)` (ideally from an outbox/background job). For tenant offboarding or GDPR erasure, `DELETE /v1/namespaces/{ns}` is planned (not implemented yet; delete the namespace's assets individually until then).
 
 ### Server-side ingestion
 
-Backend jobs (scanners, imports, generated images) can send files ≤ 25 MB straight to `POST /v1/assets` over the private network, or ask Kadr to fetch a URL with `POST /v1/imports/url`.
+Backend jobs (scanners, imports, generated images) can send files ≤ 25 MB straight to `POST /v1/assets` over the private network, or (once implemented) ask Kadr to fetch a URL with `POST /v1/imports/url`.
 
 ## 4. Frontend (`@kadr/web`, `@kadr/react`)
 
