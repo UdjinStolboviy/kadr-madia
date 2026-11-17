@@ -12,9 +12,9 @@ import { Switch } from "@/components/ui/switch";
 import { useT } from "@/i18n/react";
 import { errorMessage, isApiError } from "@/lib/api";
 import { useSavePresetVersion } from "@/lib/queries";
-import type { ImageParams, Preset, VideoParams } from "@/lib/types";
+import { FILE_FORMATS, type FileParams, type ImageParams, type Preset, type VideoParams } from "@/lib/types";
 
-type Params = ImageParams | VideoParams;
+type Params = ImageParams | VideoParams | FileParams;
 type Obj = Record<string, unknown>;
 
 function clone<T>(v: T): T {
@@ -309,6 +309,103 @@ function VideoForm({ draft, set, err }: { draft: Obj; set: (path: string[], v: u
   );
 }
 
+function FileForm({ draft, set, err }: { draft: Obj; set: (path: string[], v: unknown) => void; err: (...keys: string[]) => string | undefined }) {
+  const t = useT();
+  const strategy = String(getIn(draft, ["optimize", "strategy"]) ?? "none");
+  const thumbOn = getIn(draft, ["thumbnail", "enabled"]) === true;
+  const accept = Array.isArray(getIn(draft, ["limits", "accept"])) ? (getIn(draft, ["limits", "accept"]) as string[]) : [];
+  const maxIn = getIn(draft, ["limits", "maxInputBytes"]);
+  const toggleFormat = (f: string, on: boolean) => {
+    const rest = accept.filter((a) => a !== f);
+    set(["limits", "accept"], on ? FILE_FORMATS.filter((x) => x === f || rest.includes(x)) : rest);
+  };
+  const kb = (path: string[]) => {
+    const v = getIn(draft, path);
+    return typeof v === "number" ? Math.round((v / 1024) * 10) / 10 : undefined;
+  };
+  return (
+    <>
+      <Section title={t("presets.ed.fileOptimize")}>
+        <Field label={t("presets.ed.strategy")} htmlFor="pe-fstrat" hint={t("presets.ed.fileStrategyHint")} error={err("optimize.strategy")}>
+          <SelectField
+            id="pe-fstrat"
+            value={strategy}
+            onChange={(v) => {
+              set(["optimize", "strategy"], v);
+              if (v === "downsample") {
+                if (typeof getIn(draft, ["optimize", "imageDpi"]) !== "number") set(["optimize", "imageDpi"], 150);
+                if (typeof getIn(draft, ["optimize", "jpegQuality"]) !== "number") set(["optimize", "jpegQuality"], 75);
+              }
+            }}
+            options={[
+              { value: "none", label: t("presets.ed.fileStratNone") },
+              { value: "lossless", label: t("presets.ed.fileStratLossless") },
+              { value: "downsample", label: t("presets.ed.fileStratDownsample") },
+            ]}
+          />
+        </Field>
+        {strategy === "downsample" && (
+          <div className="grid grid-cols-2 items-start gap-3 [&>*]:min-w-0">
+            <Field label={t("presets.ed.fileDpi")} htmlFor="pe-fdpi" hint={t("presets.ed.fileDpiHint")} error={err("optimize.imageDpi")}>
+              <NumberInput id="pe-fdpi" value={getIn(draft, ["optimize", "imageDpi"])} onChange={(v) => set(["optimize", "imageDpi"], v)} min={36} max={600} suffix="dpi" />
+            </Field>
+            <Field label={t("presets.ed.fileJpeg")} htmlFor="pe-fjpeg" hint={t("presets.ed.fileJpegHint")} error={err("optimize.jpegQuality")}>
+              <NumberInput id="pe-fjpeg" value={getIn(draft, ["optimize", "jpegQuality"])} onChange={(v) => set(["optimize", "jpegQuality"], v)} min={10} max={100} />
+            </Field>
+          </div>
+        )}
+        <SwitchRow id="pe-flin" label={t("presets.ed.fileLinearize")} hint={t("presets.ed.fileLinearizeHint")} checked={getIn(draft, ["optimize", "linearize"]) === true} onChange={(v) => set(["optimize", "linearize"], v)} />
+        <Field label={t("presets.ed.fileMinSavings")} htmlFor="pe-fmin" hint={t("presets.ed.fileMinSavingsHint")} error={err("optimize.minSavingsPercent")}>
+          <NumberInput id="pe-fmin" value={getIn(draft, ["optimize", "minSavingsPercent"])} onChange={(v) => set(["optimize", "minSavingsPercent"], v)} min={0} max={90} suffix="%" />
+        </Field>
+      </Section>
+
+      <Section title={t("presets.ed.fileThumb")}>
+        <SwitchRow id="pe-fthumb" label={t("presets.ed.fileThumbEnabled")} hint={t("presets.ed.fileThumbEnabledHint")} checked={thumbOn} onChange={(v) => set(["thumbnail", "enabled"], v)} />
+        {thumbOn && (
+          <div className="grid grid-cols-2 items-start gap-3 [&>*]:min-w-0">
+            <Field label={t("presets.ed.fileThumbSide")} htmlFor="pe-fside" hint={t("presets.ed.fileThumbSideHint")} error={err("thumbnail.maxSide")}>
+              <NumberInput id="pe-fside" value={getIn(draft, ["thumbnail", "maxSide"])} onChange={(v) => set(["thumbnail", "maxSide"], v)} min={96} max={2048} step={16} suffix="px" />
+            </Field>
+            <Field label={t("presets.ed.fileThumbKb")} htmlFor="pe-fkb" hint={t("presets.ed.fileThumbKbHint")} error={err("thumbnail.maxBytes")}>
+              <NumberInput id="pe-fkb" value={kb(["thumbnail", "maxBytes"])} onChange={(v) => set(["thumbnail", "maxBytes"], v === undefined ? undefined : Math.round(v * 1024))} min={1} max={1024} suffix="KB" />
+            </Field>
+          </div>
+        )}
+      </Section>
+
+      <Section title={t("presets.ed.fileInput")}>
+        <Field label={t("presets.ed.fileMaxInput")} htmlFor="pe-fmax" hint={t("presets.ed.fileMaxInputHint")} error={err("limits.maxInputBytes")}>
+          <NumberInput
+            id="pe-fmax"
+            value={typeof maxIn === "number" ? Math.round((maxIn / 1048576) * 10) / 10 : undefined}
+            onChange={(v) => set(["limits", "maxInputBytes"], v === undefined ? undefined : Math.round(v * 1048576))}
+            min={1}
+            max={5120}
+            suffix="MB"
+          />
+        </Field>
+        <fieldset className="grid gap-2" aria-describedby="pe-faccept-hint">
+          <legend className="mb-1 text-sm font-medium">{t("presets.ed.fileAccept")}</legend>
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+            {FILE_FORMATS.map((f) => (
+              <label key={f} htmlFor={`pe-fmt-${f}`} className="flex items-center gap-2 rounded-md border px-2 py-1.5 font-mono text-xs uppercase">
+                <input id={`pe-fmt-${f}`} type="checkbox" className="size-4 accent-[var(--color-brand)]" checked={accept.includes(f)} onChange={(e) => toggleFormat(f, e.target.checked)} />
+                {f}
+              </label>
+            ))}
+          </div>
+          <p id="pe-faccept-hint" className="text-xs text-muted-foreground">
+            {t("presets.ed.fileAcceptHint")}
+          </p>
+          {err("limits.accept") && <p className="text-xs text-destructive">{err("limits.accept")}</p>}
+        </fieldset>
+        <SwitchRow id="pe-fretain" label={t("presets.ed.retain")} hint={t("presets.ed.retainHint")} checked={draft.retainOriginal === true} onChange={(v) => set(["retainOriginal"], v)} />
+      </Section>
+    </>
+  );
+}
+
 export function PresetEditor({
   projectId,
   preset,
@@ -337,6 +434,7 @@ export function PresetEditor({
   const serverMsg = isApiError(save.error) ? (save.error.fieldErrors.params ?? save.error.fieldErrors.slug) : undefined;
   const err = (...keys: string[]) => (serverMsg && keys.some((k) => serverMsg.startsWith(k)) ? serverMsg : undefined);
   const isVideo = preset?.kind === "video";
+  const isFile = preset?.kind === "file";
 
   const onSave = () => {
     if (!preset) return;
@@ -367,7 +465,7 @@ export function PresetEditor({
           </SheetDescription>
         </SheetHeader>
         <div className="grid flex-1 content-start gap-6 overflow-y-auto p-4">
-          {preset && (isVideo ? <VideoForm draft={draft} set={set} err={err} /> : <ImageForm draft={draft} set={set} err={err} />)}
+          {preset && (isVideo ? <VideoForm draft={draft} set={set} err={err} /> : isFile ? <FileForm draft={draft} set={set} err={err} /> : <ImageForm draft={draft} set={set} err={err} />)}
           {serverMsg && (
             <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive" role="alert">
               {serverMsg}
@@ -380,7 +478,7 @@ export function PresetEditor({
           )}
         </div>
         <SheetFooter className="flex-row flex-wrap items-center justify-between gap-y-2 border-t">
-          {!isVideo && preset ? (
+          {!isVideo && !isFile && preset ? (
             <Button variant="ghost" size="sm" asChild>
               <Link to="/playground" search={{ project: projectId, preset: preset.slug }}>
                 <FlaskConical /> {t("presets.ed.tryPlayground")}

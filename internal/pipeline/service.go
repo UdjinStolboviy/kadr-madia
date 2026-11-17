@@ -29,6 +29,7 @@ import (
 
 	"github.com/UdjinStolboviy/kadr-madia/internal/crypto"
 	"github.com/UdjinStolboviy/kadr-madia/internal/db"
+	"github.com/UdjinStolboviy/kadr-madia/internal/engine/file"
 	"github.com/UdjinStolboviy/kadr-madia/internal/engine/image"
 	"github.com/UdjinStolboviy/kadr-madia/internal/engine/video"
 	"github.com/UdjinStolboviy/kadr-madia/internal/importer"
@@ -41,6 +42,7 @@ import (
 const (
 	JobProcessImage = "process_image"
 	JobProcessVideo = "process_video"
+	JobProcessFile  = "process_file"
 	JobSweepUploads = "sweep_uploads"
 	JobGCBlobs      = "gc_blobs"
 	JobGCBlob       = "gc_blob"
@@ -50,7 +52,8 @@ const (
 // Limits of the M1 API.
 const (
 	MaxPutBytes          = 64 << 20 // image PUT uploads
-	MaxVideoPutBytes     = 5 << 30  // single presigned PUT limit of S3/R2; video goes straight to R2
+	MaxVideoPutBytes     = 5 << 30
+	MaxFilePutBytes      = 5 << 30  // single presigned PUT limit of S3/R2; video goes straight to R2
 	MaxServerUploadBytes = 25 << 20 // POST /v1/assets
 	MaxMetadataBytes     = 16 << 10
 	MaxWait              = 30 * time.Second
@@ -75,7 +78,9 @@ type Config struct {
 	Queue  *queue.Queue
 	Engine image.Engine
 	// Video is the video engine (nil disables video presets).
-	Video   video.Engine
+	Video video.Engine
+	// File is the document engine (nil → document uploads fail with a retryable engine error).
+	File    file.Engine
 	Keyring *crypto.Keyring
 	Logger  *slog.Logger
 	Metrics *metrics.Set
@@ -106,6 +111,7 @@ type Service struct {
 	queue                 *queue.Queue
 	engine                image.Engine
 	video                 video.Engine
+	file                  file.Engine
 	keyring               *crypto.Keyring
 	log                   *slog.Logger
 	metrics               *metrics.Set
@@ -159,7 +165,7 @@ func New(cfg Config) *Service {
 		cfg.Now = time.Now
 	}
 	return &Service{
-		store: cfg.Store, queue: cfg.Queue, engine: cfg.Engine, video: cfg.Video, keyring: cfg.Keyring, log: cfg.Logger,
+		store: cfg.Store, queue: cfg.Queue, engine: cfg.Engine, video: cfg.Video, file: cfg.File, keyring: cfg.Keyring, log: cfg.Logger,
 		metrics: cfg.Metrics, tmpDir: cfg.TmpDir, webhooks: cfg.Webhooks, newDriver: cfg.NewDriver,
 		uploadTTL: cfg.UploadTTL, grace: cfg.SweepGrace, mpThreshold: cfg.MultipartThreshold, edgeBaseURL: cfg.EdgeBaseURL, fetcher: cfg.Fetcher, rclone: cfg.Rclone, partSize: cfg.PartSize, now: cfg.Now,
 		drivers:     drivers{cache: map[string]cachedDriver{}},
@@ -173,6 +179,7 @@ func New(cfg Config) *Service {
 // Register installs the pipeline job handlers on a runner.
 func (s *Service) Register(r *queue.Runner) {
 	r.Handle(JobProcessImage, queue.Handler{Run: s.runProcessImage, Dead: s.processImageDead, Lease: 2 * time.Minute})
+	r.Handle(JobProcessFile, queue.Handler{Run: s.runProcessImage, Dead: s.processImageDead, Lease: 5 * time.Minute})
 	r.Handle(JobProcessVideo, queue.Handler{Run: s.runProcessImage, Dead: s.processImageDead, Lease: 5 * time.Minute})
 	r.Handle(JobSweepUploads, queue.Handler{Run: s.runSweepUploads, Lease: 5 * time.Minute})
 	r.Handle(JobGCBlobs, queue.Handler{Run: s.runGCBlobs, Lease: 5 * time.Minute})
@@ -332,6 +339,9 @@ func renditionContentType(format string) string {
 		return "video/mp4"
 	case "m3u8":
 		return "application/vnd.apple.mpegurl"
+	}
+	if ct := file.ContentTypes[format]; ct != "" {
+		return ct
 	}
 	return "application/octet-stream"
 }

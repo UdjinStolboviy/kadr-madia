@@ -58,6 +58,8 @@ func cmdDoctor(ctx context.Context, args []string, stdout io.Writer) (bool, erro
 		capRow("ffmpeg", caps.FFmpeg, true),
 		capRow("ffprobe", caps.FFprobe, true),
 		capRow("rclone", caps.Rclone, false),
+		capRow("ghostscript", caps.Ghostscript, false),
+		capRow("qpdf", caps.QPDF, false),
 		capRow("vaapi", caps.VAAPI, false),
 	)
 	rows = append(rows, dbCheck(ctx, cfg.DBPath), masterKeyCheck(cfg))

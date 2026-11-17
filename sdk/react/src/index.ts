@@ -1,5 +1,7 @@
 export { KadrImage } from "./KadrImage.js";
 export type { KadrImageProps } from "./KadrImage.js";
+export { KadrDocument } from "./KadrDocument.js";
+export type { KadrDocumentProps } from "./KadrDocument.js";
 export { KadrVideo } from "./KadrVideo.js";
 export type { KadrVideoProps } from "./KadrVideo.js";
 export { planImage, planVideo, mimeFor } from "./renditions.js";

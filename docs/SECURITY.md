@@ -88,3 +88,8 @@ CapabilityBoundingSet=
 - `go mod verify`, `govulncheck` in CI; Renovate for dependencies.
 - Reproducible builds (`-trimpath`, pinned Go), SHA-256 and artifact signing (cosign / minisign).
 - `ffmpeg`, `libvips`, `rclone` from official Debian packages (security updates via `unattended-upgrades`).
+
+## Documents
+
+Uploads of documents are validated by content (magic bytes, ZIP structure, UTF-8), never by name or declared type; HTML/SVG/XML, macro-enabled Office files, legacy binary Office files and archives are refused; zip bombs are bounded. Stored objects carry `Content-Disposition: attachment` and the real `Content-Type`. PDFs are rewritten only by sandboxed tools (`-dSAFER`, no shell, minimal environment, timeouts) and never when signed, encrypted or PDF/A; the rewrite is accepted only if the page count is unchanged. Malware scanning is not built in — put ClamAV in front if untrusted users upload documents that others will open.
+

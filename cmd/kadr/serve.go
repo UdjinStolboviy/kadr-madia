@@ -125,7 +125,7 @@ func cmdServe(ctx context.Context, args []string, stderr io.Writer) error {
 	imgEngine := newImageEngine(cfg.PoolImage, *fakeEngine, log)
 	playground, _ := imgEngine.(admin.PlaygroundEngine)
 	svc := pipeline.New(pipeline.Config{
-		Store: store, Queue: q, Engine: imgEngine, Video: newVideoEngine(log), EdgeBaseURL: cfg.EdgeBaseURL, Keyring: keyring,
+		Store: store, Queue: q, Engine: imgEngine, Video: newVideoEngine(log), File: newFileEngine(log), EdgeBaseURL: cfg.EdgeBaseURL, Keyring: keyring,
 		Logger: log, Metrics: set, TmpDir: cfg.TmpDir, Webhooks: dispatcher,
 	})
 	if n, err := svc.EnsureModePresets(ctx); err != nil {
@@ -145,7 +145,7 @@ func cmdServe(ctx context.Context, args []string, stderr io.Writer) error {
 		log.Info("alerting enabled", "channel", "telegram")
 	}
 	runner := queue.NewRunner(q, queue.RunnerConfig{
-		Pools:  map[string]int{queue.PoolImage: cfg.PoolImage, queue.PoolVideo: cfg.PoolVideo, queue.PoolMaintenance: 1},
+		Pools:  map[string]int{queue.PoolImage: cfg.PoolImage, queue.PoolVideo: cfg.PoolVideo, queue.PoolFile: cfg.PoolFile, queue.PoolMaintenance: 1},
 		Logger: log, Metrics: set,
 	})
 	svc.Register(runner)

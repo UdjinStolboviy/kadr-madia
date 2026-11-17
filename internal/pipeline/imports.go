@@ -133,8 +133,11 @@ func (s *Service) queueImport(ctx context.Context, projectID string, c *common, 
 
 // importLimit is the byte limit of the source of pc.
 func (pc *processCtx) importLimit() int64 {
-	if pc.kind == "video" {
+	switch pc.kind {
+	case "video":
 		return pc.vparams.Limits.MaxInputBytes
+	case "file":
+		return pc.fparams.Limits.MaxInputBytes
 	}
 	return pc.params.Limits.MaxInputBytes
 }

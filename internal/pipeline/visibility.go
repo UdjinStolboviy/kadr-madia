@@ -87,8 +87,11 @@ func (s *Service) changeVisibility(ctx context.Context, a *db.Asset, to string, 
 				newRends = append(newRends, &nr)
 				continue
 			}
-			if err := tgt.driver.Copy(ctx, srcBucket, r.StorageKey, dstBucket, nr.StorageKey,
-				storage.PutOptions{ContentType: renditionContentType(r.Format), CacheControl: cache}); err != nil {
+			po := storage.PutOptions{ContentType: renditionContentType(r.Format), CacheControl: cache}
+			if old.Kind == "file" && r.Name == "main" {
+				po.ContentDisposition = contentDispositionFor(deref(a.Filename), r.Format)
+			}
+			if err := tgt.driver.Copy(ctx, srcBucket, r.StorageKey, dstBucket, nr.StorageKey, po); err != nil {
 				cleanup()
 				return nil, apiErr(http.StatusBadGateway, CodeStorageError, "could not copy %s: %v", r.StorageKey, err)
 			}

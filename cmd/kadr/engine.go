@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/UdjinStolboviy/kadr-madia/internal/engine/fakeimage"
+	"github.com/UdjinStolboviy/kadr-madia/internal/engine/file"
 	"github.com/UdjinStolboviy/kadr-madia/internal/engine/image"
 	"github.com/UdjinStolboviy/kadr-madia/internal/engine/video"
 	"github.com/UdjinStolboviy/kadr-madia/internal/preset"
@@ -51,5 +52,13 @@ func newVideoEngine(log *slog.Logger) video.Engine {
 		return nil
 	}
 	log.Info("video engine ready", "vaapi", e.HasVAAPI())
+	return e
+}
+
+// newFileEngine returns the document engine. It always works: without
+// Ghostscript/qpdf documents are validated and stored as uploaded.
+func newFileEngine(log *slog.Logger) file.Engine {
+	e := file.New(file.Config{Nice: true})
+	log.Info("document engine ready", "ghostscript", e.HasGhostscript(), "qpdf", e.HasQPDF())
 	return e
 }

@@ -63,3 +63,11 @@ Also exported: `thumbHashToRGBA`, `thumbHashToApproximateAspectRatio`,
 pnpm install
 pnpm typecheck && pnpm lint && pnpm test && pnpm build
 ```
+
+## `<KadrDocument>`
+
+```tsx
+<KadrDocument asset={asset} filename="contract.pdf" resolveUrl={(r) => signedUrls[r.key!]} />
+```
+
+A download link for a document asset (`kind: "file"`) with the first-page thumbnail of PDFs (ThumbHash placeholder included) or a file-type badge.

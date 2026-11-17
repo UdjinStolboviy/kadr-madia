@@ -31,6 +31,7 @@ type Config struct {
 	APIKeyPepper    []byte
 	PoolImage       int
 	PoolVideo       int
+	PoolFile        int
 	VideoHW         string   // auto | vaapi | off
 	TelegramToken   string   // KADR_TELEGRAM_BOT_TOKEN (alerts)
 	TelegramChatID  string   // KADR_TELEGRAM_CHAT_ID
@@ -108,6 +109,9 @@ func Load(getenv Getenv) (*Config, error) {
 		return nil, err
 	}
 	if c.PoolVideo, err = intEnv(getenv, "KADR_POOL_VIDEO", 1); err != nil {
+		return nil, err
+	}
+	if c.PoolFile, err = intEnv(getenv, "KADR_POOL_FILE", 1); err != nil {
 		return nil, err
 	}
 

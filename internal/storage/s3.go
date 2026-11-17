@@ -73,6 +73,9 @@ func (d *S3) Put(ctx context.Context, bucket, key string, body io.ReadSeeker, si
 	if o.CacheControl != "" {
 		in.CacheControl = aws.String(o.CacheControl)
 	}
+	if o.ContentDisposition != "" {
+		in.ContentDisposition = aws.String(o.ContentDisposition)
+	}
 	if _, err := d.client.PutObject(ctx, in); err != nil {
 		return fmt.Errorf("storage: put %s/%s: %w", bucket, key, mapErr(err))
 	}
@@ -145,6 +148,9 @@ func (d *S3) Copy(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey stri
 		}
 		if opts[0].CacheControl != "" {
 			in.CacheControl = aws.String(opts[0].CacheControl)
+		}
+		if opts[0].ContentDisposition != "" {
+			in.ContentDisposition = aws.String(opts[0].ContentDisposition)
 		}
 	}
 	if _, err := d.client.CopyObject(ctx, in); err != nil {

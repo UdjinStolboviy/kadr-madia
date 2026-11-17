@@ -6,7 +6,7 @@ export interface R2ObjectLike {
   size: number;
   httpEtag: string;
   uploaded: Date;
-  httpMetadata?: { contentType?: string; contentLanguage?: string; contentEncoding?: string };
+  httpMetadata?: { contentType?: string; contentLanguage?: string; contentEncoding?: string; contentDisposition?: string };
 }
 export interface R2ObjectBodyLike extends R2ObjectLike {
   body: ReadableStream<Uint8Array>;

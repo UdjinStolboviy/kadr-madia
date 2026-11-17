@@ -193,10 +193,51 @@ function videoSummary(p: Obj): PresetSummary {
   return { headline: parts.join(" · ") || t("common.preset.videoDefault"), facts };
 }
 
+function fileSummary(p: Obj): PresetSummary {
+  const parts: string[] = [];
+  const facts: PresetFact[] = [];
+  const o = obj(p.optimize);
+  if (o) {
+    const strategy = str(o.strategy) ?? "none";
+    const lin = o.linearize === true;
+    let label: string;
+    if (strategy === "downsample") {
+      label = t("common.preset.fileDownsample", { dpi: num(o.imageDpi) ?? "?", q: num(o.jpegQuality) ?? "?" });
+    } else if (strategy === "lossless") {
+      label = t("common.preset.fileLossless");
+    } else {
+      label = t("common.preset.fileNone");
+    }
+    parts.push(lin ? `${label}, ${t("common.preset.fileLinearized")}` : label);
+    facts.push({ label: t("common.preset.fileOptimize"), value: lin ? `${label}, ${t("common.preset.fileLinearized")}` : label });
+    if (num(o.minSavingsPercent)) facts.push({ label: t("common.preset.fileMinSavings"), value: `≥ ${o.minSavingsPercent}%` });
+  }
+  const th = obj(p.thumbnail);
+  if (th) {
+    const on = th.enabled === true;
+    const value = on
+      ? [num(th.maxBytes) !== null && `≤ ${formatBytes(num(th.maxBytes))}`, num(th.maxSide) !== null && `≤ ${th.maxSide}px`].filter(Boolean).join(" · ")
+      : t("common.preset.fileThumbOff");
+    parts.push(on ? t("common.preset.fileThumbHeadline", { size: formatBytes(num(th.maxBytes)) }) : t("common.preset.fileThumbOff"));
+    facts.push({ label: t("common.preset.fileThumb"), value });
+  }
+  const lim = obj(p.limits);
+  if (lim) {
+    const items: string[] = [];
+    if (num(lim.maxInputBytes) !== null) items.push(`≤ ${formatBytes(num(lim.maxInputBytes))}`);
+    if (Array.isArray(lim.accept)) items.push(lim.accept.filter((a) => typeof a === "string").join(", "));
+    if (items.length) facts.push({ label: t("common.preset.input"), value: items.join(" · ") });
+  }
+  if (typeof p.retainOriginal === "boolean") {
+    facts.push({ label: t("common.preset.original"), value: p.retainOriginal ? t("common.preset.retained") : t("common.preset.discarded") });
+  }
+  return { headline: parts.join(" · ") || t("common.preset.fileDefault"), facts };
+}
+
 export function summarizePreset(kind: string, params: Record<string, unknown>): PresetSummary {
   try {
     const k = str(params.kind) ?? kind;
-    return k === "video" ? videoSummary(params) : imageSummary(params);
+    return k === "video" ? videoSummary(params) : k === "file" ? fileSummary(params) : imageSummary(params);
   } catch {
     return { headline: t("common.preset.generic", { kind }), facts: [] };
   }
@@ -204,7 +245,7 @@ export function summarizePreset(kind: string, params: Record<string, unknown>): 
 
 const MODE_NAMES = ["compact", "balanced", "quality"];
 
-/** The six built-in compression-mode presets (image-<mode>, video-<mode>). */
+/** The nine built-in compression-mode presets (image-, video-, file-<mode>). */
 export function isModeSlug(slug: string): boolean {
-  return MODE_NAMES.some((m) => slug === `image-${m}` || slug === `video-${m}`);
+  return MODE_NAMES.some((m) => slug === `image-${m}` || slug === `video-${m}` || slug === `file-${m}`);
 }

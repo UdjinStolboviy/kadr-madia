@@ -52,8 +52,8 @@ func (s *Service) ListAssets(ctx context.Context, projectID string, in ListAsset
 	if in.Namespace != "" && !ValidNamespace(in.Namespace) {
 		errs["namespace"] = "invalid namespace"
 	}
-	if in.Kind != "" && in.Kind != "image" && in.Kind != "video" {
-		errs["kind"] = `must be "image" or "video"`
+	if in.Kind != "" && in.Kind != "image" && in.Kind != "video" && in.Kind != "file" {
+		errs["kind"] = `must be "image", "video" or "file"`
 	}
 	switch in.Status {
 	case "", db.AssetProcessing, db.AssetReady, db.AssetFailed:

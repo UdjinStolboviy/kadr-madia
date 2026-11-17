@@ -23,8 +23,10 @@ export function ulid(prefix = ""): string {
   return prefix + (Date.now().toString(32).toUpperCase() + s).slice(0, 26 - prefix.length);
 }
 
+const fileLimits = { maxInputBytes: 104857600, accept: ["pdf", "docx", "xlsx", "pptx", "odt", "ods", "odp", "rtf", "txt", "csv"] };
+
 export function defaultPresets(projectId: string, createdAt: string): Preset[] {
-  const mk = (slug: string, kind: "image" | "video", description: string, params: Record<string, unknown>): Preset => ({
+  const mk = (slug: string, kind: "image" | "video" | "file", description: string, params: Record<string, unknown>): Preset => ({
     id: ulid("pst_"),
     slug,
     kind,
@@ -109,6 +111,13 @@ export function defaultPresets(projectId: string, createdAt: string): Preset[] {
       limits: { maxInputBytes: 2147483648, maxDurationSec: 300, maxWidth: 4096, maxHeight: 4096 },
       retainOriginal: false,
     }),
+    mk("file-original", "file", "Documents stored exactly as uploaded (validated by content); PDF thumbnail ≤ 20 KB", {
+      kind: "file",
+      limits: fileLimits,
+      optimize: { strategy: "none", linearize: false, minSavingsPercent: 0 },
+      thumbnail: { enabled: true, maxSide: 640, maxBytes: 20480 },
+      retainOriginal: false,
+    }),
     ...modePresets(projectId, createdAt),
   ];
 }
@@ -161,6 +170,15 @@ export function modePresets(projectId: string, createdAt: string): Preset[] {
       retainOriginal: false,
     },
   });
+  const doc = (mode: string, description: string, optimize: Record<string, unknown>, thumbnail: Record<string, unknown>): Preset => ({
+    id: ulid("pst_"),
+    slug: `file-${mode}`,
+    kind: "file",
+    description,
+    current_version: 1,
+    created_at: createdAt,
+    params: { kind: "file", limits: fileLimits, optimize, thumbnail, retainOriginal: false },
+  });
   return [
     img("compact", "Compact: good quality at a very small size (max side 1080, ≤ 30 KB)", 1080, { mode: "budget", maxBytes: 30720, qMax: 55, qMin: 25, downscaleStep: 0.85, minSide: 480 }, std, { sigma: 0.6, m1: 0.5, m2: 1.5 }),
     img("balanced", "Balanced: the golden middle (max side 1440, SSIM ≥ 0.975)", 1440, { mode: "ssim", target: 0.975, qMin: 35, qMax: 65 }, std, null),
@@ -168,6 +186,9 @@ export function modePresets(projectId: string, createdAt: string): Preset[] {
     vid("compact", "Compact: 480p H.264 CRF 30, ≤ 450 kbit/s, AAC 48k mono", { maxWidth: 854, crf: 30, maxrate: "450k", bufsize: "900k" }, { bitrate: "48k", channels: 1, sampleRate: 44100 }),
     vid("balanced", "Balanced: 720p H.264 CRF 26, ≤ 1.2 Mbit/s, AAC 96k stereo", { maxWidth: 1280, crf: 26, maxrate: "1200k", bufsize: "2400k" }, { bitrate: "96k", channels: 2, sampleRate: 44100 }),
     vid("quality", "Quality: 1080p H.264 CRF 20, ≤ 5 Mbit/s, AAC 160k stereo", { maxWidth: 1920, crf: 20, maxrate: "5000k", bufsize: "10000k" }, { bitrate: "160k", channels: 2, sampleRate: 48000 }),
+    doc("compact", "Compact: PDF images re-encoded at 110 dpi / JPEG 60, linearized; thumbnail ≤ 12 KB", { strategy: "downsample", imageDpi: 110, jpegQuality: 60, linearize: true, minSavingsPercent: 5 }, { enabled: true, maxSide: 480, maxBytes: 12288 }),
+    doc("balanced", "Balanced: PDF images at 150 dpi / JPEG 75, linearized; thumbnail ≤ 20 KB", { strategy: "downsample", imageDpi: 150, jpegQuality: 75, linearize: true, minSavingsPercent: 5 }, { enabled: true, maxSide: 640, maxBytes: 20480 }),
+    doc("quality", "Quality: lossless PDF recompression (no visible change), linearized; thumbnail ≤ 30 KB", { strategy: "lossless", linearize: true, minSavingsPercent: 3 }, { enabled: true, maxSide: 800, maxBytes: 30720 }),
   ];
 }
 

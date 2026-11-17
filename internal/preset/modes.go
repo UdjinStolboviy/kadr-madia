@@ -30,12 +30,12 @@ func ValidMode(m string) bool {
 	return false
 }
 
-// ModeSlug returns the preset slug of a mode for kind "image" or "video".
+// ModeSlug returns the preset slug of a mode for kind "image", "video" or "file".
 func ModeSlug(kind, mode string) string { return kind + "-" + mode }
 
-// IsModeSlug reports whether slug is one of the six mode presets.
+// IsModeSlug reports whether slug is one of the nine mode presets.
 func IsModeSlug(slug string) bool {
-	for _, k := range []string{"image", "video"} {
+	for _, k := range []string{"image", "video", "file"} {
 		for _, m := range Modes {
 			if slug == ModeSlug(k, m) {
 				return true
@@ -45,7 +45,7 @@ func IsModeSlug(slug string) bool {
 	return false
 }
 
-// ModePresets returns the six mode presets.
+// ModePresets returns the nine mode presets (image, video and file × 3).
 func ModePresets() []DefaultPreset {
 	var out []DefaultPreset
 	for _, d := range DefaultPresets() {

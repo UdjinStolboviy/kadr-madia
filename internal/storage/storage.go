@@ -43,8 +43,9 @@ type ObjectInfo struct {
 
 // PutOptions are optional object attributes for Put.
 type PutOptions struct {
-	ContentType  string
-	CacheControl string
+	ContentType        string
+	CacheControl       string
+	ContentDisposition string // e.g. attachment; filename="a.pdf"
 }
 
 // PresignPutOptions constrain a presigned upload. ContentLength and

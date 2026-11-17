@@ -370,3 +370,22 @@ pnpm gen          # regenerate src/generated/openapi.ts after editing api/openap
 pnpm typecheck && pnpm lint && pnpm test && pnpm build
 ../../scripts/e2e-sdk.sh   # contract tests against a real server (pnpm test:e2e)
 ```
+
+## Documents
+
+PDF, DOCX, XLSX, PPTX, ODT/ODS/ODP, RTF, TXT and CSV are uploaded like any other file — send a compression `mode` (or a `file-*` preset); the kind (`"file"`) is chosen from the content type:
+
+```ts
+const up = await kadr.uploads.create({
+  mode: "balanced",               // file-balanced: PDF images 150 dpi, linearized, thumbnail of page 1
+  namespace: "org_8f2c",
+  visibility: "private",
+  filename: "contract.pdf",
+  contentType: "application/pdf",
+  size: file.byteLength,
+});
+// PUT to up.url (or the multipart parts), then:
+const asset = await kadr.uploads.complete(up.uploadId, { wait: 20 });
+asset.kind;        // "file"
+const [{ url }] = await kadr.signUrls([{ assetId: asset.id, rendition: "main", download: "contract.pdf" }]);
+```

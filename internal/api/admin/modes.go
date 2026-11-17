@@ -17,12 +17,14 @@ type modeDTO struct {
 	Description string     `json:"description"`
 	Image       presetDTO  `json:"image"`
 	Video       presetDTO  `json:"video"`
+	File        presetDTO  `json:"file"`
 	Customized  customized `json:"customized"`
 }
 
 type customized struct {
 	Image bool `json:"image"`
 	Video bool `json:"video"`
+	File  bool `json:"file"`
 }
 
 // handleListModes: GET /admin/api/projects/{id}/modes — the three compression
@@ -45,7 +47,7 @@ func (s *Server) handleListModes(w http.ResponseWriter, r *http.Request) {
 	out := make([]modeDTO, 0, 3)
 	for _, m := range preset.Modes {
 		d := modeDTO{Mode: m, Description: descr[m]}
-		for _, kind := range []string{"image", "video"} {
+		for _, kind := range []string{"image", "video", "file"} {
 			pr, err := s.store.GetPresetBySlug(r.Context(), p.ID, preset.ModeSlug(kind, m))
 			if errors.Is(err, db.ErrNotFound) {
 				continue // created on the next start (EnsureModePresets)
@@ -56,10 +58,13 @@ func (s *Server) handleListModes(w http.ResponseWriter, r *http.Request) {
 			}
 			dto := toPresetDTO(pr)
 			edited := pr.CurrentVersion > 1 && !sameJSON(pr.Params, defaults[pr.Slug].Params)
-			if kind == "image" {
+			switch kind {
+			case "image":
 				d.Image, d.Customized.Image = dto, edited
-			} else {
+			case "video":
 				d.Video, d.Customized.Video = dto, edited
+			default:
+				d.File, d.Customized.File = dto, edited
 			}
 		}
 		out = append(out, d)

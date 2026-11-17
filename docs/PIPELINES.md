@@ -102,6 +102,14 @@ Three ready-made trade-offs for **images and videos**, seeded into every project
 
 On the reference photo the three image modes produce ≈ 24 KB / 96 KB / 350 KB; the video modes on synthetic noisy 1080p ≈ 0.17 / 0.6 / 2.5 MB (tests `TestCompressionModesAreOrdered`, `TestVideoModesAreOrdered`). `quality` uses the SSIM search, so it stops at the lowest quality that still reaches the target instead of always using the maximum.
 
+Documents (`file-compact`, `file-balanced`, `file-quality`, plus `file-original` = store as uploaded) follow the same idea for PDFs — see §4:
+
+| Mode | PDF optimisation | Thumbnail of page 1 |
+|---|---|---|
+| `compact` | images re-encoded at 110 dpi / JPEG 60 (Ghostscript), linearized (qpdf) | ≤ 12 KB, max side 480 |
+| `balanced` | images at 150 dpi / JPEG 75, linearized | ≤ 20 KB, max side 640 |
+| `quality` | lossless: qpdf recompression + object streams + linearization, no visible change | ≤ 30 KB, max side 800 |
+
 **Per-project settings.** Each project owns its copies: edit any mode preset in the admin console (Compression modes tab — a new preset *version*; existing assets keep the version they were processed with), change the default mode, or *Reset* a preset to the built-in values. Projects created before modes existed get the six presets on the next start. The legacy purpose-specific presets (`photo-lite`, `photo-balanced`, `doc-lite`, `avatar`, `video-720p`, `video-480p-eco`) remain.
 
 ## 3. Video
@@ -173,3 +181,26 @@ A video preset with `"hls": true` additionally produces an adaptive package next
 - **Reference fixture set** (`test/fixtures`): photos, screenshots, documents, night shots, iPhone HEIC, rotated and VFR video.
 - **Golden tests in CI:** for every preset we assert `bytes ≤ maxBytes`, a minimum SSIM against a downscaled reference, and stable dimensions.
 - **Savings metric:** `original_bytes` vs `sum(rendition bytes)` per Blob → "ingested / stored / saved" dashboard.
+
+## 4. Documents (`kind: "file"`)
+
+Accepted formats: **PDF, DOCX, XLSX, PPTX, ODT, ODS, ODP, RTF, TXT, CSV** (a preset's `limits.accept` narrows the list). Everything else — images, video, archives, legacy binary Office (`.doc/.xls/.ppt`), macro-enabled Office files, HTML/SVG/XML — is refused.
+
+**Validation is by content, never by file name or declared type** (`internal/engine/file`):
+- PDF: `%PDF-` header, `%%EOF` trailer, page count via Ghostscript (a PDF Ghostscript cannot parse is `corrupt`).
+- DOCX/XLSX/PPTX: a valid ZIP with `[Content_Types].xml` and the matching main part; ODT/ODS/ODP: the `mimetype` entry. Zip-bomb limits (≤ 20 000 entries, ≤ 2 GiB expanded, ratio ≤ 1000×); `vbaProject.bin` ⇒ refused.
+- RTF: `{\rtf` header. TXT/CSV: valid UTF-8, no NUL bytes, ≤ 1 % control characters, and **never markup** (a text file starting with `<` is refused).
+
+**Optimisation (PDF only, best effort — it never fails an upload):**
+1. Skipped, original stored, when the PDF is **digitally signed** (`/ByteRange`), **encrypted** (`/Encrypt`) or claims **PDF/A** (`pdfaid:part`) — rewriting would break the signature or the conformance.
+2. `downsample`: Ghostscript `pdfwrite` (`-dSAFER`, no network, minimal environment, timeout) re-encodes colour/gray images at `imageDpi` and JPEG `jpegQuality`; `lossless`: qpdf object-stream/Flate recompression; `Linearize` adds "fast web view".
+3. The result is kept only if it is a valid PDF with the **same page count** and at least `minSavingsPercent` smaller; otherwise the original is stored. The reason is logged (`signed`, `encrypted`, `pdfa`, `no_savings`, `tool_missing`, `failed`).
+4. Without Ghostscript/qpdf installed (see System → capabilities) documents are validated and stored as uploaded.
+5. `retainOriginal` keeps the uploaded file in the private bucket when it was rewritten.
+
+DOCX/XLSX/PPTX/ODF are ZIP containers already; they are stored unchanged (rewriting them risks corrupting documents for a few percent).
+
+**Thumbnail:** page 1 of the PDF is rendered by Ghostscript and compressed by the image budget search (AVIF + WebP, rendition name `thumb`, ThumbHash and dominant colour included).
+
+**Storage and delivery:** the document is the rendition `main` with `format` = `pdf`/`docx`/…; it is stored with its real `Content-Type` and `Content-Disposition: attachment; filename="…"; filename*=UTF-8''…`, so a document is downloaded, never rendered inline from the CDN origin (add a Transform Rule with `X-Content-Type-Options: nosniff` on `cdn.<domain>`; `kadr-edge` already sets it and honours the stored disposition, or `download` per URL). Dedup by SHA-256, quotas, public/private, visibility change, signed URLs and imports work like for media. Limits: 100 MB default (`limits.maxInputBytes`, max 5 GB); files over 64 MB use multipart tickets like videos; ClamAV scanning is not built in.
+

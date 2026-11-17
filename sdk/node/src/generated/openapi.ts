@@ -483,8 +483,11 @@ export interface components {
         Namespace: string;
         /** @enum {string} */
         Visibility: "public" | "private";
-        /** @enum {string} */
-        Kind: "image" | "video";
+        /**
+         * @description `file` = document (PDF, DOCX, XLSX, PPTX, ODT, ODS, ODP, RTF, TXT, CSV).
+         * @enum {string}
+         */
+        Kind: "image" | "video" | "file";
         /**
          * @description Free-form JSON object stored with the asset (≤ 16 KB).
          * @example {
@@ -496,8 +499,8 @@ export interface components {
             [key: string]: unknown;
         };
         /**
-         * @description Compression mode, resolved to the project's preset `image-<mode>` or
-         *     `video-<mode>` by the file type. `compact`: good quality at a very small
+         * @description Compression mode, resolved to the project's preset `image-<mode>`,
+         *     `video-<mode>` or `file-<mode>` (documents) by the file type. `compact`: good quality at a very small
          *     size; `balanced`: the golden middle; `quality`: ideal quality at the
          *     smallest size that still achieves it. Every project can edit its mode
          *     presets in the admin console.
@@ -611,8 +614,10 @@ export interface components {
             /** @example main */
             name: string;
             /**
+             * @description Encoded format: avif, webp, mp4, m3u8, or the document format (pdf, docx, …).
              * @example avif
              * @example webp
+             * @example pdf
              */
             format: string;
             bytes: number;
@@ -838,7 +843,7 @@ export interface components {
                 "application/problem+json": components["schemas"]["Problem"];
             };
         };
-        /** @description `unsupported_media` — content type not accepted by the preset, or a non-image preset. */
+        /** @description `unsupported_media` — content type not accepted by the preset (for documents the file is also checked by content). */
         UnsupportedMedia: {
             headers: {
                 [name: string]: unknown;
@@ -1155,7 +1160,7 @@ export interface operations {
             404: components["responses"]["PresetNotFound"];
             409: components["responses"]["Conflict"];
             413: components["responses"]["TooLarge"];
-            /** @description `unsupported_media` (non-image preset) or `unsupported_content_type` (the body is not multipart/form-data). */
+            /** @description `unsupported_media` or `unsupported_content_type` (the body is not multipart/form-data). */
             415: {
                 headers: {
                     [name: string]: unknown;

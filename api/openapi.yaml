@@ -247,7 +247,7 @@ paths:
         "409": { $ref: "#/components/responses/Conflict" }
         "413": { $ref: "#/components/responses/TooLarge" }
         "415":
-          description: "`unsupported_media` (non-image preset) or `unsupported_content_type` (the body is not multipart/form-data)."
+          description: "`unsupported_media` or `unsupported_content_type` (the body is not multipart/form-data)."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
@@ -784,7 +784,7 @@ components:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
     UnsupportedMedia:
-      description: "`unsupported_media` — content type not accepted by the preset, or a non-image preset."
+      description: "`unsupported_media` — content type not accepted by the preset (for documents the file is also checked by content)."
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
@@ -825,7 +825,8 @@ components:
       enum: [public, private]
     Kind:
       type: string
-      enum: [image, video]
+      enum: [image, video, file]
+      description: "`file` = document (PDF, DOCX, XLSX, PPTX, ODT, ODS, ODP, RTF, TXT, CSV)."
     Metadata:
       type: object
       description: Free-form JSON object stored with the asset (≤ 16 KB).
@@ -836,8 +837,8 @@ components:
       type: string
       enum: [compact, balanced, quality]
       description: |
-        Compression mode, resolved to the project's preset `image-<mode>` or
-        `video-<mode>` by the file type. `compact`: good quality at a very small
+        Compression mode, resolved to the project's preset `image-<mode>`,
+        `video-<mode>` or `file-<mode>` (documents) by the file type. `compact`: good quality at a very small
         size; `balanced`: the golden middle; `quality`: ideal quality at the
         smallest size that still achieves it. Every project can edit its mode
         presets in the admin console.
@@ -960,7 +961,7 @@ components:
       required: [name, format, bytes, width, height]
       properties:
         name: { type: string, examples: [main] }
-        format: { type: string, examples: [avif, webp] }
+        format: { type: string, description: "Encoded format: avif, webp, mp4, m3u8, or the document format (pdf, docx, …).", examples: [avif, webp, pdf] }
         bytes: { type: integer }
         width: { type: [integer, "null"] }
         height: { type: [integer, "null"] }

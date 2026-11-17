@@ -88,6 +88,16 @@ export const en = {
   "common.preset.posterAt": "at {sec}s",
   "common.preset.minutes": "{n} min",
   "common.preset.mp": "{n} MP",
+  "common.preset.fileDefault": "Document preset",
+  "common.preset.fileDownsample": "PDF images {dpi} dpi / JPEG {q}",
+  "common.preset.fileLossless": "PDF lossless recompression",
+  "common.preset.fileNone": "stored as uploaded",
+  "common.preset.fileLinearized": "linearized",
+  "common.preset.fileOptimize": "Optimization",
+  "common.preset.fileMinSavings": "Min. savings",
+  "common.preset.fileThumb": "Thumbnail",
+  "common.preset.fileThumbOff": "no thumbnail",
+  "common.preset.fileThumbHeadline": "thumbnail ≤ {size}",
 };
 
 export const uk: Messages<typeof en> = {
@@ -174,6 +184,16 @@ export const uk: Messages<typeof en> = {
   "common.preset.posterAt": "на {sec} с",
   "common.preset.minutes": "{n} хв",
   "common.preset.mp": "{n} Мп",
+  "common.preset.fileDefault": "Пресет документів",
+  "common.preset.fileDownsample": "зображення в PDF {dpi} dpi / JPEG {q}",
+  "common.preset.fileLossless": "PDF: стиснення без втрат",
+  "common.preset.fileNone": "зберігається як є",
+  "common.preset.fileLinearized": "лінеаризація",
+  "common.preset.fileOptimize": "Оптимізація",
+  "common.preset.fileMinSavings": "Мін. економія",
+  "common.preset.fileThumb": "Мініатюра",
+  "common.preset.fileThumbOff": "без мініатюри",
+  "common.preset.fileThumbHeadline": "мініатюра ≤ {size}",
 };
 
 export const es: Messages<typeof en> = {
@@ -260,4 +280,14 @@ export const es: Messages<typeof en> = {
   "common.preset.posterAt": "en {sec} s",
   "common.preset.minutes": "{n} min",
   "common.preset.mp": "{n} MP",
+  "common.preset.fileDefault": "Preset de documentos",
+  "common.preset.fileDownsample": "imágenes del PDF {dpi} dpi / JPEG {q}",
+  "common.preset.fileLossless": "PDF: recompresión sin pérdidas",
+  "common.preset.fileNone": "se guarda tal cual",
+  "common.preset.fileLinearized": "linealizado",
+  "common.preset.fileOptimize": "Optimización",
+  "common.preset.fileMinSavings": "Ahorro mín.",
+  "common.preset.fileThumb": "Miniatura",
+  "common.preset.fileThumbOff": "sin miniatura",
+  "common.preset.fileThumbHeadline": "miniatura ≤ {size}",
 };

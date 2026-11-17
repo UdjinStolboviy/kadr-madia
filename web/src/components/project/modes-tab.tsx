@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Film, ImageIcon, Loader2, Pencil, RotateCcw } from "lucide-react";
+import { FileText, Film, ImageIcon, Loader2, Pencil, RotateCcw } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -34,9 +34,10 @@ const TITLES: Record<CompressionMode, { title: MessageKey; blurb: MessageKey }> 
   quality: { title: "modes.quality.title", blurb: "modes.quality.blurb" },
 };
 
-const FACT_LABELS: Record<"image" | "video", MessageKey[]> = {
+const FACT_LABELS: Record<"image" | "video" | "file", MessageKey[]> = {
   image: ["common.preset.resize", "common.preset.quality", "common.preset.formats"],
   video: ["common.preset.video", "common.preset.frame", "common.preset.audio"],
+  file: ["common.preset.fileOptimize", "common.preset.fileThumb", "common.preset.input"],
 };
 
 function PresetColumn({
@@ -47,7 +48,7 @@ function PresetColumn({
   onReset,
   resetting,
 }: {
-  kind: "image" | "video";
+  kind: "image" | "video" | "file";
   preset: Preset | undefined;
   customized: boolean;
   onEdit: () => void;
@@ -55,8 +56,8 @@ function PresetColumn({
   resetting: boolean;
 }) {
   const t = useT();
-  const Icon = kind === "video" ? Film : ImageIcon;
-  const kindLabel = kind === "video" ? t("modes.kindVideo") : t("modes.kindImage");
+  const Icon = kind === "video" ? Film : kind === "file" ? FileText : ImageIcon;
+  const kindLabel = kind === "video" ? t("modes.kindVideo") : kind === "file" ? t("modes.kindFile") : t("modes.kindImage");
   if (!preset) {
     return (
       <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
@@ -69,7 +70,7 @@ function PresetColumn({
   return (
     <div className="flex min-w-0 flex-col gap-3 rounded-lg border bg-muted/20 p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <Icon className={cn("size-4", kind === "video" ? "text-warning" : "text-brand")} />
+        <Icon className={cn("size-4", kind === "video" ? "text-warning" : kind === "file" ? "text-success" : "text-brand")} />
         <span className="text-sm font-semibold">{kindLabel}</span>
         <StatusBadge tone="neutral" dot={false}>
           v{preset.current_version}
@@ -112,9 +113,10 @@ function ModeCard({ info, isDefault, onEdit, onReset, resettingSlug }: { info: M
         </CardTitle>
         <CardDescription>{t(names.blurb)}</CardDescription>
       </CardHeader>
-      <CardContent className="grid gap-3 px-5 md:grid-cols-2">
+      <CardContent className="grid gap-3 px-5 md:grid-cols-2 xl:grid-cols-3">
         <PresetColumn kind="image" preset={info.image} customized={info.customized.image} onEdit={() => onEdit(info.image)} onReset={() => onReset(info.image)} resetting={resettingSlug === info.image?.slug} />
         <PresetColumn kind="video" preset={info.video} customized={info.customized.video} onEdit={() => onEdit(info.video)} onReset={() => onReset(info.video)} resetting={resettingSlug === info.video?.slug} />
+        <PresetColumn kind="file" preset={info.file} customized={info.customized.file === true} onEdit={() => info.file && onEdit(info.file)} onReset={() => info.file && onReset(info.file)} resetting={resettingSlug === info.file?.slug} />
       </CardContent>
     </Card>
   );

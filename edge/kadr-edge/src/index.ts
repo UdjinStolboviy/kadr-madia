@@ -47,6 +47,8 @@ interface Meta {
   etag: string;
   contentType: string;
   lastModified: string;
+  /** Content-Disposition stored with the object (documents are stored as attachments). */
+  disposition?: string;
 }
 
 function metaOf(o: R2ObjectLike): Meta {
@@ -55,6 +57,7 @@ function metaOf(o: R2ObjectLike): Meta {
     etag: o.httpEtag,
     contentType: o.httpMetadata?.contentType || "application/octet-stream",
     lastModified: o.uploaded.toUTCString(),
+    disposition: o.httpMetadata?.contentDisposition || undefined,
   };
 }
 
@@ -66,7 +69,9 @@ function baseHeaders(meta: Meta, exp: number, nowMs: number, download?: string):
   h.set("Last-Modified", meta.lastModified);
   h.set("Accept-Ranges", "bytes");
   h.set("Cache-Control", `private, max-age=${ttl}`);
+  // A per-request download name wins; otherwise honour the disposition stored with the object.
   if (download !== undefined) h.set("Content-Disposition", contentDisposition(download));
+  else if (meta.disposition) h.set("Content-Disposition", meta.disposition);
   return h;
 }
 
@@ -106,6 +111,7 @@ export async function handle(
         etag: hit.headers.get("ETag") ?? "",
         contentType: hit.headers.get("Content-Type") ?? "application/octet-stream",
         lastModified: hit.headers.get("Last-Modified") ?? "",
+        disposition: hit.headers.get("X-Kadr-Disposition") ?? undefined,
       };
       return fromBuffer(meta, await hit.arrayBuffer());
     }
@@ -210,7 +216,8 @@ async function streamOrCache(
   if (!cache || meta.size > CACHE_MAX_BYTES) return new Response(body, { status: 200, headers: h });
   const bytes = await new Response(body).arrayBuffer();
   // Stored copy is edge-internal and keyed without the signature. It carries no
-  // Content-Disposition; the per-request value is added on the way out.
+  // Content-Disposition header (a per-request value is added on the way out);
+  // the object's own disposition travels in an internal header.
   const stored = new Headers({
     "Content-Type": meta.contentType,
     "Content-Length": String(bytes.byteLength),
@@ -218,6 +225,7 @@ async function streamOrCache(
     "Last-Modified": meta.lastModified,
     "Cache-Control": `public, max-age=${MAX_CACHE_SECONDS}`,
   });
+  if (meta.disposition) stored.set("X-Kadr-Disposition", meta.disposition);
   ctx.waitUntil(cache.put(cacheKey, new Response(bytes.slice(0), { status: 200, headers: stored })));
   return new Response(bytes, { status: 200, headers: h });
 }

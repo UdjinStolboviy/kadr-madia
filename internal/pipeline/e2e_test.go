@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/UdjinStolboviy/kadr-madia/internal/engine/file"
 	"github.com/UdjinStolboviy/kadr-madia/internal/importer"
 	"io"
 	"log/slog"
@@ -99,7 +100,7 @@ type env struct {
 	kr       *crypto.Keyring
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T, opts ...func(*pipeline.Config)) *env {
 	t.Helper()
 	ctx := context.Background()
 	store := dbtest.Open(t)
@@ -142,8 +143,8 @@ func newEnv(t *testing.T) *env {
 	q.SetBackoff(time.Millisecond, 5*time.Millisecond)
 	set := metrics.NewSet()
 	eng := fakeimage.New()
-	svc := pipeline.New(pipeline.Config{
-		Store: store, Queue: q, Engine: eng, Video: videoEngine(), MultipartThreshold: 8 << 20, PartSize: 5 << 20, EdgeBaseURL: "https://media.example.com", Fetcher: &importer.Fetcher{AllowAnyPort: true, AllowAddr: func(netip.Addr) bool { return true }}, Keyring: kr, Logger: log, Metrics: set, TmpDir: t.TempDir(), Now: clk.Now,
+	pcfg := pipeline.Config{
+		Store: store, Queue: q, Engine: eng, Video: videoEngine(), File: file.New(file.Config{}), MultipartThreshold: 8 << 20, PartSize: 5 << 20, EdgeBaseURL: "https://media.example.com", Fetcher: &importer.Fetcher{AllowAnyPort: true, AllowAddr: func(netip.Addr) bool { return true }}, Keyring: kr, Logger: log, Metrics: set, TmpDir: t.TempDir(), Now: clk.Now,
 		NewDriver: func(c storage.Config) (storage.Driver, error) {
 			d, err := storage.NewS3(c)
 			if err != nil {
@@ -152,8 +153,12 @@ func newEnv(t *testing.T) *env {
 			rec.Driver = d
 			return rec, nil
 		},
-	})
-	runner := queue.NewRunner(q, queue.RunnerConfig{Pools: map[string]int{queue.PoolImage: 2, queue.PoolVideo: 1, queue.PoolMaintenance: 1},
+	}
+	for _, o := range opts {
+		o(&pcfg)
+	}
+	svc := pipeline.New(pcfg)
+	runner := queue.NewRunner(q, queue.RunnerConfig{Pools: map[string]int{queue.PoolImage: 2, queue.PoolVideo: 1, queue.PoolFile: 1, queue.PoolMaintenance: 1},
 		Logger: log, Metrics: set, PollInterval: 10 * time.Millisecond})
 	svc.Register(runner)
 	runner.Start(ctx)

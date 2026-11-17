@@ -201,7 +201,7 @@ export interface StorageTestResult {
 
 // ---- Presets ----------------------------------------------------------------
 
-export type PresetKind = "image" | "video";
+export type PresetKind = "image" | "video" | "file";
 
 export interface Preset {
   id: string;
@@ -223,7 +223,8 @@ export interface ModeInfo {
   description: string;
   image: Preset;
   video: Preset;
-  customized: { image: boolean; video: boolean };
+  file?: Preset;
+  customized: { image: boolean; video: boolean; file?: boolean };
 }
 
 export interface ModesResponse {
@@ -245,6 +246,21 @@ export interface VideoParams {
   [k: string]: unknown;
 }
 
+export const FILE_FORMATS = ["pdf", "docx", "xlsx", "pptx", "odt", "ods", "odp", "rtf", "txt", "csv"] as const;
+export type FileFormat = (typeof FILE_FORMATS)[number];
+export const FILE_STRATEGIES = ["none", "lossless", "downsample"] as const;
+export type FileStrategy = (typeof FILE_STRATEGIES)[number];
+
+/** Document preset params (docs/PIPELINES.md section 2b). */
+export interface FileParams {
+  kind?: string;
+  limits: { maxInputBytes: number; accept: string[] };
+  optimize: { strategy: FileStrategy; imageDpi?: number; jpegQuality?: number; linearize: boolean; minSavingsPercent: number };
+  thumbnail: { enabled: boolean; maxSide: number; maxBytes: number };
+  retainOriginal: boolean;
+  [k: string]: unknown;
+}
+
 // ---- System -----------------------------------------------------------------
 
 export interface Cap {
@@ -253,7 +269,7 @@ export interface Cap {
   detail?: string;
 }
 
-export const CAPABILITY_KEYS = ["vips", "vips_avif", "ffmpeg", "ffprobe", "rclone", "vaapi"] as const;
+export const CAPABILITY_KEYS = ["vips", "vips_avif", "ffmpeg", "ffprobe", "rclone", "vaapi", "ghostscript", "qpdf"] as const;
 export type CapabilityKey = (typeof CAPABILITY_KEYS)[number];
 
 export interface SystemInfo {
@@ -315,7 +331,7 @@ export interface JobFilters {
 
 // ---- Assets -----------------------------------------------------------------
 
-export const ASSET_KINDS = ["image", "video"] as const;
+export const ASSET_KINDS = ["image", "video", "file"] as const;
 export const ASSET_STATUSES = ["processing", "ready", "failed"] as const;
 
 export interface AssetOriginal {
@@ -443,7 +459,7 @@ export interface PlaygroundResult {
 }
 
 export interface SavePresetVersionRequest {
-  params: ImageParams | VideoParams;
+  params: ImageParams | VideoParams | FileParams;
   description?: string;
 }
 

@@ -13,11 +13,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/UdjinStolboviy/kadr-madia/internal/db"
+	"github.com/UdjinStolboviy/kadr-madia/internal/engine/file"
 	"github.com/UdjinStolboviy/kadr-madia/internal/preset"
 	"github.com/UdjinStolboviy/kadr-madia/internal/queue"
 	"github.com/UdjinStolboviy/kadr-madia/internal/storage"
@@ -54,6 +56,7 @@ type common struct {
 	kind     string
 	params   preset.ImageParams
 	vparams  preset.VideoParams
+	fparams  preset.FileParams
 	ns       string
 	vis      string
 	filename *string
@@ -120,6 +123,8 @@ func (s *Service) validateCommon(ctx context.Context, projectID, presetSlug, mod
 		err = json.Unmarshal(p.Params, &c.params)
 	case "video":
 		err = json.Unmarshal(p.Params, &c.vparams)
+	case "file":
+		err = json.Unmarshal(p.Params, &c.fparams)
 	default:
 		return nil, apiErr(http.StatusUnsupportedMediaType, CodeUnsupportedMedia, "preset %q has unsupported kind %q", p.Slug, p.Kind)
 	}
@@ -211,7 +216,7 @@ func (s *Service) CreateUpload(ctx context.Context, projectID string, in CreateU
 	}
 	key := "tmp/" + project.Slug + "/" + u.ID
 	u.TmpKey = &key
-	if c.kind == "video" && in.Size > s.mpThreshold {
+	if c.kind != "image" && in.Size > s.mpThreshold {
 		return s.createMultipartTicket(ctx, tgt, u, c, key, ct, in.Size)
 	}
 	pr, err := tgt.driver.PresignPut(ctx, tgt.profile.PrivateBucket, key, storage.PresignPutOptions{
@@ -362,8 +367,8 @@ func (s *Service) promote(ctx context.Context, u *db.Upload, requireObject bool)
 	now := s.now()
 	kind := "image"
 	jobKind, pool := JobProcessImage, queue.PoolImage
-	if pv, err := s.store.GetPresetVersion(ctx, u.PresetID, u.PresetVersion); err == nil && pv.Kind == "video" {
-		kind, jobKind, pool = "video", JobProcessVideo, queue.PoolVideo
+	if pv, err := s.store.GetPresetVersion(ctx, u.PresetID, u.PresetVersion); err == nil && pv.Kind != "image" {
+		kind, jobKind, pool = pv.Kind, jobKindFor(pv.Kind), poolFor(pv.Kind)
 	}
 	a := &db.Asset{ID: db.NewID(db.PrefixAsset), ProjectID: u.ProjectID, NS: u.NS, UploadID: &u.ID, Kind: kind,
 		Visibility: u.Visibility, Filename: u.Filename, Metadata: u.Metadata, Status: db.AssetProcessing,
@@ -659,43 +664,60 @@ func deref(s *string) string {
 }
 
 func jobKindFor(kind string) string {
-	if kind == "video" {
+	switch kind {
+	case "video":
 		return JobProcessVideo
+	case "file":
+		return JobProcessFile
 	}
 	return JobProcessImage
 }
 
 func poolFor(kind string) string {
-	if kind == "video" {
+	switch kind {
+	case "video":
 		return queue.PoolVideo
+	case "file":
+		return queue.PoolFile
 	}
 	return queue.PoolImage
 }
 
 func (c *common) maxPutBytes() int64 {
-	if c.kind == "video" {
+	if c.kind == "video" || c.kind == "file" {
 		return MaxVideoPutBytes
 	}
 	return MaxPutBytes
 }
 
 func (c *common) maxInputBytes() int64 {
-	if c.kind == "video" {
+	switch c.kind {
+	case "video":
 		return c.vparams.Limits.MaxInputBytes
+	case "file":
+		return c.fparams.Limits.MaxInputBytes
 	}
 	return c.params.Limits.MaxInputBytes
 }
 
 func (c *common) acceptsContentType(ct string) bool {
-	if c.kind == "video" {
+	switch c.kind {
+	case "video":
 		return strings.HasPrefix(ct, "video/")
+	case "file":
+		// The declared type only has to be plausible: the engine decides by content.
+		f := file.FormatForContentType(ct)
+		return ct == "application/octet-stream" || (f != "" && slices.Contains(c.fparams.Limits.Accept, f))
 	}
 	return acceptsContentType(c.params.Limits.Accept, ct)
 }
 
 func (c *common) acceptedDesc() string {
-	if c.kind == "video" {
+	switch c.kind {
+	case "video":
 		return "accepted: video/*"
+	case "file":
+		return "accepted documents: " + strings.Join(c.fparams.Limits.Accept, ", ")
 	}
 	return "accepted formats: " + strings.Join(c.params.Limits.Accept, ", ")
 }
@@ -789,6 +811,8 @@ func (s *Service) abortMultipart(ctx context.Context, u *db.Upload, tgt *target)
 var extKinds = map[string]string{
 	"jpg": "image", "jpeg": "image", "png": "image", "webp": "image", "heic": "image", "heif": "image", "avif": "image",
 	"gif": "image", "tif": "image", "tiff": "image",
+	"pdf": "file", "docx": "file", "xlsx": "file", "pptx": "file", "odt": "file", "ods": "file", "odp": "file",
+	"rtf": "file", "txt": "file", "csv": "file",
 	"mp4": "video", "mov": "video", "m4v": "video", "webm": "video", "mkv": "video", "avi": "video", "mpg": "video", "mpeg": "video", "3gp": "video",
 }
 
@@ -801,6 +825,8 @@ func kindFromHint(hint string) string {
 			return "image"
 		case strings.HasPrefix(f, "video/"):
 			return "video"
+		case file.FormatForContentType(f) != "":
+			return "file"
 		}
 	}
 	for _, f := range strings.Fields(strings.ToLower(hint)) {

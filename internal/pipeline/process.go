@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 
 	"github.com/UdjinStolboviy/kadr-madia/internal/db"
+	"github.com/UdjinStolboviy/kadr-madia/internal/engine/file"
 	"github.com/UdjinStolboviy/kadr-madia/internal/engine/image"
 	"github.com/UdjinStolboviy/kadr-madia/internal/engine/video"
 	"github.com/UdjinStolboviy/kadr-madia/internal/preset"
@@ -33,6 +34,7 @@ type processCtx struct {
 	kind    string // image | video
 	params  preset.ImageParams
 	vparams preset.VideoParams
+	fparams preset.FileParams
 	tgt     *target
 	workDir string
 }
@@ -77,9 +79,12 @@ func (s *Service) runProcessImage(ctx context.Context, j *queue.Job) error {
 		return permanent(FailInternal, "preset version not found", err)
 	}
 	pc.kind = pv.Kind
-	if pc.kind == "video" {
+	switch pc.kind {
+	case "video":
 		err = json.Unmarshal(pv.Params, &pc.vparams)
-	} else {
+	case "file":
+		err = json.Unmarshal(pv.Params, &pc.fparams)
+	default:
 		pc.kind = "image"
 		err = json.Unmarshal(pv.Params, &pc.params)
 	}
@@ -120,9 +125,12 @@ func (s *Service) runProcessImage(ctx context.Context, j *queue.Job) error {
 		return fmt.Errorf("create output dir: %w", err)
 	}
 	var out *produced
-	if pc.kind == "video" {
+	switch pc.kind {
+	case "video":
 		out, err = s.produceVideo(ctx, pc, srcPath, outDir)
-	} else {
+	case "file":
+		out, err = s.produceFile(ctx, pc, srcPath, outDir)
+	default:
 		out, err = s.produceImage(ctx, pc, srcPath, outDir)
 	}
 	if err != nil {
@@ -132,8 +140,11 @@ func (s *Service) runProcessImage(ctx context.Context, j *queue.Job) error {
 	blob := &db.Blob{
 		ID: db.NewID(db.PrefixBlob), ProjectID: u.ProjectID, StorageProfileID: pc.tgt.profile.ID, Visibility: u.Visibility,
 		PresetID: u.PresetID, PresetVersion: u.PresetVersion, SourceSHA256: sha, Kind: pc.kind, OriginalBytes: size,
-		OriginalWidth: ptr(int64(out.srcWidth)), OriginalHeight: ptr(int64(out.srcHeight)), OriginalContentType: &out.srcContentType,
-		ThumbHash: out.thumbHash, Refcount: 1, Status: db.BlobReady, CreatedAt: s.now(),
+		OriginalContentType: &out.srcContentType,
+		ThumbHash:           out.thumbHash, Refcount: 1, Status: db.BlobReady, CreatedAt: s.now(),
+	}
+	if out.srcWidth > 0 {
+		blob.OriginalWidth, blob.OriginalHeight = ptr(int64(out.srcWidth)), ptr(int64(out.srcHeight))
 	}
 	if out.durationMs > 0 {
 		blob.DurationMs = &out.durationMs
@@ -159,7 +170,7 @@ func (s *Service) runProcessImage(ctx context.Context, j *queue.Job) error {
 	for _, r := range out.files {
 		key := fmt.Sprintf("%s/%s/%s.%s", pc.project.Slug, blob.ID, r.name, r.format)
 		if err := putFile(ctx, pc.tgt.driver, bucket, key, r.path, storage.PutOptions{
-			ContentType: renditionContentType(r.format), CacheControl: cacheControl,
+			ContentType: renditionContentType(r.format), CacheControl: cacheControl, ContentDisposition: r.disposition,
 		}); err != nil {
 			cleanup()
 			return fmt.Errorf("upload rendition %s.%s: %w", r.name, r.format, err)
@@ -384,6 +395,12 @@ func classifyEngineError(err error) error {
 			return &jobError{code: ie.Code, detail: ie.Detail, err: err}
 		}
 		return permanent(ie.Code, ie.Detail, err)
+	}
+	if fe, ok := file.AsError(err); ok {
+		if fe.Retryable {
+			return &jobError{code: fe.Code, detail: fe.Detail, err: err}
+		}
+		return permanent(fe.Code, fe.Detail, err)
 	}
 	if ve, ok := video.AsError(err); ok {
 		if ve.Retryable {

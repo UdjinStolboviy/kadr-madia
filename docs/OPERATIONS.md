@@ -59,6 +59,7 @@ KADR_MASTER_KEY_FILE=/etc/kadr/master.key
 KADR_API_KEY_PEPPER=…
 KADR_POOL_IMAGE=2
 KADR_POOL_VIDEO=1
+KADR_POOL_FILE=1                         # document jobs (PDF optimisation)
 KADR_VIDEO_HW=auto                       # auto | vaapi | off
 KADR_EDGE_BASE_URL=https://media.example.com   # private delivery host (kadr-edge) for POST /v1/signed-urls
 KADR_WEBAUTHN_RP_ID=admin.example.com           # passkeys: relying party id (host of the admin UI)
@@ -161,3 +162,8 @@ Proxmox uplink: every video pulls its source from R2 (50–150 MB) and pushes ~2
 The password is shown only there (it is hashed with argon2id and not stored or logged anywhere else). Later deploys print `administrator already exists; no credentials generated`. The default email is `admin@kadr.local`; override with `ADMIN_EMAIL` / `KADR_BOOTSTRAP_ADMIN_EMAIL`. Lost the password? Create another owner with `kadr admin create --email … --password-stdin` on the host. Change the password and enable TOTP or a passkey after the first sign-in.
 
 **Admin console over plain HTTP.** On a LAN address (`http://192.168.x.x:8081`) browsers drop `Secure` / `__Host-` cookies, which made the login succeed and the next request bounce back to the login page. Kadr now chooses the cookie per request: over HTTPS (TLS, `X-Forwarded-Proto: https` or Cloudflare's `CF-Visitor`) it uses the hardened `__Host-kadr_session`; over plain HTTP it uses a non-Secure `kadr_session`. Use HTTPS (cloudflared) for anything but a trusted network.
+
+
+## Documents: packages
+
+Document upload works without extra packages (validation + storage). For PDF optimisation and thumbnails install `ghostscript` and `qpdf` (`apt-get install ghostscript qpdf`; `deploy/lxc/provision.sh` does it). System → capabilities and `kadr doctor` list them as optional. Ghostscript has a history of security issues: keep it updated (`unattended-upgrades`); Kadr runs it with `-dSAFER`, a minimal environment, `nice` and per-command timeouts, inside the systemd sandbox.

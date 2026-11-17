@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -266,8 +267,8 @@ func (s *Server) handleSavePresetVersion(w http.ResponseWriter, r *http.Request)
 	} else {
 		var k struct{ Kind string }
 		_ = json.Unmarshal(in.Params, &k)
-		if k.Kind == "video" {
-			kind = "video"
+		if k.Kind == "video" || k.Kind == "file" {
+			kind = k.Kind
 		}
 	}
 	raw, msg := normalizePresetParams(kind, in.Params)
@@ -331,6 +332,17 @@ func normalizePresetParams(kind string, raw json.RawMessage) (json.RawMessage, s
 			return nil, msg
 		}
 		b, _ := json.Marshal(v)
+		return b, ""
+	}
+	if kind == "file" {
+		var f preset.FileParams
+		if err := json.Unmarshal(raw, &f); err != nil {
+			return nil, "must be valid document preset parameters JSON"
+		}
+		if msg := validateFileParams(&f); msg != "" {
+			return nil, msg
+		}
+		b, _ := json.Marshal(f)
 		return b, ""
 	}
 	var ip preset.ImageParams
@@ -405,6 +417,54 @@ func validateVideoParams(v *preset.VideoParams) string {
 	}
 	if v.Limits.MaxInputBytes <= 0 {
 		v.Limits = preset.VideoLimits{MaxInputBytes: 2 << 30, MaxDurationSec: 300, MaxWidth: 4096, MaxHeight: 4096}
+	}
+	return ""
+}
+
+// validateFileParams returns a message for obviously invalid document preset parameters.
+func validateFileParams(f *preset.FileParams) string {
+	if f.Kind != "" && f.Kind != "file" {
+		return `kind must be "file"`
+	}
+	f.Kind = "file"
+	if f.Limits.MaxInputBytes <= 0 {
+		f.Limits.MaxInputBytes = 100 << 20
+	}
+	if f.Limits.MaxInputBytes > 5<<30 {
+		return "limits.maxInputBytes must be at most 5 GB"
+	}
+	if len(f.Limits.Accept) == 0 {
+		f.Limits.Accept = preset.DefaultFileFormats
+	}
+	for _, a := range f.Limits.Accept {
+		if !slices.Contains(preset.DefaultFileFormats, a) {
+			return "limits.accept: unsupported format " + a
+		}
+	}
+	switch f.Optimize.Strategy {
+	case "", preset.FileStrategyNone:
+		f.Optimize.Strategy = preset.FileStrategyNone
+	case preset.FileStrategyLossless:
+	case preset.FileStrategyDownsample:
+		if f.Optimize.ImageDPI < 36 || f.Optimize.ImageDPI > 600 {
+			return "optimize.imageDpi must be 36–600"
+		}
+		if f.Optimize.JPEGQuality < 10 || f.Optimize.JPEGQuality > 100 {
+			return "optimize.jpegQuality must be 10–100"
+		}
+	default:
+		return "optimize.strategy must be none, lossless or downsample"
+	}
+	if f.Optimize.MinSavingsPercent < 0 || f.Optimize.MinSavingsPercent > 90 {
+		return "optimize.minSavingsPercent must be 0–90"
+	}
+	if f.Thumbnail.Enabled {
+		if f.Thumbnail.MaxSide < 96 || f.Thumbnail.MaxSide > 2048 {
+			return "thumbnail.maxSide must be 96–2048"
+		}
+		if f.Thumbnail.MaxBytes < 1024 || f.Thumbnail.MaxBytes > 1<<20 {
+			return "thumbnail.maxBytes must be 1 KB–1 MB"
+		}
 	}
 	return ""
 }

@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { KadrImage, KadrVideo } from "../src/index.js";
+import { KadrDocument, KadrImage, KadrVideo } from "../src/index.js";
 import type { KadrAssetLike } from "../src/index.js";
 
 afterEach(cleanup);
@@ -74,5 +74,34 @@ describe("KadrVideo", () => {
   it("falls back to a thumbhash poster", () => {
     const { container } = render(<KadrVideo asset={{ ...video, poster: null }} />);
     expect(container.querySelector("video")!.getAttribute("poster")).toMatch(/^data:image\/png;base64,/);
+  });
+});
+
+describe("KadrDocument", () => {
+  const doc: KadrAssetLike = {
+    renditions: [
+      { name: "main", format: "pdf", bytes: 204800, url: "https://cdn/x/main.pdf" },
+      { name: "thumb", format: "avif", width: 480, height: 640, url: "https://cdn/x/thumb.avif" },
+      { name: "thumb", format: "webp", width: 480, height: 640, url: "https://cdn/x/thumb.webp" },
+    ],
+  };
+
+  it("links to the main file and shows the first-page thumbnail, not the document as an image", () => {
+    const { container } = render(<KadrDocument asset={doc} filename="contract.pdf" />);
+    const a = container.querySelector("a")!;
+    expect(a.getAttribute("href")).toBe("https://cdn/x/main.pdf");
+    expect(a.getAttribute("download")).toBe("contract.pdf");
+    expect([...container.querySelectorAll("picture source")].map((s) => s.getAttribute("type"))).toEqual(["image/avif", "image/webp"]);
+    expect(container.textContent).toContain("contract.pdf");
+    expect(container.textContent).toContain("PDF · 200 KB");
+  });
+
+  it("falls back to a type badge without a thumbnail and resolves private keys", () => {
+    const priv: KadrAssetLike = { renditions: [{ name: "main", format: "docx", key: "acme/blb_1/main.docx" }] };
+    const { container } = render(<KadrDocument asset={priv} resolveUrl={(r) => `https://media/${r.key}?sig=1`} />);
+    expect(container.querySelector("a")!.getAttribute("href")).toBe("https://media/acme/blb_1/main.docx?sig=1");
+    expect(container.querySelector("picture")).toBeNull();
+    expect(container.textContent).toContain("DOCX");
+    expect(render(<KadrDocument asset={{ renditions: [{ name: "main", format: "pdf", key: "k" }] }} />).container.innerHTML).toBe("");
   });
 });

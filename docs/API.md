@@ -114,9 +114,13 @@ Scope `uploads:write`. For backend processes (scanners, imports): files ≤ 25 M
 
 **Errors:** as for tickets, plus `too_large` (413, over 25 MB), `unsupported_content_type` (415, the body is not multipart/form-data), `invalid_multipart` (400).
 
+### Documents
+
+PDF, DOCX, XLSX, PPTX, ODT, ODS, ODP, RTF, TXT and CSV are accepted as assets of `kind: "file"` (see [PIPELINES.md §4](PIPELINES.md)). Use `"mode"` or a `file-*` preset (`file-original` stores as uploaded). The format is verified from the content; a mismatch fails the asset with `unsupported_media` / `corrupt`. The asset has a `main` rendition whose `format` is the document format (`pdf`, `docx`, …) and, for PDFs, a `thumb` rendition (avif + webp) plus `placeholder`. Documents are stored with `Content-Disposition: attachment`. Private documents are delivered with signed URLs (`rendition: "main"`, optional `download` file name).
+
 ### Compression modes
 
-Instead of `preset` any upload or import may send `"mode": "compact" | "balanced" | "quality"` (see [PIPELINES.md §2b](PIPELINES.md)). The preset becomes `image-<mode>` or `video-<mode>` depending on the content type (or the file name/URL extension for server-side uploads and imports). Sending both `preset` and `mode` is a `422`. With neither, the project's default mode is used. The asset's `preset` field reports the resulting preset.
+Instead of `preset` any upload or import may send `"mode": "compact" | "balanced" | "quality"` (see [PIPELINES.md §2b](PIPELINES.md)). The preset becomes `image-<mode>`, `video-<mode>` or `file-<mode>` (documents) depending on the content type (or the file name/URL extension for server-side uploads and imports). Sending both `preset` and `mode` is a `422`. With neither, the project's default mode is used. The asset's `preset` field reports the resulting preset.
 
 ### `POST /v1/imports/url` — import from a URL
 

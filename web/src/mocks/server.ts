@@ -4,6 +4,7 @@
 // of a production build.
 import type {
   ApiKey,
+  Asset,
   ApiKeyScope,
   CreateApiKeyRequest,
   CloudConnection,
@@ -339,7 +340,7 @@ on("GET", "/projects/:id/modes", ({ params }) => {
         const d = defaults.find((x) => x.slug === c.slug)!;
         return c.current_version > 1 && JSON.stringify(c.params) !== JSON.stringify(d.params);
       };
-      return { mode: m, description: MODE_DESCR[m], image: cur("image"), video: cur("video"), customized: { image: edited("image"), video: edited("video") } };
+      return { mode: m, description: MODE_DESCR[m], image: cur("image"), video: cur("video"), file: cur("file"), customized: { image: edited("image"), video: edited("video"), file: edited("file") } };
     }),
   });
 });
@@ -522,6 +523,8 @@ on("GET", "/system", () => {
       ffprobe: { ok: true, version: "7.1" },
       rclone: { ok: false, detail: "rclone not found in PATH" },
       vaapi: { ok: false, detail: "/dev/dri/renderD128 not present" },
+      ghostscript: { ok: true, version: "10.05.1" },
+      qpdf: { ok: true, version: "12.2.0" },
     },
   };
   return json(200, sys);
@@ -558,9 +561,49 @@ on("POST", "/jobs/:id/cancel", ({ params }) => {
   return json(200, j);
 });
 
-on("GET", "/projects/:id/assets", ({ params }) => {
+const mockDoc: Asset = {
+  id: "ast_01JDOC000000000000000000AB",
+  status: "ready",
+  kind: "file",
+  namespace: "contracts",
+  visibility: "public",
+  preset: "file-balanced",
+  preset_version: 1,
+  original: { filename: "annual-report-2026.pdf", content_type: "application/pdf", bytes: 8_400_000, width: null, height: null },
+  renditions: [
+    { name: "main", format: "pdf", bytes: 2_350_000, width: null, height: null, url: "https://cdn.example.com/p/contracts/annual-report-2026.pdf" },
+    { name: "thumb", format: "avif", bytes: 14_200, width: 452, height: 640, url: "data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='452' height='640'%3E%3Crect width='100%25' height='100%25' fill='%23e8ecf4'/%3E%3Crect x='50' y='60' width='352' height='24' fill='%23a5b0c8'/%3E%3Crect x='50' y='110' width='300' height='12' fill='%23c5cde0'/%3E%3Crect x='50' y='135' width='340' height='12' fill='%23c5cde0'/%3E%3C/svg%3E" },
+  ],
+  placeholder: null,
+  duration_sec: null,
+  poster: null,
+  metadata: { pages: 24, optimize: { strategy: "downsample", linearized: true } },
+  savings_ratio: 0.72,
+  created_at: nowIso(),
+  ready_at: nowIso(),
+};
+const mockPrivateDoc: Asset = {
+  ...mockDoc,
+  id: "ast_01JDOC000000000000000000AC",
+  namespace: "hr",
+  visibility: "private",
+  preset: "file-quality",
+  original: { ...mockDoc.original, filename: "payroll-q3.xlsx", content_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", bytes: 1_200_000 },
+  renditions: [{ name: "main", format: "xlsx", bytes: 1_200_000, width: null, height: null, key: "prv/hr/payroll-q3.xlsx" }],
+  savings_ratio: 0,
+  metadata: {},
+};
+on("GET", "/projects/:id/assets", ({ params, query }) => {
   findProject(params[0]!);
-  return json(200, { items: [], next_cursor: null });
+  const kind = query.get("kind");
+  const items = [mockDoc, mockPrivateDoc].filter((a) => !kind || a.kind === kind);
+  return json(200, { items, next_cursor: null });
+});
+on("GET", "/projects/:id/assets/:aid", ({ params }) => {
+  findProject(params[0]!);
+  const a = [mockDoc, mockPrivateDoc].find((x) => x.id === params[1]);
+  if (!a) throw new HttpError(404, "not_found", "Not found", "asset not found");
+  return json(200, a);
 });
 on("GET", "/projects/:id/analytics", ({ params, query }) => {
   findProject(params[0]!);
@@ -589,8 +632,8 @@ on("POST", "/projects/:id/presets/:slug/versions", ({ params, body }) => {
   const list = (db.presets[findProject(params[0]!).id] ??= []);
   const b = body as { params: Record<string, unknown>; description?: string };
   let p = list.find((x) => x.slug === params[1]);
-  const kind = p?.kind ?? (b.params.kind === "video" ? "video" : "image");
-  const bad = kind === "video" ? validateVideo(b.params) : validateImage(b.params);
+  const kind = p?.kind ?? (b.params.kind === "video" ? "video" : b.params.kind === "file" ? "file" : "image");
+  const bad = kind === "video" ? validateVideo(b.params) : kind === "file" ? validateFile(b.params) : validateImage(b.params);
   if (bad) throw validationError({ params: bad });
   if (p) {
     p.current_version += 1;
@@ -612,6 +655,26 @@ function validateImage(p: Record<string, unknown>): string {
   if (!r.maxWidth || !r.maxHeight || r.maxWidth < 16 || r.maxWidth > 8192 || r.maxHeight < 16 || r.maxHeight > 8192) return "resize.maxWidth/maxHeight must be 16–8192";
   if (q.mode === "budget" && !(q.maxBytes && q.maxBytes >= 1024 && q.maxBytes <= 10 << 20)) return "quality.maxBytes must be 1 KB–10 MB";
   if (!["budget", "ssim", "fixed"].includes(q.mode ?? "")) return "quality.mode must be budget, ssim or fixed";
+  return "";
+}
+function validateFile(p: Record<string, unknown>): string {
+  const lim = (p.limits ?? {}) as { maxInputBytes?: number; accept?: string[] };
+  const o = (p.optimize ?? {}) as { strategy?: string; imageDpi?: number; jpegQuality?: number; minSavingsPercent?: number };
+  const th = (p.thumbnail ?? {}) as { enabled?: boolean; maxSide?: number; maxBytes?: number };
+  const formats = ["pdf", "docx", "xlsx", "pptx", "odt", "ods", "odp", "rtf", "txt", "csv"];
+  if ((lim.maxInputBytes ?? 0) > 5 * 2 ** 30) return "limits.maxInputBytes must be at most 5 GB";
+  for (const a of lim.accept ?? []) if (!formats.includes(a)) return "limits.accept: unsupported format " + a;
+  const st = o.strategy || "none";
+  if (!["none", "lossless", "downsample"].includes(st)) return "optimize.strategy must be none, lossless or downsample";
+  if (st === "downsample") {
+    if (!o.imageDpi || o.imageDpi < 36 || o.imageDpi > 600) return "optimize.imageDpi must be 36–600";
+    if (!o.jpegQuality || o.jpegQuality < 10 || o.jpegQuality > 100) return "optimize.jpegQuality must be 10–100";
+  }
+  if ((o.minSavingsPercent ?? 0) < 0 || (o.minSavingsPercent ?? 0) > 90) return "optimize.minSavingsPercent must be 0–90";
+  if (th.enabled) {
+    if (!th.maxSide || th.maxSide < 96 || th.maxSide > 2048) return "thumbnail.maxSide must be 96–2048";
+    if (!th.maxBytes || th.maxBytes < 1024 || th.maxBytes > 1 << 20) return "thumbnail.maxBytes must be 1 KB–1 MB";
+  }
   return "";
 }
 function validateVideo(p: Record<string, unknown>): string {

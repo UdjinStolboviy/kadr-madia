@@ -178,8 +178,20 @@ func applyOne(ctx context.Context, w *sql.DB, mg Migration) error {
 		return fmt.Errorf("migrate %04d: begin: %w", mg.Version, err)
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after commit
+	bump := strings.Contains(mg.SQL, "-- kadr:bump-schema-version")
+	var schemaVersion int64
+	if bump {
+		if err := tx.QueryRowContext(ctx, `PRAGMA schema_version`).Scan(&schemaVersion); err != nil {
+			return fmt.Errorf("migrate %04d: read schema_version: %w", mg.Version, err)
+		}
+	}
 	if _, err := tx.ExecContext(ctx, mg.SQL); err != nil {
 		return fmt.Errorf("migrate %04d_%s: %w", mg.Version, mg.Name, err)
+	}
+	if bump { // migrations that edit sqlite_master must force a schema reload
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf(`PRAGMA schema_version = %d`, schemaVersion+1)); err != nil {
+			return fmt.Errorf("migrate %04d: bump schema_version: %w", mg.Version, err)
+		}
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, ?)`,

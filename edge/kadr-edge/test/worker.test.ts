@@ -10,14 +10,14 @@ const NOW = 1763326800_000;
 const KEY = "acme/blb_01/video.mp4";
 const DATA = new TextEncoder().encode("0123456789abcdefghij"); // 20 bytes
 
-function makeEnv() {
+function makeEnv(disposition?: string) {
   const calls: string[] = [];
   const meta = (): R2ObjectLike => ({
     key: KEY,
     size: DATA.length,
     httpEtag: '"abc"',
     uploaded: new Date("2025-01-01T00:00:00Z"),
-    httpMetadata: { contentType: "video/mp4" },
+    httpMetadata: { contentType: "video/mp4", ...(disposition ? { contentDisposition: disposition } : {}) },
   });
   const bucket = {
     async head(k: string) {
@@ -68,6 +68,17 @@ describe("worker", () => {
     expect(res.headers.get("Content-Disposition")).toBe(
       `attachment; filename="a _b__.mp4"; filename*=UTF-8''a%20%22b%22%C3%A9.mp4`,
     );
+  });
+
+  it("honours the Content-Disposition stored with the object (documents), overridden by download", async () => {
+    const stored = `attachment; filename="contract.pdf"; filename*=UTF-8''contract.pdf`;
+    const { env } = makeEnv(stored);
+    const plain = await handle(req(signed()), env, ctx(), { now: NOW });
+    expect(plain.headers.get("Content-Disposition")).toBe(stored);
+    const named = await handle(req(signed({ download: "other.pdf" })), env, ctx(), { now: NOW });
+    expect(named.headers.get("Content-Disposition")).toContain("other.pdf");
+    const head = await handle(req(signed(), { method: "HEAD" }), env, ctx(), { now: NOW });
+    expect(head.headers.get("Content-Disposition")).toBe(stored);
   });
 
   it("403 on bad, missing and expired signature", async () => {
@@ -167,6 +178,18 @@ describe("worker", () => {
       };
       return { cache, keys };
     };
+
+    it("keeps the stored disposition on cache hits", async () => {
+      const stored = `attachment; filename="a.pdf"`;
+      const { env } = makeEnv(stored);
+      const { cache } = makeCache();
+      const c = ctx();
+      const r1 = await handle(req(signed()), env, c, { now: NOW, cache });
+      await r1.arrayBuffer();
+      await Promise.all(c.pending);
+      const r2 = await handle(req(signed()), env, ctx(), { now: NOW, cache });
+      expect(r2.headers.get("Content-Disposition")).toBe(stored);
+    });
 
     it("stores under a key without signature query; hits skip R2 and keep per-request headers", async () => {
       const { env, calls } = makeEnv();

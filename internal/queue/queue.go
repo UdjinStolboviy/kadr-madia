@@ -32,6 +32,7 @@ import (
 const (
 	PoolImage       = "image"
 	PoolVideo       = "video"
+	PoolFile        = "file"
 	PoolMaintenance = "maintenance"
 	PoolWebhook     = "webhook"
 )

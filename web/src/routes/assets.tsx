@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
-import { FolderKanban, ImageOff, Images, Loader2, Trash2, Video } from "lucide-react";
+import { Download, FileText, FolderKanban, ImageOff, Images, Loader2, Trash2, Video } from "lucide-react";
 import { useCallback, useState } from "react";
 
 import { CopyButton, KeyValue, PageHeader, RelativeTime, StatusBadge } from "@/components/common";
@@ -42,6 +42,7 @@ const ENUM_KEY: Record<string, MessageKey> = {
   processing: "assets.status.processing",
   image: "assets.kind.image",
   video: "assets.kind.video",
+  file: "assets.kind.file",
   public: "assets.visibility.public",
   private: "assets.visibility.private",
 };
@@ -55,13 +56,21 @@ function useEnumLabel() {
   };
 }
 
+const NON_IMAGE = new Set(["mp4", "webm", "m3u8", "pdf", "docx", "xlsx", "pptx", "odt", "ods", "odp", "rtf", "txt", "csv"]);
+
+/** Image-like rendition for previews; for documents this is the thumb (avif/webp), never the file itself. */
 function previewRendition(a: Asset): Rendition | undefined {
-  return a.renditions.find((r) => r.url && r.format !== "mp4" && r.format !== "webm" && r.format !== "m3u8");
+  return a.renditions.find((r) => r.url && !NON_IMAGE.has(r.format));
+}
+
+/** The document itself: the "main" rendition of a file asset. */
+function mainFile(a: Asset): Rendition | undefined {
+  return a.kind === "file" ? (a.renditions.find((r) => r.name === "main") ?? a.renditions.find((r) => NON_IMAGE.has(r.format))) : undefined;
 }
 
 function Thumb({ asset, className }: { asset: Asset; className?: string }) {
   const src = (asset.poster?.url || previewRendition(asset)?.url) ?? undefined;
-  const Icon = asset.kind === "video" ? Video : ImageOff;
+  const Icon = asset.kind === "video" ? Video : asset.kind === "file" ? FileText : ImageOff;
   return (
     <div
       className={cn("flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted text-muted-foreground", className)}
@@ -92,6 +101,13 @@ function Preview({ asset }: { asset: Asset }) {
     return (
       <div className="flex justify-center rounded-lg border bg-muted/40 p-2">
         <img src={img.url} alt={asset.original.filename ?? asset.id} className="max-h-72 rounded object-contain" />
+      </div>
+    );
+  }
+  if (asset.kind === "file" && asset.visibility === "public") {
+    return (
+      <div className="flex h-32 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground">
+        <FileText className="size-10 opacity-50" aria-hidden />
       </div>
     );
   }
@@ -160,6 +176,32 @@ function AssetDetail({ projectId, assetId, onClose }: { projectId: string; asset
                 <KeyValue label={t("assets.created")}>{formatDateTime(a.created_at)}</KeyValue>
                 <KeyValue label={t("assets.ready")}>{formatDateTime(a.ready_at)}</KeyValue>
               </dl>
+
+              {a.kind === "file" && mainFile(a) && (
+                <section className="rounded-lg border p-3">
+                  <h4 className="mb-2 text-sm font-semibold">{t("assets.document")}</h4>
+                  <div className="flex items-center gap-3 text-sm">
+                    <FileText className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium">
+                        <span className="font-mono text-xs uppercase">{mainFile(a)!.format}</span> · {formatBytes(mainFile(a)!.bytes)}
+                      </div>
+                      {a.savings_ratio !== null && a.savings_ratio > 0 && (
+                        <div className="text-xs text-success">
+                          {t("assets.smaller", { pct: (a.savings_ratio * 100).toFixed(0) })} ({formatBytes(a.original.bytes)} → {formatBytes(mainFile(a)!.bytes)})
+                        </div>
+                      )}
+                    </div>
+                    {mainFile(a)!.url && (
+                      <Button size="sm" variant="outline" asChild>
+                        <a href={mainFile(a)!.url} target="_blank" rel="noreferrer" download>
+                          <Download /> {t("assets.download")}
+                        </a>
+                      </Button>
+                    )}
+                  </div>
+                </section>
+              )}
 
               <section>
                 <h4 className="mb-2 text-sm font-semibold">{t("assets.renditions")}</h4>

@@ -209,6 +209,7 @@ func DefaultPresets() []DefaultPreset {
 		}},
 	}
 	items = append(items, modePresets()...)
+	items = append(items, filePresets()...)
 	out := make([]DefaultPreset, 0, len(items))
 	for _, it := range items {
 		b, err := json.Marshal(it.params)

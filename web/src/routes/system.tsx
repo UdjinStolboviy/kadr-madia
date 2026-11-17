@@ -21,6 +21,8 @@ const CAP_NAME: Record<CapabilityKey, string> = {
   ffprobe: "ffprobe",
   rclone: "rclone",
   vaapi: "VAAPI",
+  ghostscript: "Ghostscript",
+  qpdf: "qpdf",
 };
 
 function Stat({ icon, label, value, sub }: { icon: ReactNode; label: string; value: ReactNode; sub?: ReactNode }) {
@@ -144,7 +146,7 @@ export default function SystemPage() {
                             ) : c?.ok ? (
                               <StatusBadge tone="success">{t("system.ok")}</StatusBadge>
                             ) : (
-                              <StatusBadge tone={k === "vaapi" || k === "rclone" ? "neutral" : "danger"}>{t("system.missing")}</StatusBadge>
+                              <StatusBadge tone={k === "vaapi" || k === "rclone" || k === "ghostscript" || k === "qpdf" ? "neutral" : "danger"}>{t("system.missing")}</StatusBadge>
                             )}
                           </TableCell>
                         </TableRow>

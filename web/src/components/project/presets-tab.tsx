@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, Film, ImageIcon, Layers } from "lucide-react";
+import { ChevronDown, FileText, Film, ImageIcon, Layers } from "lucide-react";
 import { useState } from "react";
 
 import { CopyButton, StatusBadge } from "@/components/common";
@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useT } from "@/i18n/react";
+import type { MessageKey } from "@/i18n/dictionaries";
 import { presetsQuery } from "@/lib/queries";
 import { isModeSlug, summarizePreset } from "@/lib/presets";
 import type { Preset } from "@/lib/types";
@@ -18,7 +19,7 @@ function PresetCard({ preset }: { preset: Preset }) {
   const [open, setOpen] = useState(false);
   const summary = summarizePreset(preset.kind, preset.params);
   const json = JSON.stringify(preset.params, null, 2);
-  const Icon = preset.kind === "video" ? Film : ImageIcon;
+  const Icon = preset.kind === "video" ? Film : preset.kind === "file" ? FileText : ImageIcon;
 
   return (
     <Card className="gap-4 py-5">
@@ -27,7 +28,7 @@ function PresetCard({ preset }: { preset: Preset }) {
           <div
             className={cn(
               "flex size-9 shrink-0 items-center justify-center rounded-lg",
-              preset.kind === "video" ? "bg-warning/10 text-warning" : "bg-brand/10 text-brand",
+              preset.kind === "video" ? "bg-warning/10 text-warning" : preset.kind === "file" ? "bg-success/10 text-success" : "bg-brand/10 text-brand",
             )}
           >
             <Icon className="size-4" />
@@ -37,6 +38,9 @@ function PresetCard({ preset }: { preset: Preset }) {
               <h3 className="font-mono text-sm font-semibold">{preset.slug}</h3>
               <StatusBadge tone="neutral" dot={false}>
                 v{preset.current_version}
+              </StatusBadge>
+              <StatusBadge tone="neutral" dot={false}>
+                {t(`presets.kind.${preset.kind}` as MessageKey)}
               </StatusBadge>
               {isModeSlug(preset.slug) && (
                 <StatusBadge tone="info" dot={false}>
@@ -99,6 +103,7 @@ export function PresetsTab({ projectId }: { projectId: string }) {
 
   const images = presets.data.filter((p) => p.kind === "image");
   const videos = presets.data.filter((p) => p.kind === "video");
+  const files = presets.data.filter((p) => p.kind === "file");
 
   return (
     <div className="grid gap-8">
@@ -108,6 +113,7 @@ export function PresetsTab({ projectId }: { projectId: string }) {
       {[
         { id: "image", title: t("presets.imageGroup"), items: images },
         { id: "video", title: t("presets.videoGroup"), items: videos },
+        { id: "file", title: t("presets.fileGroup"), items: files },
       ]
         .filter((g) => g.items.length)
         .map((g) => (
