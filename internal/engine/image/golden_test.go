@@ -96,6 +96,12 @@ func ssimFloor(presetSlug, fixtureName string) float64 {
 	switch presetSlug {
 	case "photo-balanced":
 		return 0.90
+	case "image-compact": // bounded by a byte budget
+		return 0.80
+	case "image-balanced": // bounded by q ≤ 65
+		return 0.84
+	case "image-quality":
+		return 0.90
 	case "doc-lite":
 		if fixtureName == "document.jpg" || fixtureName == "screenshot.png" {
 			return 0.80

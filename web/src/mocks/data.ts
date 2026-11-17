@@ -44,6 +44,7 @@ export function defaultPresets(projectId: string, createdAt: string): Preset[] {
   ];
   void projectId;
   return [
+    ...modePresets(projectId, createdAt),
     mk("photo-lite", "image", "Cards, inventory, thumbnails", {
       kind: "image",
       resize: { maxWidth: 800, maxHeight: 800, fit: "inside", crop: null, aspect: null },
@@ -109,6 +110,64 @@ export function defaultPresets(projectId: string, createdAt: string): Preset[] {
       limits: { maxInputBytes: 2147483648, maxDurationSec: 300, maxWidth: 4096, maxHeight: 4096 },
       retainOriginal: false,
     }),
+  ];
+}
+
+/** The six compression-mode presets (mirrors internal/preset/modes.go). */
+export function modePresets(projectId: string, createdAt: string): Preset[] {
+  void projectId;
+  const limits = { maxInputBytes: 26214400, maxInputPixels: 40000000, accept: ["jpeg", "png", "webp", "heic", "avif", "gif"] };
+  const std = [
+    { name: "main", format: "avif", effort: 4, chroma: "4:2:0" },
+    { name: "main", format: "webp", smartSubsample: true },
+  ];
+  const hq = [
+    { name: "main", format: "avif", effort: 4, chroma: "4:4:4" },
+    { name: "main", format: "webp" },
+  ];
+  const img = (mode: string, description: string, side: number, quality: Record<string, unknown>, outputs: unknown[], sharpen: unknown): Preset => ({
+    id: ulid("pst_"),
+    slug: `image-${mode}`,
+    kind: "image",
+    description,
+    current_version: 1,
+    created_at: createdAt,
+    params: {
+      kind: "image",
+      resize: { maxWidth: side, maxHeight: side, fit: "inside", crop: null, aspect: null },
+      color: { grayscale: false, normalise: false },
+      sharpen,
+      outputs,
+      quality,
+      placeholder: { thumbhash: true, dominantColor: true },
+      limits,
+      retainOriginal: false,
+    },
+  });
+  const vid = (mode: string, description: string, video: Record<string, unknown>, audio: Record<string, unknown>): Preset => ({
+    id: ulid("pst_"),
+    slug: `video-${mode}`,
+    kind: "video",
+    description,
+    current_version: 1,
+    created_at: createdAt,
+    params: {
+      kind: "video",
+      video: { codec: "h264", fps: 30, preset: "slow", hw: "auto", ...video },
+      audio: { codec: "aac", ...audio },
+      container: { format: "mp4", faststart: true },
+      poster: { atSec: 1.0, preset: "photo-lite", maxBytes: 15360 },
+      limits: { maxInputBytes: 2147483648, maxDurationSec: 300, maxWidth: 4096, maxHeight: 4096 },
+      retainOriginal: false,
+    },
+  });
+  return [
+    img("compact", "Compact: good quality at a very small size (max side 1080, ≤ 30 KB)", 1080, { mode: "budget", maxBytes: 30720, qMax: 55, qMin: 25, downscaleStep: 0.85, minSide: 480 }, std, { sigma: 0.6, m1: 0.5, m2: 1.5 }),
+    img("balanced", "Balanced: the golden middle (max side 1440, SSIM ≥ 0.975)", 1440, { mode: "ssim", target: 0.975, qMin: 35, qMax: 65 }, std, null),
+    img("quality", "Quality: ideal quality at the smallest size that achieves it (max side 2048, SSIM ≥ 0.99, 4:4:4)", 2048, { mode: "ssim", target: 0.99, qMin: 45, qMax: 85 }, hq, null),
+    vid("compact", "Compact: 480p H.264 CRF 30, ≤ 450 kbit/s, AAC 48k mono", { maxWidth: 854, crf: 30, maxrate: "450k", bufsize: "900k" }, { bitrate: "48k", channels: 1, sampleRate: 44100 }),
+    vid("balanced", "Balanced: 720p H.264 CRF 26, ≤ 1.2 Mbit/s, AAC 96k stereo", { maxWidth: 1280, crf: 26, maxrate: "1200k", bufsize: "2400k" }, { bitrate: "96k", channels: 2, sampleRate: 44100 }),
+    vid("quality", "Quality: 1080p H.264 CRF 20, ≤ 5 Mbit/s, AAC 160k stereo", { maxWidth: 1920, crf: 20, maxrate: "5000k", bufsize: "10000k" }, { bitrate: "160k", channels: 2, sampleRate: 48000 }),
   ];
 }
 

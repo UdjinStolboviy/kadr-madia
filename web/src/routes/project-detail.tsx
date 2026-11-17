@@ -5,6 +5,7 @@ import { ChevronLeft } from "lucide-react";
 import { CopyButton, PageHeader, StatusBadge } from "@/components/common";
 import { ApiKeysTab } from "@/components/project/api-keys-tab";
 import { CloudTab } from "@/components/project/cloud-tab";
+import { ModesTab } from "@/components/project/modes-tab";
 import { PresetsTab } from "@/components/project/presets-tab";
 import { SettingsTab } from "@/components/project/settings-tab";
 import { SigningKeysTab } from "@/components/project/signing-keys-tab";
@@ -88,6 +89,7 @@ export default function ProjectDetailPage() {
           <TabsTrigger className="flex-none px-3" value="settings">Settings</TabsTrigger>
           <TabsTrigger className="flex-none px-3" value="keys">API keys</TabsTrigger>
           <TabsTrigger className="flex-none px-3" value="presets">Presets</TabsTrigger>
+          <TabsTrigger className="flex-none px-3" value="modes">Compression modes</TabsTrigger>
           <TabsTrigger className="flex-none px-3" value="webhooks">Webhooks</TabsTrigger>
           <TabsTrigger className="flex-none px-3" value="signing">Signing keys</TabsTrigger>
           <TabsTrigger className="flex-none px-3" value="cloud">Cloud</TabsTrigger>
@@ -100,6 +102,9 @@ export default function ProjectDetailPage() {
         </TabsContent>
         <TabsContent value="presets">
           <PresetsTab projectId={p.id} />
+        </TabsContent>
+        <TabsContent value="modes">
+          <ModesTab project={p} />
         </TabsContent>
         <TabsContent value="webhooks">
           <WebhooksTab project={p} />

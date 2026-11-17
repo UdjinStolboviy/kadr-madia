@@ -22,7 +22,7 @@ import type {
 } from "@/lib/types";
 import { API_KEY_SCOPES, SLUG_RE } from "@/lib/types";
 
-import { defaultPresets, seed, ulid, type MockDb } from "./data";
+import { defaultPresets, modePresets, seed, ulid, type MockDb } from "./data";
 
 const DB_KEY = "kadr-mock-db";
 const SESSION_KEY = "kadr-mock-session";
@@ -321,6 +321,47 @@ on("PATCH", "/projects/:id", ({ params, body }) => {
   return json(200, p);
 });
 
+const MODE_DESCR: Record<string, string> = {
+  compact: "Good quality at a very small size",
+  balanced: "The golden middle",
+  quality: "Ideal quality at the smallest size that achieves it",
+};
+on("GET", "/projects/:id/modes", ({ params }) => {
+  const p = findProject(params[0]!);
+  const list = (db.presets[p.id] ??= []);
+  const defaults = modePresets(p.id, nowIso());
+  return json(200, {
+    default_mode: p.default_mode ?? "balanced",
+    modes: ["compact", "balanced", "quality"].map((m) => {
+      const cur = (kind: string) => list.find((x) => x.slug === `${kind}-${m}`) ?? defaults.find((x) => x.slug === `${kind}-${m}`)!;
+      const edited = (kind: string) => {
+        const c = cur(kind);
+        const d = defaults.find((x) => x.slug === c.slug)!;
+        return c.current_version > 1 && JSON.stringify(c.params) !== JSON.stringify(d.params);
+      };
+      return { mode: m, description: MODE_DESCR[m], image: cur("image"), video: cur("video"), customized: { image: edited("image"), video: edited("video") } };
+    }),
+  });
+});
+on("POST", "/projects/:id/presets/:slug/reset", ({ params }) => {
+  const p = findProject(params[0]!);
+  const list = (db.presets[p.id] ??= []);
+  const def = [...modePresets(p.id, nowIso()), ...defaultPresets(p.id, nowIso())].find((x) => x.slug === params[1]);
+  if (!def) throw validationError({ slug: "only built-in presets can be reset" });
+  let cur = list.find((x) => x.slug === def.slug);
+  if (cur) {
+    cur.current_version += 1;
+    cur.params = def.params;
+    cur.description = def.description;
+  } else {
+    cur = def;
+    list.push(cur);
+  }
+  audit("preset.version", cur.id, p.id, { slug: cur.slug, version: cur.current_version, reset: true });
+  persist();
+  return json(200, cur);
+});
+
 on("GET", "/projects/:id/presets", ({ params }) => {
   findProject(params[0]!);
   return json(200, { items: db.presets[params[0]!] ?? [] });
@@ -548,17 +589,45 @@ on("POST", "/projects/:id/presets/:slug/versions", ({ params, body }) => {
   const list = (db.presets[findProject(params[0]!).id] ??= []);
   const b = body as { params: Record<string, unknown>; description?: string };
   let p = list.find((x) => x.slug === params[1]);
+  const kind = p?.kind ?? (b.params.kind === "video" ? "video" : "image");
+  const bad = kind === "video" ? validateVideo(b.params) : validateImage(b.params);
+  if (bad) throw validationError({ params: bad });
   if (p) {
     p.current_version += 1;
     p.params = b.params;
   } else {
-    p = { id: ulid("pst_"), slug: params[1]!, kind: "image", description: b.description ?? "", current_version: 1, params: b.params, created_at: nowIso() };
+    p = { id: ulid("pst_"), slug: params[1]!, kind, description: b.description ?? "", current_version: 1, params: b.params, created_at: nowIso() };
     list.push(p);
   }
   audit("preset.version", p.id, params[0]!, { slug: p.slug, version: p.current_version });
   persist();
   return json(200, p);
 });
+
+function validateImage(p: Record<string, unknown>): string {
+  const r = (p.resize ?? {}) as { maxWidth?: number; maxHeight?: number };
+  const q = (p.quality ?? {}) as { mode?: string; maxBytes?: number };
+  const outs = Array.isArray(p.outputs) ? p.outputs : [];
+  if (outs.length === 0 || outs.length > 4) return "1–4 outputs required";
+  if (!r.maxWidth || !r.maxHeight || r.maxWidth < 16 || r.maxWidth > 8192 || r.maxHeight < 16 || r.maxHeight > 8192) return "resize.maxWidth/maxHeight must be 16–8192";
+  if (q.mode === "budget" && !(q.maxBytes && q.maxBytes >= 1024 && q.maxBytes <= 10 << 20)) return "quality.maxBytes must be 1 KB–10 MB";
+  if (!["budget", "ssim", "fixed"].includes(q.mode ?? "")) return "quality.mode must be budget, ssim or fixed";
+  return "";
+}
+function validateVideo(p: Record<string, unknown>): string {
+  const v = (p.video ?? {}) as { maxWidth?: number; fps?: number; crf?: number; maxrate?: string; bufsize?: string; preset?: string; hw?: string };
+  const a = (p.audio ?? {}) as { bitrate?: string; channels?: number };
+  const rate = /^[1-9][0-9]{1,5}[kKmM]$/;
+  if (!v.maxWidth || v.maxWidth < 160 || v.maxWidth > 4096) return "video.maxWidth must be 160–4096";
+  if (!v.fps || v.fps < 1 || v.fps > 60) return "video.fps must be 1–60";
+  if (!v.crf || v.crf < 14 || v.crf > 40) return "video.crf must be 14–40";
+  if (v.maxrate && !rate.test(v.maxrate)) return 'video.maxrate must look like "900k" or "4M"';
+  if (v.bufsize && !rate.test(v.bufsize)) return 'video.bufsize must look like "1800k" or "8M"';
+  if (v.hw && !["auto", "vaapi", "off"].includes(v.hw)) return "video.hw must be auto, vaapi or off";
+  if (a.bitrate && !rate.test(a.bitrate)) return 'audio.bitrate must look like "96k"';
+  if (a.channels !== undefined && (a.channels < 0 || a.channels > 2)) return "audio.channels must be 1 or 2";
+  return "";
+}
 
 const mockWebhooks: WebhookEndpoint[] = [];
 on("GET", "/projects/:id/webhooks", ({ params }) => json(200, { items: mockWebhooks.filter((w) => w.project_id === params[0]) }));
@@ -603,6 +672,14 @@ on("POST", "/projects/:id/signing-keys", ({ params }) => {
   const key: SigningKey = { id: `${p.slug}-k${mine.length + 1}`, project_id: p.id, status: "active", published_at: null, created_at: nowIso() };
   mockSigning.push(key);
   return json(201, { key, secret: randomBase62(43) });
+});
+on("POST", "/signing-keys/publish", () => {
+  if (sessionStorage.getItem("kadr-mock-edge") !== "1" /* set to "1" in devtools to simulate a configured edge */) {
+    throw new HttpError(503, "edge_not_configured", "Service Unavailable", "set KADR_CF_ACCOUNT_ID and KADR_CF_API_TOKEN to publish keys to kadr-edge");
+  }
+  const live = mockSigning.filter((k) => k.status !== "retired");
+  for (const k of live) k.published_at = nowIso();
+  return json(200, { published: live.length });
 });
 on("DELETE", "/signing-keys/:kid", ({ params }) => {
   const k = mockSigning.find((x) => x.id === params[0]);

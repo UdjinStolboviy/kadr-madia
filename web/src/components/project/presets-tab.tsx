@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Skeleton } from "@/components/ui/skeleton";
 import { presetsQuery } from "@/lib/queries";
-import { summarizePreset } from "@/lib/presets";
+import { isModeSlug, summarizePreset } from "@/lib/presets";
 import type { Preset } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -36,6 +36,11 @@ function PresetCard({ preset }: { preset: Preset }) {
               <StatusBadge tone="neutral" dot={false}>
                 v{preset.current_version}
               </StatusBadge>
+              {isModeSlug(preset.slug) && (
+                <StatusBadge tone="info" dot={false}>
+                  mode preset
+                </StatusBadge>
+              )}
             </div>
             {preset.description && <p className="mt-0.5 text-sm text-muted-foreground">{preset.description}</p>}
           </div>
@@ -95,7 +100,7 @@ export function PresetsTab({ projectId }: { projectId: string }) {
   return (
     <div className="grid gap-8">
       <p className="text-sm text-muted-foreground">
-        Presets are versioned and read-only in this release. A visual preset editor arrives with the Playground.
+        Presets are versioned. The six mode presets can be edited under Compression modes; save new versions of other image presets from the Playground.
       </p>
       {[
         { title: "Image presets", items: images },

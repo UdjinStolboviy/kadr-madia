@@ -2,7 +2,7 @@
 # Same Worker and binding names as wrangler.toml, but no custom-domain route
 # (wrangler dev cannot infer a host from the "media.<domain>" placeholder).
 name = "kadr-edge"
-main = "src/index.ts"
+main = "src/worker.ts"
 compatibility_date = "2025-01-01"
 workers_dev = false
 

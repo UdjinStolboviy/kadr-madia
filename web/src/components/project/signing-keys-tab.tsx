@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { KeyRound, Loader2, RefreshCw, Trash2 } from "lucide-react";
+import { CloudUpload, KeyRound, Loader2, RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { RelativeTime, StatusBadge } from "@/components/common";
@@ -18,8 +18,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { errorMessage } from "@/lib/api";
-import { signingKeysQuery, useRetireSigningKey, useRotateSigningKey } from "@/lib/queries";
+import { errorMessage, isApiError } from "@/lib/api";
+import { signingKeysQuery, usePublishSigningKeys, useRetireSigningKey, useRotateSigningKey } from "@/lib/queries";
 import type { CreateSigningKeyResponse, Project, SigningKey } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -30,6 +30,8 @@ export function SigningKeysTab({ project }: { project: Project }) {
   const keys = useQuery(signingKeysQuery(project.id));
   const rotate = useRotateSigningKey(project.id);
   const retire = useRetireSigningKey(project.id);
+  const publish = usePublishSigningKeys(project.id);
+  const [publishError, setPublishError] = useState<{ notConfigured: boolean; message: string } | null>(null);
   const [confirmRotate, setConfirmRotate] = useState(false);
   const [created, setCreated] = useState<CreateSigningKeyResponse | null>(null);
   const [toRetire, setToRetire] = useState<SigningKey | null>(null);
@@ -44,6 +46,18 @@ export function SigningKeysTab({ project }: { project: Project }) {
     });
   };
 
+  const doPublish = () => {
+    setPublishError(null);
+    publish.mutate(undefined, {
+      onSuccess: (r) => toast.success(`Published ${r.published} key${r.published === 1 ? "" : "s"} to the edge`),
+      onError: (e) => {
+        const notConfigured = isApiError(e) && e.status === 503 && e.code === "edge_not_configured";
+        setPublishError({ notConfigured, message: errorMessage(e) });
+        if (!notConfigured) toast.error("Couldn't publish keys", { description: errorMessage(e) });
+      },
+    });
+  };
+
   return (
     <div className="grid gap-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -51,6 +65,11 @@ export function SigningKeysTab({ project }: { project: Project }) {
           Signing keys sign private delivery URLs. Rotating creates a new active key; the previous one keeps verifying existing URLs
           until you retire it.
         </p>
+        <div className="flex shrink-0 gap-2">
+        <Button variant="outline" onClick={doPublish} disabled={publish.isPending || list.length === 0}>
+          {publish.isPending ? <Loader2 className="animate-spin" /> : <CloudUpload />}
+          Publish to edge
+        </Button>
         <Button
           onClick={() => (hasActive ? setConfirmRotate(true) : doRotate())}
           disabled={project.disabled || rotate.isPending}
@@ -59,7 +78,21 @@ export function SigningKeysTab({ project }: { project: Project }) {
           {rotate.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
           {hasActive ? "Rotate key" : "Create key"}
         </Button>
+        </div>
       </div>
+
+      {publishError && (
+        <p className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm" role="alert">
+          {publishError.notConfigured ? (
+            <>
+              Edge publishing isn't configured. Set <code className="font-mono text-xs">KADR_CF_ACCOUNT_ID</code> and{" "}
+              <code className="font-mono text-xs">KADR_CF_API_TOKEN</code> on the server, then try again.
+            </>
+          ) : (
+            <>Publishing to the edge failed: {publishError.message}</>
+          )}
+        </p>
+      )}
 
       {keys.isPending ? (
         <Skeleton className="h-24 w-full" />
@@ -75,6 +108,7 @@ export function SigningKeysTab({ project }: { project: Project }) {
                 <TableHead className="pl-4">Key ID</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="hidden sm:table-cell">Created</TableHead>
+                <TableHead className="hidden md:table-cell">Published to edge</TableHead>
                 <TableHead className="w-12 pr-4" />
               </TableRow>
             </TableHeader>
@@ -89,6 +123,9 @@ export function SigningKeysTab({ project }: { project: Project }) {
                   </TableCell>
                   <TableCell className="hidden text-sm text-muted-foreground sm:table-cell">
                     <RelativeTime value={k.created_at} />
+                  </TableCell>
+                  <TableCell className="hidden text-sm text-muted-foreground md:table-cell">
+                    <RelativeTime value={k.published_at} fallback="not published" />
                   </TableCell>
                   <TableCell className="pr-3">
                     {k.status !== "retired" && (

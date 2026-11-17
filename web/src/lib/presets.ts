@@ -199,3 +199,10 @@ export function summarizePreset(kind: string, params: Record<string, unknown>): 
     return { headline: `${kind} preset`, facts: [] };
   }
 }
+
+const MODE_NAMES = ["compact", "balanced", "quality"];
+
+/** The six built-in compression-mode presets (image-<mode>, video-<mode>). */
+export function isModeSlug(slug: string): boolean {
+  return MODE_NAMES.some((m) => slug === `image-${m}` || slug === `video-${m}`);
+}
