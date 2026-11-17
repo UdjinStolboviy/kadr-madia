@@ -7,6 +7,7 @@ import (
 
 	"github.com/UdjinStolboviy/kadr-madia/internal/engine/fakeimage"
 	"github.com/UdjinStolboviy/kadr-madia/internal/engine/image"
+	"github.com/UdjinStolboviy/kadr-madia/internal/engine/video"
 	"github.com/UdjinStolboviy/kadr-madia/internal/preset"
 )
 
@@ -39,4 +40,16 @@ func (u unavailableEngine) Probe(context.Context, string, preset.ImageLimits) (i
 
 func (u unavailableEngine) Process(context.Context, image.SourceInfo, preset.ImageParams, string) (*image.Output, error) {
 	return nil, u.fail()
+}
+
+// newVideoEngine returns the ffmpeg engine, or nil when ffmpeg/ffprobe are
+// missing (video presets then fail with a retryable engine error).
+func newVideoEngine(log *slog.Logger) video.Engine {
+	e, err := video.New(video.Config{Nice: true})
+	if err != nil {
+		log.Error("video engine unavailable; video jobs will fail until ffmpeg is installed", "err", err)
+		return nil
+	}
+	log.Info("video engine ready", "vaapi", e.HasVAAPI())
+	return e
 }

@@ -140,7 +140,7 @@ func newEnv(t *testing.T) *env {
 	set := metrics.NewSet()
 	eng := fakeimage.New()
 	svc := pipeline.New(pipeline.Config{
-		Store: store, Queue: q, Engine: eng, Keyring: kr, Logger: log, Metrics: set, TmpDir: t.TempDir(), Now: clk.Now,
+		Store: store, Queue: q, Engine: eng, Video: videoEngine(), Keyring: kr, Logger: log, Metrics: set, TmpDir: t.TempDir(), Now: clk.Now,
 		NewDriver: func(c storage.Config) (storage.Driver, error) {
 			d, err := storage.NewS3(c)
 			if err != nil {
@@ -150,7 +150,7 @@ func newEnv(t *testing.T) *env {
 			return rec, nil
 		},
 	})
-	runner := queue.NewRunner(q, queue.RunnerConfig{Pools: map[string]int{queue.PoolImage: 2, queue.PoolMaintenance: 1},
+	runner := queue.NewRunner(q, queue.RunnerConfig{Pools: map[string]int{queue.PoolImage: 2, queue.PoolVideo: 1, queue.PoolMaintenance: 1},
 		Logger: log, Metrics: set, PollInterval: 10 * time.Millisecond})
 	svc.Register(runner)
 	runner.Start(ctx)
@@ -769,7 +769,7 @@ func TestValidationAbortPatchAndPresets(t *testing.T) {
 	big["size"] = 64<<20 + 1
 	r := e.call("POST", "/v1/uploads", big, nil)
 	expect(t, r, 413, "too_large")
-	if !strings.Contains(r.obj(t)["detail"].(string), "multipart") {
+	if !strings.Contains(r.obj(t)["detail"].(string), "single upload") {
 		t.Fatalf("too_large detail: %s", r.body)
 	}
 	overPreset := ticketBody(photo("x"), "org_v", "public", false)

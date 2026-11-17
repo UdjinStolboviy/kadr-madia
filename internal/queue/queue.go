@@ -31,6 +31,7 @@ import (
 // Pool names.
 const (
 	PoolImage       = "image"
+	PoolVideo       = "video"
 	PoolMaintenance = "maintenance"
 	PoolWebhook     = "webhook"
 )

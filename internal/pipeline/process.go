@@ -13,6 +13,7 @@ import (
 
 	"github.com/UdjinStolboviy/kadr-madia/internal/db"
 	"github.com/UdjinStolboviy/kadr-madia/internal/engine/image"
+	"github.com/UdjinStolboviy/kadr-madia/internal/engine/video"
 	"github.com/UdjinStolboviy/kadr-madia/internal/preset"
 	"github.com/UdjinStolboviy/kadr-madia/internal/queue"
 	"github.com/UdjinStolboviy/kadr-madia/internal/storage"
@@ -29,7 +30,9 @@ type processCtx struct {
 	upload  *db.Upload
 	asset   *db.Asset
 	project *db.Project
+	kind    string // image | video
 	params  preset.ImageParams
+	vparams preset.VideoParams
 	tgt     *target
 	workDir string
 }
@@ -73,7 +76,14 @@ func (s *Service) runProcessImage(ctx context.Context, j *queue.Job) error {
 	if err != nil {
 		return permanent(FailInternal, "preset version not found", err)
 	}
-	if err := json.Unmarshal(pv.Params, &pc.params); err != nil {
+	pc.kind = pv.Kind
+	if pc.kind == "video" {
+		err = json.Unmarshal(pv.Params, &pc.vparams)
+	} else {
+		pc.kind = "image"
+		err = json.Unmarshal(pv.Params, &pc.params)
+	}
+	if err != nil {
 		return permanent(FailInternal, "invalid preset parameters", err)
 	}
 	if pc.tgt, err = s.storageFor(ctx, pc.project); err != nil {
@@ -105,30 +115,31 @@ func (s *Service) runProcessImage(ctx context.Context, j *queue.Job) error {
 		return err
 	}
 
-	info, err := s.engine.Probe(ctx, srcPath, pc.params.Limits)
-	if err != nil {
-		return classifyEngineError(err)
-	}
 	outDir := filepath.Join(pc.workDir, "out")
 	if err := os.MkdirAll(outDir, 0o750); err != nil {
 		return fmt.Errorf("create output dir: %w", err)
 	}
-	out, err := s.engine.Process(ctx, info, pc.params, outDir)
-	if err != nil {
-		return classifyEngineError(err)
+	var out *produced
+	if pc.kind == "video" {
+		out, err = s.produceVideo(ctx, pc, srcPath, outDir)
+	} else {
+		out, err = s.produceImage(ctx, pc, srcPath, outDir)
 	}
-	if len(out.Renditions) == 0 {
-		return permanent(image.CodeEngineFailure, "engine produced no renditions", nil)
+	if err != nil {
+		return err
 	}
 
 	blob := &db.Blob{
 		ID: db.NewID(db.PrefixBlob), ProjectID: u.ProjectID, StorageProfileID: pc.tgt.profile.ID, Visibility: u.Visibility,
-		PresetID: u.PresetID, PresetVersion: u.PresetVersion, SourceSHA256: sha, Kind: "image", OriginalBytes: size,
-		OriginalWidth: ptr(int64(info.Width)), OriginalHeight: ptr(int64(info.Height)), OriginalContentType: &info.ContentType,
-		ThumbHash: out.ThumbHash, Refcount: 1, Status: db.BlobReady, CreatedAt: s.now(),
+		PresetID: u.PresetID, PresetVersion: u.PresetVersion, SourceSHA256: sha, Kind: pc.kind, OriginalBytes: size,
+		OriginalWidth: ptr(int64(out.srcWidth)), OriginalHeight: ptr(int64(out.srcHeight)), OriginalContentType: &out.srcContentType,
+		ThumbHash: out.thumbHash, Refcount: 1, Status: db.BlobReady, CreatedAt: s.now(),
 	}
-	if out.DominantColor != "" {
-		blob.DominantColor = &out.DominantColor
+	if out.durationMs > 0 {
+		blob.DurationMs = &out.durationMs
+	}
+	if out.dominantColor != "" {
+		blob.DominantColor = &out.dominantColor
 	}
 	bucket := pc.tgt.bucket(u.Visibility)
 	cacheControl := CacheControlPrivate
@@ -145,23 +156,30 @@ func (s *Service) runProcessImage(ctx context.Context, j *queue.Job) error {
 			_ = pc.tgt.driver.Delete(context.WithoutCancel(ctx), pc.tgt.profile.PrivateBucket, *blob.OriginalKey)
 		}
 	}
-	for _, r := range out.Renditions {
-		key := fmt.Sprintf("%s/%s/%s.%s", pc.project.Slug, blob.ID, r.Name, r.Format)
-		if err := putFile(ctx, pc.tgt.driver, bucket, key, r.Path, storage.PutOptions{
-			ContentType: renditionContentType(r.Format), CacheControl: cacheControl,
+	for _, r := range out.files {
+		key := fmt.Sprintf("%s/%s/%s.%s", pc.project.Slug, blob.ID, r.name, r.format)
+		if err := putFile(ctx, pc.tgt.driver, bucket, key, r.path, storage.PutOptions{
+			ContentType: renditionContentType(r.format), CacheControl: cacheControl,
 		}); err != nil {
 			cleanup()
-			return fmt.Errorf("upload rendition %s.%s: %w", r.Name, r.Format, err)
+			return fmt.Errorf("upload rendition %s.%s: %w", r.name, r.format, err)
 		}
 		uploaded = append(uploaded, key)
-		rends = append(rends, &db.Rendition{BlobID: blob.ID, Name: r.Name, Format: r.Format, StorageKey: key, Bytes: r.Bytes,
-			Width: ptr(int64(r.Width)), Height: ptr(int64(r.Height)), Quality: ptr(int64(r.Quality)), OverBudget: r.OverBudget})
-		blob.TotalBytes += r.Bytes
+		rd := &db.Rendition{BlobID: blob.ID, Name: r.name, Format: r.format, StorageKey: key, Bytes: r.bytes,
+			Width: ptr(int64(r.width)), Height: ptr(int64(r.height)), OverBudget: r.overBudget}
+		if r.quality > 0 {
+			rd.Quality = ptr(int64(r.quality))
+		}
+		if r.bitrate > 0 {
+			rd.Bitrate = ptr(r.bitrate)
+		}
+		rends = append(rends, rd)
+		blob.TotalBytes += r.bytes
 	}
-	if pc.params.RetainOrigin {
-		key := fmt.Sprintf("originals/%s/%s.%s", pc.project.Slug, blob.ID, info.Format)
+	if out.retainOrigin {
+		key := fmt.Sprintf("originals/%s/%s.%s", pc.project.Slug, blob.ID, out.srcFormat)
 		if err := putFile(ctx, pc.tgt.driver, pc.tgt.profile.PrivateBucket, key, srcPath, storage.PutOptions{
-			ContentType: info.ContentType, CacheControl: CacheControlPrivate,
+			ContentType: out.srcContentType, CacheControl: CacheControlPrivate,
 		}); err != nil {
 			cleanup()
 			return fmt.Errorf("upload original: %w", err)
@@ -182,7 +200,7 @@ func (s *Service) runProcessImage(ctx context.Context, j *queue.Job) error {
 			return errAssetSettled
 		}
 		if err := s.settleReady(ctx, tx, pc, blob.TotalBytes, db.UsageDelta{
-			AssetsReady: 1, BytesIn: size, BytesStored: blob.TotalBytes, CPUMillis: out.CPUMillis,
+			AssetsReady: 1, BytesIn: size, BytesStored: blob.TotalBytes, CPUMillis: out.cpuMillis,
 		}); err != nil {
 			return err
 		}
@@ -350,6 +368,12 @@ func classifyEngineError(err error) error {
 			return &jobError{code: ie.Code, detail: ie.Detail, err: err}
 		}
 		return permanent(ie.Code, ie.Detail, err)
+	}
+	if ve, ok := video.AsError(err); ok {
+		if ve.Retryable {
+			return &jobError{code: ve.Code, detail: ve.Detail, err: err}
+		}
+		return permanent(ve.Code, ve.Detail, err)
 	}
 	if errors.Is(err, context.Canceled) {
 		return err

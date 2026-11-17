@@ -50,7 +50,9 @@ type CreateUploadResult struct {
 // common holds validated fields shared by ticket and server-side uploads.
 type common struct {
 	preset   *db.Preset
+	kind     string
 	params   preset.ImageParams
+	vparams  preset.VideoParams
 	ns       string
 	vis      string
 	filename *string
@@ -89,11 +91,16 @@ func (s *Service) validateCommon(ctx context.Context, projectID, presetSlug, ns,
 	if err != nil {
 		return nil, err
 	}
-	if p.Kind != "image" {
-		return nil, apiErr(http.StatusUnsupportedMediaType, CodeUnsupportedMedia,
-			"preset %q processes %s; only image presets are supported in this version", p.Slug, p.Kind)
+	c.kind = p.Kind
+	switch p.Kind {
+	case "image":
+		err = json.Unmarshal(p.Params, &c.params)
+	case "video":
+		err = json.Unmarshal(p.Params, &c.vparams)
+	default:
+		return nil, apiErr(http.StatusUnsupportedMediaType, CodeUnsupportedMedia, "preset %q has unsupported kind %q", p.Slug, p.Kind)
 	}
-	if err := json.Unmarshal(p.Params, &c.params); err != nil {
+	if err != nil {
 		return nil, fmt.Errorf("preset %s params: %w", p.ID, err)
 	}
 	c.preset = p
@@ -144,16 +151,16 @@ func (s *Service) CreateUpload(ctx context.Context, projectID string, in CreateU
 	if len(errs) > 0 {
 		return nil, validationErr(errs)
 	}
-	if in.Size > MaxPutBytes {
+	if maxPut := c.maxPutBytes(); in.Size > maxPut {
 		return nil, apiErr(http.StatusRequestEntityTooLarge, CodeTooLarge,
-			"files larger than %d MB need a multipart upload, which is not available yet (planned for M2); use a smaller file", MaxPutBytes>>20)
+			"files larger than %d MB are not supported by a single upload; use a smaller file", maxPut>>20)
 	}
-	if lim := c.params.Limits.MaxInputBytes; lim > 0 && in.Size > lim {
+	if lim := c.maxInputBytes(); lim > 0 && in.Size > lim {
 		return nil, apiErr(http.StatusRequestEntityTooLarge, CodeTooLarge, "file is %d bytes; preset %q accepts at most %d bytes", in.Size, c.preset.Slug, lim)
 	}
-	if !acceptsContentType(c.params.Limits.Accept, ct) {
+	if !c.acceptsContentType(ct) {
 		return nil, apiErr(http.StatusUnsupportedMediaType, CodeUnsupportedMedia,
-			"content type %q is not accepted by preset %q (accepted formats: %s)", ct, c.preset.Slug, strings.Join(c.params.Limits.Accept, ", "))
+			"content type %q is not accepted by preset %q (%s)", ct, c.preset.Slug, c.acceptedDesc())
 	}
 	project, err := s.store.GetProject(ctx, projectID)
 	if err != nil {
@@ -322,7 +329,12 @@ func (s *Service) promote(ctx context.Context, u *db.Upload, requireObject bool)
 	}
 
 	now := s.now()
-	a := &db.Asset{ID: db.NewID(db.PrefixAsset), ProjectID: u.ProjectID, NS: u.NS, UploadID: &u.ID, Kind: "image",
+	kind := "image"
+	jobKind, pool := JobProcessImage, queue.PoolImage
+	if pv, err := s.store.GetPresetVersion(ctx, u.PresetID, u.PresetVersion); err == nil && pv.Kind == "video" {
+		kind, jobKind, pool = "video", JobProcessVideo, queue.PoolVideo
+	}
+	a := &db.Asset{ID: db.NewID(db.PrefixAsset), ProjectID: u.ProjectID, NS: u.NS, UploadID: &u.ID, Kind: kind,
 		Visibility: u.Visibility, Filename: u.Filename, Metadata: u.Metadata, Status: db.AssetProcessing,
 		PresetID: &u.PresetID, PresetVersion: ptr(int64(u.PresetVersion)), CreatedAt: now}
 	assetID := a.ID
@@ -350,7 +362,7 @@ func (s *Service) promote(ctx context.Context, u *db.Upload, requireObject bool)
 			return err
 		}
 		_, _, err = s.queue.Enqueue(ctx, tx, queue.EnqueueOptions{
-			Kind: JobProcessImage, Pool: queue.PoolImage, DedupeKey: u.ID, Payload: processPayload{UploadID: u.ID},
+			Kind: jobKind, Pool: pool, DedupeKey: u.ID, Payload: processPayload{UploadID: u.ID},
 		})
 		return err
 	})
@@ -481,7 +493,7 @@ func (s *Service) CreateServerAsset(ctx context.Context, projectID string, in Se
 	if len(errs) > 0 {
 		return nil, validationErr(errs)
 	}
-	if lim := c.params.Limits.MaxInputBytes; lim > 0 && st.Size > lim {
+	if lim := c.maxInputBytes(); lim > 0 && st.Size > lim {
 		return nil, apiErr(http.StatusRequestEntityTooLarge, CodeTooLarge, "file is %d bytes; preset %q accepts at most %d bytes", st.Size, c.preset.Slug, lim)
 	}
 	project, err := s.store.GetProject(ctx, projectID)
@@ -502,7 +514,7 @@ func (s *Service) CreateServerAsset(ctx context.Context, projectID string, in Se
 		Visibility: c.vis, Method: db.UploadMethodServer, Filename: c.filename, ContentType: ct, DeclaredBytes: st.Size,
 		DeclaredSHA256: st.SHA256, SourceRef: &ref, Metadata: c.metadata, Status: db.UploadUploaded, ExpiresAt: now.Add(s.uploadTTL),
 		CreatedAt: now, UpdatedAt: now}
-	a := &db.Asset{ID: db.NewID(db.PrefixAsset), ProjectID: projectID, NS: c.ns, UploadID: &u.ID, Kind: "image",
+	a := &db.Asset{ID: db.NewID(db.PrefixAsset), ProjectID: projectID, NS: c.ns, UploadID: &u.ID, Kind: c.kind,
 		Visibility: c.vis, Filename: c.filename, Metadata: c.metadata, Status: db.AssetProcessing,
 		PresetID: &c.preset.ID, PresetVersion: ptr(int64(c.preset.CurrentVersion)), CreatedAt: now}
 	u.AssetID = &a.ID
@@ -520,7 +532,7 @@ func (s *Service) CreateServerAsset(ctx context.Context, projectID string, in Se
 			return err
 		}
 		_, _, err := s.queue.Enqueue(ctx, tx, queue.EnqueueOptions{
-			Kind: JobProcessImage, Pool: queue.PoolImage, DedupeKey: u.ID, Payload: processPayload{UploadID: u.ID},
+			Kind: jobKindFor(c.kind), Pool: poolFor(c.kind), DedupeKey: u.ID, Payload: processPayload{UploadID: u.ID},
 		})
 		return err
 	})
@@ -611,4 +623,46 @@ func deref(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+func jobKindFor(kind string) string {
+	if kind == "video" {
+		return JobProcessVideo
+	}
+	return JobProcessImage
+}
+
+func poolFor(kind string) string {
+	if kind == "video" {
+		return queue.PoolVideo
+	}
+	return queue.PoolImage
+}
+
+func (c *common) maxPutBytes() int64 {
+	if c.kind == "video" {
+		return MaxVideoPutBytes
+	}
+	return MaxPutBytes
+}
+
+func (c *common) maxInputBytes() int64 {
+	if c.kind == "video" {
+		return c.vparams.Limits.MaxInputBytes
+	}
+	return c.params.Limits.MaxInputBytes
+}
+
+func (c *common) acceptsContentType(ct string) bool {
+	if c.kind == "video" {
+		return strings.HasPrefix(ct, "video/")
+	}
+	return acceptsContentType(c.params.Limits.Accept, ct)
+}
+
+func (c *common) acceptedDesc() string {
+	if c.kind == "video" {
+		return "accepted: video/*"
+	}
+	return "accepted formats: " + strings.Join(c.params.Limits.Accept, ", ")
 }

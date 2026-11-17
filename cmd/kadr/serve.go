@@ -121,14 +121,14 @@ func cmdServe(ctx context.Context, args []string, stderr io.Writer) error {
 	q := queue.New(store, nil)
 	dispatcher := webhook.New(webhook.Config{Store: store, Keyring: keyring, Logger: log, Metrics: set})
 	svc := pipeline.New(pipeline.Config{
-		Store: store, Queue: q, Engine: newImageEngine(cfg.PoolImage, *fakeEngine, log), Keyring: keyring,
+		Store: store, Queue: q, Engine: newImageEngine(cfg.PoolImage, *fakeEngine, log), Video: newVideoEngine(log), Keyring: keyring,
 		Logger: log, Metrics: set, TmpDir: cfg.TmpDir, Webhooks: dispatcher,
 	})
 	if err := svc.CleanStaleWorkDirs(ctx); err != nil {
 		log.Warn("clean stale work dirs", "err", err)
 	}
 	runner := queue.NewRunner(q, queue.RunnerConfig{
-		Pools:  map[string]int{queue.PoolImage: cfg.PoolImage, queue.PoolMaintenance: 1},
+		Pools:  map[string]int{queue.PoolImage: cfg.PoolImage, queue.PoolVideo: cfg.PoolVideo, queue.PoolMaintenance: 1},
 		Logger: log, Metrics: set,
 	})
 	svc.Register(runner)
