@@ -31,6 +31,7 @@ import (
 	"github.com/UdjinStolboviy/kadr-madia/internal/db"
 	"github.com/UdjinStolboviy/kadr-madia/internal/engine/image"
 	"github.com/UdjinStolboviy/kadr-madia/internal/engine/video"
+	"github.com/UdjinStolboviy/kadr-madia/internal/importer"
 	"github.com/UdjinStolboviy/kadr-madia/internal/queue"
 	"github.com/UdjinStolboviy/kadr-madia/internal/storage"
 	"github.com/UdjinStolboviy/kadr-madia/internal/webhook"
@@ -93,7 +94,10 @@ type Config struct {
 	MultipartThreshold int64
 	// EdgeBaseURL is the private delivery host used by SignURLs.
 	EdgeBaseURL string
-	PartSize    int64
+	// Fetcher downloads URL imports; Rclone cloud imports (nil → defaults).
+	Fetcher  *importer.Fetcher
+	Rclone   *importer.Rclone
+	PartSize int64
 }
 
 // Service is the pipeline.
@@ -112,6 +116,8 @@ type Service struct {
 	grace                 time.Duration
 	mpThreshold, partSize int64
 	edgeBaseURL           string
+	fetcher               *importer.Fetcher
+	rclone                *importer.Rclone
 	now                   func() time.Time
 
 	drivers  drivers
@@ -143,13 +149,19 @@ func New(cfg Config) *Service {
 	if cfg.PartSize <= 0 {
 		cfg.PartSize = 16 << 20
 	}
+	if cfg.Fetcher == nil {
+		cfg.Fetcher = &importer.Fetcher{}
+	}
+	if cfg.Rclone == nil {
+		cfg.Rclone = &importer.Rclone{}
+	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
 	return &Service{
 		store: cfg.Store, queue: cfg.Queue, engine: cfg.Engine, video: cfg.Video, keyring: cfg.Keyring, log: cfg.Logger,
 		metrics: cfg.Metrics, tmpDir: cfg.TmpDir, webhooks: cfg.Webhooks, newDriver: cfg.NewDriver,
-		uploadTTL: cfg.UploadTTL, grace: cfg.SweepGrace, mpThreshold: cfg.MultipartThreshold, edgeBaseURL: cfg.EdgeBaseURL, partSize: cfg.PartSize, now: cfg.Now,
+		uploadTTL: cfg.UploadTTL, grace: cfg.SweepGrace, mpThreshold: cfg.MultipartThreshold, edgeBaseURL: cfg.EdgeBaseURL, fetcher: cfg.Fetcher, rclone: cfg.Rclone, partSize: cfg.PartSize, now: cfg.Now,
 		drivers:     drivers{cache: map[string]cachedDriver{}},
 		notifier:    newNotifier(),
 		bytesIn:     cfg.Metrics.GetOrCreateCounter("kadr_bytes_in_total"),

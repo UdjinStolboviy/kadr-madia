@@ -320,6 +320,12 @@ func (s *Service) fetchSource(ctx context.Context, pc *processCtx) (string, int6
 		}
 		return path, n, h.Sum(nil), nil
 	}
+	switch u.Method {
+	case db.UploadMethodURL:
+		return s.fetchURL(ctx, pc)
+	case db.UploadMethodCloud:
+		return s.fetchCloud(ctx, pc)
+	}
 	body, _, err := pc.tgt.driver.Get(ctx, pc.tgt.profile.PrivateBucket, deref(u.TmpKey))
 	if errors.Is(err, storage.ErrNotFound) {
 		return "", 0, nil, permanent(FailSourceMissing, "the uploaded file is no longer in temporary storage", err)

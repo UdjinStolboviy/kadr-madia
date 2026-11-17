@@ -35,6 +35,8 @@ const (
 	UploadMethodPut       = "PUT"
 	UploadMethodMultipart = "MULTIPART"
 	UploadMethodServer    = "SERVER"
+	UploadMethodURL       = "URL"
+	UploadMethodCloud     = "CLOUD"
 )
 
 // Upload is an upload ticket and the source of an asset.

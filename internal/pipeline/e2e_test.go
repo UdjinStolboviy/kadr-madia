@@ -9,12 +9,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/UdjinStolboviy/kadr-madia/internal/importer"
 	"io"
 	"log/slog"
 	"math"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -141,7 +143,7 @@ func newEnv(t *testing.T) *env {
 	set := metrics.NewSet()
 	eng := fakeimage.New()
 	svc := pipeline.New(pipeline.Config{
-		Store: store, Queue: q, Engine: eng, Video: videoEngine(), MultipartThreshold: 8 << 20, PartSize: 5 << 20, EdgeBaseURL: "https://media.example.com", Keyring: kr, Logger: log, Metrics: set, TmpDir: t.TempDir(), Now: clk.Now,
+		Store: store, Queue: q, Engine: eng, Video: videoEngine(), MultipartThreshold: 8 << 20, PartSize: 5 << 20, EdgeBaseURL: "https://media.example.com", Fetcher: &importer.Fetcher{AllowAnyPort: true, AllowAddr: func(netip.Addr) bool { return true }}, Keyring: kr, Logger: log, Metrics: set, TmpDir: t.TempDir(), Now: clk.Now,
 		NewDriver: func(c storage.Config) (storage.Driver, error) {
 			d, err := storage.NewS3(c)
 			if err != nil {

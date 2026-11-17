@@ -37,6 +37,9 @@ func (h *handlers) routes(r chi.Router) {
 	r.With(auth.RequireScope(auth.ScopeAssetsWrite)).Patch("/assets/{id}", h.patchAsset)
 	r.With(auth.RequireScope(auth.ScopeAssetsDelete)).Delete("/assets/{id}", h.deleteAsset)
 
+	imp := auth.RequireScope(auth.ScopeImportsWrite)
+	r.With(imp).Post("/imports/url", h.importURL)
+	r.With(imp).Post("/imports/cloud", h.importCloud)
 	r.With(auth.RequireScope(auth.ScopeURLsSign)).Post("/signed-urls", h.signURLs)
 
 	r.Get("/presets", h.listPresets)
@@ -345,4 +348,34 @@ func (h *handlers) signURLs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": out})
+}
+
+// importURL handles POST /v1/imports/url → 202 { asset (processing) }.
+func (h *handlers) importURL(w http.ResponseWriter, r *http.Request) {
+	var in pipeline.ImportURLInput
+	if err := httpx.DecodeJSON(w, r, &in); err != nil {
+		badJSON(w, err)
+		return
+	}
+	a, err := h.svc.ImportURL(r.Context(), projectID(r), in)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusAccepted, a)
+}
+
+// importCloud handles POST /v1/imports/cloud → 202.
+func (h *handlers) importCloud(w http.ResponseWriter, r *http.Request) {
+	var in pipeline.ImportCloudInput
+	if err := httpx.DecodeJSON(w, r, &in); err != nil {
+		badJSON(w, err)
+		return
+	}
+	a, err := h.svc.ImportCloud(r.Context(), projectID(r), in)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusAccepted, a)
 }
