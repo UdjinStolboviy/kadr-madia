@@ -845,3 +845,12 @@ func TestValidationAbortPatchAndPresets(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// setDefaultMode changes the default compression mode of the test project.
+func (e *env) setDefaultMode(mode string) {
+	e.t.Helper()
+	p, err := e.store.GetProject(e.ctx, e.project.ID)
+	must(e.t, err)
+	p.DefaultMode = mode
+	must(e.t, e.store.UpdateProject(e.ctx, p))
+}

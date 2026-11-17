@@ -2,7 +2,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { REGEXP_ONLY_DIGITS } from "input-otp";
-import { AlertCircle, ArrowLeft, Loader2, ShieldCheck } from "lucide-react";
+import { AlertCircle, ArrowLeft, KeyRound, Loader2, ShieldCheck } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { InputOTP, InputOTPGroup, InputOTPSeparator, InputOTPSlot } from "@/components/ui/input-otp";
 import { api, errorMessage, isApiError } from "@/lib/api";
 import { qk } from "@/lib/queries";
+import { getCredential, isWebAuthnCancelled, webauthnSupported } from "@/lib/webauthn";
 
 const route = getRouteApi("/login");
 
@@ -77,6 +78,33 @@ export default function LoginPage() {
     }
   }
 
+  async function passkeyLogin() {
+    setPending(true);
+    setError(null);
+    try {
+      const begin = await api.auth.passkeyLoginBegin();
+      const credential = await getCredential(begin.options);
+      const session = await api.auth.passkeyLoginFinish({ ceremony_id: begin.ceremony_id, credential });
+      qc.setQueryData(qk.me, session);
+      await navigate({ to: search.redirect ?? "/", replace: true });
+    } catch (e) {
+      if (isWebAuthnCancelled(e)) {
+        // dismissed the browser prompt
+      } else if (isApiError(e, "rate_limited")) {
+        setLockedFor(RATE_LIMIT_SEC);
+        setError(errorMessage(e));
+      } else if (isApiError(e, "invalid_credentials")) {
+        setError("Passkey sign-in failed. Use your password instead.");
+      } else if (isApiError(e, "webauthn_disabled")) {
+        setError("Passkeys are not configured on this server.");
+      } else {
+        setError(errorMessage(e));
+      }
+    } finally {
+      setPending(false);
+    }
+  }
+
   const locked = lockedFor > 0;
 
   return (
@@ -128,6 +156,11 @@ export default function LoginPage() {
                 {pending && <Loader2 className="animate-spin" />}
                 {locked ? `Try again in ${lockedFor}s` : "Sign in"}
               </Button>
+              {webauthnSupported() && (
+                <Button type="button" variant="outline" disabled={pending || locked} onClick={() => void passkeyLogin()} className="w-full">
+                  <KeyRound /> Sign in with a passkey
+                </Button>
+              )}
             </form>
           ) : (
             <form

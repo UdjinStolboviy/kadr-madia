@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { signUrl } from "../../../sdk/node/src/signing.ts";
 import { handle } from "../src/index.ts";
@@ -201,5 +202,74 @@ describe("worker", () => {
       const bad = signed().replace(/sig=[^&]+/, "sig=" + "A".repeat(43));
       expect((await handle(req(bad), env, ctx(), { now: NOW, cache })).status).toBe(403);
     });
+  });
+});
+
+describe("directory-scoped (prefix=1) signatures for HLS", () => {
+  const DIR = "acme/blb_01/hls/";
+  const files: Record<string, string> = {
+    [`${DIR}master.m3u8`]: '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nv_360p.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=2\nhttps://other.example/x.m3u8\n',
+    [`${DIR}v_360p.m3u8`]: '#EXTM3U\n#EXT-X-MAP:URI="init_360p.mp4"\n#EXTINF:4,\nseg_360p_00000.m4s\n#EXT-X-ENDLIST\n',
+    [`${DIR}seg_360p_00000.m4s`]: "SEGMENT",
+    "acme/blb_01/video.mp4": "SECRET",
+  };
+  const env: Env = {
+    PRIVATE: {
+      async head(k) {
+        return k in files ? ({ key: k, size: files[k]!.length, httpEtag: '"e"', uploaded: new Date(0) } as R2ObjectLike) : null;
+      },
+      async get(k) {
+        if (!(k in files)) return null;
+        return {
+          key: k,
+          size: files[k]!.length,
+          httpEtag: '"e"',
+          uploaded: new Date(0),
+          httpMetadata: { contentType: k.endsWith(".m3u8") ? "application/vnd.apple.mpegurl" : "video/iso.segment" },
+          body: new Response(files[k]).body as ReadableStream<Uint8Array>,
+        };
+      },
+    },
+    SIGNING_KEYS: JSON.stringify({ k3: secret }),
+  };
+  const exp = NOW / 1000 + 3600;
+  const sigFor = (canonical: string) => createHmac("sha256", secret).update(canonical).digest("base64url");
+  const sig = sigFor(`GETP\n/${DIR}\n${exp}\n`);
+  const url = (key: string, s = sig) => `https://media.example.com/${key}?exp=${exp}&kid=k3&sig=${s}&prefix=1`;
+
+  it("rewrites playlists so relative references carry the signature", async () => {
+    const res = await handle(req(url(`${DIR}master.m3u8`)), env, ctx(), { now: NOW });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("application/vnd.apple.mpegurl");
+    const body = await res.text();
+    const q = `exp=${exp}&kid=k3&sig=${sig}&prefix=1`;
+    expect(body).toContain(`\nv_360p.m3u8?${q}\n`);
+    expect(body).toContain("\nhttps://other.example/x.m3u8\n"); // absolute URIs untouched
+    const v = await (await handle(req(url(`${DIR}v_360p.m3u8`)), env, ctx(), { now: NOW })).text();
+    expect(v).toContain(`URI="init_360p.mp4?${q}"`);
+    expect(v).toContain(`\nseg_360p_00000.m4s?${q}\n`);
+  });
+
+  it("serves sibling segments with the same signature", async () => {
+    const res = await handle(req(url(`${DIR}seg_360p_00000.m4s`)), env, ctx(), { now: NOW });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("SEGMENT");
+  });
+
+  it("does not authorize other directories, per-object forms or other verbs", async () => {
+    expect((await handle(req(url("acme/blb_01/video.mp4")), env, ctx(), { now: NOW })).status).toBe(403);
+    // A per-object signature does not validate in prefix mode, and vice versa.
+    const objSig = sigFor(`GET\n/${DIR}master.m3u8\n${exp}\n`);
+    expect((await handle(req(url(`${DIR}master.m3u8`, objSig)), env, ctx(), { now: NOW })).status).toBe(403);
+    const plain = `https://media.example.com/${DIR}master.m3u8?exp=${exp}&kid=k3&sig=${sig}`;
+    expect((await handle(req(plain), env, ctx(), { now: NOW })).status).toBe(403);
+  });
+
+  it("matches the Go signer vector", () => {
+    expect(sigFor(`GETP\n/${DIR}\n1763330400\n`)).toBe("eEC8YEe8hi8C4T_dfxNBkoR8szjp_oOArAdYjWghpa0");
+  });
+
+  it("expires", async () => {
+    expect((await handle(req(url(`${DIR}master.m3u8`)), env, ctx(), { now: NOW + 3601_000 })).status).toBe(403);
   });
 });

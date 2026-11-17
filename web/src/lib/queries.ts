@@ -29,6 +29,7 @@ export const queryClient = new QueryClient({
 
 export const qk = {
   me: ["auth", "me"] as const,
+  passkeys: ["auth", "passkeys"] as const,
   projects: ["projects"] as const,
   project: (id: string) => ["projects", id] as const,
   apiKeys: (projectId: string) => ["projects", projectId, "api-keys"] as const,

@@ -73,7 +73,8 @@ func newEnv(t *testing.T, ui fstest.MapFS) *env {
 	cfg := Config{Store: store, Keyring: kr, Logger: log, Metrics: set, Dev: true, Pepper: testPepper,
 		Build: BuildInfo{Version: "test", Commit: "abc", StartedAt: time.Now()}, TmpDir: t.TempDir(),
 		FallbackHTML: []byte("<p>fallback</p>"),
-		Webhooks:     webhook.New(webhook.Config{Store: store, Keyring: kr, Logger: log})}
+		WebAuthnRPID: "localhost", WebAuthnOrigins: []string{"http://localhost:8081"},
+		Webhooks: webhook.New(webhook.Config{Store: store, Keyring: kr, Logger: log})}
 	disp := cfg.Webhooks
 	if ui != nil {
 		cfg.UI = ui

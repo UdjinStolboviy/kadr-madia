@@ -42,6 +42,7 @@ type projectDTO struct {
 	AllowedOrigins   []string `json:"allowed_origins"`
 	QuotaBytes       *int64   `json:"quota_bytes"`
 	UsedBytes        int64    `json:"used_bytes"`
+	DefaultMode      string   `json:"default_mode"`
 	Disabled         bool     `json:"disabled"`
 	CreatedAt        string   `json:"created_at"`
 	UpdatedAt        string   `json:"updated_at"`
@@ -54,7 +55,7 @@ func toProjectDTO(p *db.Project) projectDTO {
 	}
 	return projectDTO{ID: p.ID, Slug: p.Slug, Name: p.Name, Environment: p.Environment,
 		StorageProfileID: p.StorageProfileID, AllowedOrigins: origins, QuotaBytes: p.QuotaBytes,
-		UsedBytes: p.UsedBytes, Disabled: p.DisabledAt != nil, CreatedAt: ts(p.CreatedAt), UpdatedAt: ts(p.UpdatedAt)}
+		UsedBytes: p.UsedBytes, DefaultMode: p.DefaultMode, Disabled: p.DisabledAt != nil, CreatedAt: ts(p.CreatedAt), UpdatedAt: ts(p.UpdatedAt)}
 }
 
 type apiKeyDTO struct {

@@ -23,6 +23,7 @@ type produced struct {
 	srcFormat      string
 	srcContentType string
 	retainOrigin   bool
+	hls            *video.HLSOutput // optional HLS package (video presets with hls=true)
 }
 
 type producedFile struct {
@@ -84,17 +85,30 @@ func (s *Service) produceVideo(ctx context.Context, pc *processCtx, srcPath, out
 	if err != nil {
 		return nil, classifyEngineError(err)
 	}
-	vo, err := s.video.Transcode(ctx, info, pc.vparams, outDir, func(pct int) {
+	// Progress is 0-100 overall; with an HLS ladder the MP4 takes the first
+	// half and the ladder the second.
+	report := func(pct int) {
 		if pc.job.WorkerID != nil {
 			if err := s.store.SetJobProgress(ctx, pc.job.ID, *pc.job.WorkerID, pct); err != nil {
 				s.log.Debug("record job progress", "job_id", pc.job.ID, "err", err)
 			}
 		}
-	})
+	}
+	mp4Report := report
+	if pc.vparams.HLS {
+		mp4Report = func(pct int) { report(pct / 2) }
+	}
+	vo, err := s.video.Transcode(ctx, info, pc.vparams, outDir, mp4Report)
 	if err != nil {
 		return nil, classifyEngineError(err)
 	}
-	p := &produced{cpuMillis: vo.CPUMillis, durationMs: vo.DurationMs, srcWidth: info.Width, srcHeight: info.Height,
+	var ho *video.HLSOutput
+	if pc.vparams.HLS {
+		if ho, err = s.packageHLS(ctx, pc, info, outDir, func(pct int) { report(50 + pct/2) }); err != nil {
+			return nil, err
+		}
+	}
+	p := &produced{hls: ho, cpuMillis: vo.CPUMillis, durationMs: vo.DurationMs, srcWidth: info.Width, srcHeight: info.Height,
 		srcFormat: videoExt(info.Container), srcContentType: videoMIME(info.Container), retainOrigin: pc.vparams.RetainOrigin}
 	var bitrate int64
 	if vo.DurationMs > 0 {

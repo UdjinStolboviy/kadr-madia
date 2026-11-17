@@ -69,7 +69,10 @@ export type UpdateAssetInput = Camelize<
 
 /** Fields of a server-side upload (`POST /v1/assets`, multipart/form-data). */
 export interface UploadAssetInput {
-  preset: CreateUploadInput["preset"];
+  /** Preset slug; send either `preset` or `mode` (default: the project's default mode). */
+  preset?: string;
+  /** Compression mode: compact | balanced | quality. */
+  mode?: CompressionMode;
   namespace: CreateUploadInput["namespace"];
   visibility: CreateUploadInput["visibility"];
   /** File name stored with the asset (also used as the file part name). */
@@ -82,6 +85,9 @@ export interface UploadAssetInput {
 // ---------------------------------------------------------------------------
 // Uploads
 // ---------------------------------------------------------------------------
+
+/** Compression mode (`image-<mode>` / `video-<mode>` presets of the project). */
+export type CompressionMode = Schemas["CompressionMode"];
 
 /** Body of `POST /v1/uploads`. `size` must be exact; `sha256` enables dedup. */
 export type CreateUploadInput = Camelize<Schemas["CreateUploadRequest"]>;
@@ -207,7 +213,8 @@ export interface SignedUrl {
 }
 
 interface ImportCommon {
-  preset: string;
+  preset?: string;
+  mode?: CompressionMode;
   namespace: string;
   visibility: "public" | "private";
   filename?: string;

@@ -45,7 +45,7 @@ Estimates assume one full-time engineer working with AI agents.
 - OpenAPI 3.1 published; SDKs generated.
 - **Onboard two more design-partner products; integration guide validated (< 1 day per product).**
 
-## M4 — Product polish (2–3 weeks) — done except WebAuthn
+## M4 — Product polish (2–3 weeks) — done
 
 - Asset explorer (filters, metadata view, deletion).
 - **Playground:** upload a sample, tweak preset parameters, Before/After split view, live size/SSIM, "Save as new version".
@@ -53,7 +53,7 @@ Estimates assume one full-time engineer working with AI agents.
 - Webhook delivery log with re-send; audit log.
 - URL imports (SSRF-safe) and cloud connections (Google Drive / OneDrive / Dropbox via rclone).
 - Litestream + `restore-drill`; `/metrics`, built-in alerts (Telegram/email).
-- WebAuthn for the admin console.
+- WebAuthn passkeys for the admin console (`KADR_WEBAUTHN_RP_ID` / `KADR_WEBAUTHN_ORIGINS`).
 
 ## M5 — Scale & SaaS-ready (as needed)
 

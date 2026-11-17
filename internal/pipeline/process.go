@@ -176,6 +176,16 @@ func (s *Service) runProcessImage(ctx context.Context, j *queue.Job) error {
 		rends = append(rends, rd)
 		blob.TotalBytes += r.bytes
 	}
+	if out.hls != nil {
+		rd, keys, err := s.uploadHLS(ctx, pc, blob, bucket, cacheControl, out.hls)
+		uploaded = append(uploaded, keys...)
+		if err != nil {
+			cleanup()
+			return err
+		}
+		rends = append(rends, rd)
+		blob.TotalBytes += rd.Bytes
+	}
 	if out.retainOrigin {
 		key := fmt.Sprintf("originals/%s/%s.%s", pc.project.Slug, blob.ID, out.srcFormat)
 		if err := putFile(ctx, pc.tgt.driver, pc.tgt.profile.PrivateBucket, key, srcPath, storage.PutOptions{

@@ -33,6 +33,8 @@ import type {
   StorageTestResult,
   SystemInfo,
   TotpSetupResponse,
+  Passkey,
+  WebAuthnCeremony,
   UpdateProjectRequest,
   WebhookEndpoint,
 } from "./types";
@@ -213,6 +215,22 @@ export const api = {
     totpSetup: () => request<TotpSetupResponse>("/auth/totp/setup", { method: "POST" }),
     totpEnable: (code: string) => request<void>("/auth/totp/enable", { method: "POST", body: { code } }),
     totpDisable: (password: string) => request<void>("/auth/totp/disable", { method: "POST", body: { password } }),
+    passkeys: () => request<{ data: Passkey[] }>("/auth/webauthn/credentials"),
+    passkeyRegisterBegin: () => request<WebAuthnCeremony>("/auth/webauthn/register/begin", { method: "POST" }),
+    passkeyRegisterFinish: (body: { ceremony_id: string; name: string; credential: unknown }) =>
+      request<Passkey>("/auth/webauthn/register/finish", { method: "POST", body }),
+    passkeyDelete: (id: string) => request<void>(`/auth/webauthn/credentials/${enc(id)}`, { method: "DELETE" }),
+    passkeyLoginBegin: () =>
+      request<WebAuthnCeremony>("/auth/webauthn/login/begin", { method: "POST", skipAuthRedirect: true }),
+    async passkeyLoginFinish(body: { ceremony_id: string; credential: unknown }): Promise<SessionResponse> {
+      const res = await request<SessionResponse>("/auth/webauthn/login/finish", {
+        method: "POST",
+        body,
+        skipAuthRedirect: true,
+      });
+      setCsrfToken(res.csrf_token);
+      return res;
+    },
   },
 
   projects: {

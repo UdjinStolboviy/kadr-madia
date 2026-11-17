@@ -111,6 +111,29 @@ func (d *S3) Delete(ctx context.Context, bucket, key string) error {
 	return nil
 }
 
+// List returns all objects under prefix, following pagination.
+func (d *S3) List(ctx context.Context, bucket, prefix string) ([]ObjectInfo, error) {
+	var out []ObjectInfo
+	var token *string
+	for {
+		res, err := d.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{Bucket: &bucket, Prefix: &prefix, ContinuationToken: token})
+		if err != nil {
+			return nil, fmt.Errorf("storage: list %s/%s: %w", bucket, prefix, mapErr(err))
+		}
+		for _, o := range res.Contents {
+			info := ObjectInfo{Key: aws.ToString(o.Key), Size: aws.ToInt64(o.Size), ETag: aws.ToString(o.ETag)}
+			if o.LastModified != nil {
+				info.LastModified = *o.LastModified
+			}
+			out = append(out, info)
+		}
+		if !aws.ToBool(res.IsTruncated) || res.NextContinuationToken == nil {
+			return out, nil
+		}
+		token = res.NextContinuationToken
+	}
+}
+
 // Copy copies an object server-side (between buckets of the same account).
 func (d *S3) Copy(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string, opts ...PutOptions) error {
 	src := srcBucket + "/" + url.PathEscape(srcKey)

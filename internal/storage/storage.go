@@ -82,6 +82,8 @@ type Driver interface {
 	Head(ctx context.Context, bucket, key string) (ObjectInfo, error)
 	Get(ctx context.Context, bucket, key string) (io.ReadCloser, ObjectInfo, error)
 	Delete(ctx context.Context, bucket, key string) error
+	// List returns every object whose key starts with prefix (all pages).
+	List(ctx context.Context, bucket, prefix string) ([]ObjectInfo, error)
 	// Copy copies server-side. With opts the destination gets that Content-Type
 	// and Cache-Control instead of the source metadata.
 	Copy(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string, opts ...PutOptions) error

@@ -208,7 +208,7 @@ func (h *handlers) createServerAsset(w http.ResponseWriter, r *http.Request) {
 				h.fail(w, r, err)
 				return
 			}
-		case "preset", "namespace", "visibility", "metadata", "filename":
+		case "preset", "mode", "namespace", "visibility", "metadata", "filename":
 			v, err := io.ReadAll(io.LimitReader(part, pipeline.MaxMetadataBytes+1))
 			if err != nil {
 				httpx.WriteProblem(w, http.StatusBadRequest, "invalid_multipart", err.Error())
@@ -217,6 +217,8 @@ func (h *handlers) createServerAsset(w http.ResponseWriter, r *http.Request) {
 			switch part.FormName() {
 			case "preset":
 				in.Preset = string(v)
+			case "mode":
+				in.Mode = string(v)
 			case "namespace":
 				in.Namespace = string(v)
 			case "visibility":

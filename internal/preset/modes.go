@@ -82,17 +82,17 @@ func modePresets() []struct {
 		}}
 	}
 	hq := []ImageOutput{
-		{Name: "main", Format: "avif", Effort: 6, Chroma: "4:4:4"},
+		{Name: "main", Format: "avif", Effort: 4, Chroma: "4:4:4"},
 		{Name: "main", Format: "webp", SmartSubsample: false},
 	}
 	return []item{
 		img(ModeCompact, "Compact: good quality at a very small size (max side 1080, ≤ 30 KB)", 1080,
 			Quality{Mode: "budget", MaxBytes: 30 << 10, QMax: 55, QMin: 25, DownscaleStep: 0.85, MinSide: 480},
 			defaultOutputs, &Sharpen{Sigma: 0.6, M1: 0.5, M2: 1.5}),
-		img(ModeBalanced, "Balanced: the golden middle (max side 1600, SSIM ≥ 0.985)", 1600,
-			Quality{Mode: "ssim", Target: 0.985, QMin: 35, QMax: 75}, defaultOutputs, nil),
-		img(ModeQuality, "Quality: ideal quality at the smallest size that achieves it (max side 2560, SSIM ≥ 0.995, 4:4:4)", 2560,
-			Quality{Mode: "ssim", Target: 0.995, QMin: 50, QMax: 90}, hq, nil),
+		img(ModeBalanced, "Balanced: the golden middle (max side 1440, SSIM ≥ 0.975)", 1440,
+			Quality{Mode: "ssim", Target: 0.975, QMin: 35, QMax: 65}, defaultOutputs, nil),
+		img(ModeQuality, "Quality: ideal quality at the smallest size that achieves it (max side 2048, SSIM ≥ 0.99, 4:4:4)", 2048,
+			Quality{Mode: "ssim", Target: 0.99, QMin: 45, QMax: 85}, hq, nil),
 		vid(ModeCompact, "Compact: 480p H.264 CRF 30, ≤ 450 kbit/s, AAC 48k mono",
 			VideoCodec{Codec: "h264", MaxWidth: 854, FPS: 30, CRF: 30, Maxrate: "450k", Bufsize: "900k", Preset: "slow", HW: "auto"},
 			AudioCodec{Codec: "aac", Bitrate: "48k", Channels: 1, SampleRate: 44100}),

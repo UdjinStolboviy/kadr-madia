@@ -282,7 +282,8 @@ class Assets {
   ): Promise<Asset> {
     const blob = await toBlob(file, input.contentType);
     const form = new FormData();
-    form.append("preset", input.preset);
+    if (input.preset !== undefined) form.append("preset", input.preset);
+    if (input.mode !== undefined) form.append("mode", input.mode);
     form.append("namespace", input.namespace);
     form.append("visibility", input.visibility);
     if (input.filename !== undefined) form.append("filename", input.filename);

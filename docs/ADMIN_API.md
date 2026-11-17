@@ -27,6 +27,21 @@ Internal contract between the Kadr backend and the embedded admin console (`web/
 
 Login rate limit: 5 attempts / min per IP and email → `429 rate_limited`.
 
+### WebAuthn (passkeys / security keys)
+
+Enabled when `KADR_WEBAUTHN_RP_ID` (e.g. `admin.example.com`) and `KADR_WEBAUTHN_ORIGINS` (comma separated, e.g. `https://admin.example.com`) are set; in dev mode they default to `localhost` / `http://localhost:8081,http://127.0.0.1:8081,http://localhost:5173`. Without them every endpoint below answers `503 webauthn_disabled`. Passkeys are discoverable (resident) credentials and require user verification, so a passkey sign-in counts as MFA: no TOTP prompt follows.
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| POST | `/admin/api/auth/webauthn/register/begin` | — (session + CSRF) | `200 { ceremony_id, options }` — `options` is the `navigator.credentials.create()` argument (JSON, base64url binary fields) |
+| POST | `/admin/api/auth/webauthn/register/finish` | `{ ceremony_id, name, credential }` (session + CSRF) | `201 { id, name, transports, created_at, last_used_at }` · `400 invalid_ceremony` / `invalid_credential` · `409 credential_exists` / `too_many_credentials` · `422 validation_failed` |
+| GET | `/admin/api/auth/webauthn/credentials` | — | `200 { data: [{ id, name, transports, created_at, last_used_at }] }` |
+| DELETE | `/admin/api/auth/webauthn/credentials/{id}` | — | `204` · `404 not_found` |
+| POST | `/admin/api/auth/webauthn/login/begin` | — (no session) | `200 { ceremony_id, options }` — usernameless: `navigator.credentials.get()` argument with empty `allowCredentials` |
+| POST | `/admin/api/auth/webauthn/login/finish` | `{ ceremony_id, credential }` (no session) | `200 { admin, csrf_token }` + session cookie · `401 invalid_credentials` |
+
+`credential` is the `PublicKeyCredential` serialized to JSON (`id`, `rawId`, `type`, `response.*` as base64url). A ceremony lives 5 minutes and is consumed by its first finish attempt (replays fail). Login failures are always the same generic `401 invalid_credentials` (unknown/deleted credential, bad signature, wrong challenge, replay, sign-count regression), so nothing reveals whether an account exists. Login endpoints share the login rate limiter (per IP; finish also 5/min). Audit actions: `auth.webauthn_register`, `auth.webauthn_delete`, `auth.login` (`details.method = "passkey"`), `auth.login_failed` (target `passkey`, `details.reason`). Using a security key as a second factor after the password is not implemented.
+
 ## Projects
 
 | Method | Path | Body | Response |
@@ -167,3 +182,12 @@ Audit actions: `webhook.create`, `webhook.delete`, `webhook.test`, `delivery.ret
 | GET | `/admin/api/projects/{id}/cloud-connections` | — | `200 { items }` |
 | POST | `/admin/api/projects/{id}/cloud-connections` | `{ provider: gdrive\|onedrive\|dropbox, token (rclone token JSON), account_label?, namespace? }` | `201` — the token is stored encrypted and never returned |
 | DELETE | `/admin/api/cloud-connections/{id}` | — | `204` (token wiped) |
+
+## Compression modes (per project)
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| GET | `/admin/api/projects/{id}/modes` | — | `200 { default_mode, modes: [{ mode, description, image: Preset, video: Preset, customized: { image, video } }] }` |
+| PATCH | `/admin/api/projects/{id}` | `{ default_mode: "compact"\|"balanced"\|"quality" }` | `200 Project` (also exposes `default_mode`) |
+| POST | `/admin/api/projects/{id}/presets/{slug}/versions` | `{ params, description? }` | image **and video** presets (validated: video `maxWidth` 160–4096, `fps` 1–60, `crf` 14–40, bitrates like `900k`/`4M`, x264 preset names, audio channels 1–2) |
+| POST | `/admin/api/projects/{id}/presets/{slug}/reset` | — | `200 Preset` — restores a built-in preset (incl. the six mode presets) as a new version |

@@ -12,3 +12,13 @@ func TestSignKeyMatchesNodeSDK(t *testing.T) {
 		t.Fatalf("without download: %s", got)
 	}
 }
+
+// Vector shared with edge/kadr-edge/test/worker.test.ts (prefix=1 mode).
+func TestSignKeyPrefixVector(t *testing.T) {
+	const secret = "test-secret-0123456789abcdef"
+	for _, key := range []string{"acme/blb_01/hls/master.m3u8", "acme/blb_01/hls/seg_360p_00000.m4s"} {
+		if got := SignKeyPrefix(secret, key, 1763330400); got != "eEC8YEe8hi8C4T_dfxNBkoR8szjp_oOArAdYjWghpa0" {
+			t.Fatalf("%s: %s", key, got)
+		}
+	}
+}

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { REGEXP_ONLY_DIGITS } from "input-otp";
-import { Loader2, ShieldCheck, ShieldOff, Smartphone } from "lucide-react";
+import { KeyRound, Loader2, ShieldCheck, ShieldOff, Smartphone, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { encode } from "uqr";
@@ -22,6 +22,7 @@ import { api, errorMessage, isApiError } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { meQuery, qk } from "@/lib/queries";
 import type { SessionResponse, TotpSetupResponse } from "@/lib/types";
+import { createCredential, isWebAuthnCancelled, webauthnSupported } from "@/lib/webauthn";
 
 function QrCode({ value, size = 184 }: { value: string; size?: number }) {
   const path = useMemo(() => {
@@ -252,6 +253,100 @@ function DisableDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o
   );
 }
 
+function PasskeysSection() {
+  const qc = useQueryClient();
+  const list = useQuery({ queryKey: qk.passkeys, queryFn: () => api.auth.passkeys() });
+  const [name, setName] = useState("");
+  const supported = webauthnSupported();
+
+  const register = useMutation({
+    mutationFn: async (n: string) => {
+      const begin = await api.auth.passkeyRegisterBegin();
+      const credential = await createCredential(begin.options);
+      return api.auth.passkeyRegisterFinish({ ceremony_id: begin.ceremony_id, name: n, credential });
+    },
+    onSuccess: () => {
+      setName("");
+      void qc.invalidateQueries({ queryKey: qk.passkeys });
+      toast.success("Passkey added");
+    },
+    onError: (e) => {
+      if (isWebAuthnCancelled(e)) return;
+      toast.error(isApiError(e, "webauthn_disabled") ? "Passkeys are not configured on this server." : errorMessage(e));
+    },
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => api.auth.passkeyDelete(id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.passkeys });
+      toast.success("Passkey removed");
+    },
+    onError: (e) => toast.error(errorMessage(e)),
+  });
+
+  const items = list.data?.data ?? [];
+  return (
+    <div className="grid gap-3 rounded-lg border p-4">
+      <div className="flex items-center gap-3">
+        <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted">
+          <KeyRound className="size-5 text-muted-foreground" />
+        </div>
+        <div className="flex-1 text-sm">
+          <div className="font-medium">Passkeys &amp; security keys</div>
+          <p className="text-muted-foreground">Sign in with Touch ID, Windows Hello or a hardware key — no password or code.</p>
+        </div>
+      </div>
+      {items.length > 0 && (
+        <ul className="divide-y rounded-md border">
+          {items.map((k) => (
+            <li key={k.id} className="flex items-center gap-3 px-3 py-2 text-sm">
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium">{k.name}</div>
+                <div className="text-xs text-muted-foreground">
+                  Added {formatDateTime(k.created_at)} · {k.last_used_at ? `last used ${formatDateTime(k.last_used_at)}` : "never used"}
+                </div>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Delete passkey ${k.name}`}
+                disabled={remove.isPending}
+                onClick={() => {
+                  if (window.confirm(`Delete passkey "${k.name}"?`)) remove.mutate(k.id);
+                }}
+              >
+                <Trash2 />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {supported ? (
+        <form
+          className="flex flex-col gap-2 sm:flex-row"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (name.trim()) register.mutate(name.trim());
+          }}
+        >
+          <Input
+            aria-label="Passkey name"
+            placeholder="Name, e.g. MacBook Touch ID"
+            value={name}
+            maxLength={80}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <Button type="submit" disabled={!name.trim() || register.isPending}>
+            {register.isPending ? <Loader2 className="animate-spin" /> : <KeyRound />} Add passkey
+          </Button>
+        </form>
+      ) : (
+        <p className="text-xs text-muted-foreground">This browser does not support passkeys.</p>
+      )}
+    </div>
+  );
+}
+
 export function SecurityCard() {
   const me = useQuery(meQuery);
   const [enableOpen, setEnableOpen] = useState(false);
@@ -297,6 +392,7 @@ export function SecurityCard() {
             </Button>
           )}
         </div>
+        <PasskeysSection />
         {admin && (
           <p className="text-xs text-muted-foreground">
             Signed in as <span className="capitalize">{admin.role}</span> · last sign-in {formatDateTime(admin.last_login_at)}

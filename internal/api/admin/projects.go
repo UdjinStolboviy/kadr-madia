@@ -206,6 +206,15 @@ func (s *Server) handlePatchProject(w http.ResponseWriter, r *http.Request) {
 			changed = append(changed, "allowed_origins")
 		}
 	}
+	if raw, ok := body["default_mode"]; ok {
+		var v string
+		if err := json.Unmarshal(raw, &v); err != nil || !preset.ValidMode(v) {
+			errs["default_mode"] = "must be compact, balanced or quality"
+		} else if v != p.DefaultMode {
+			p.DefaultMode = v
+			changed = append(changed, "default_mode")
+		}
+	}
 	if raw, ok := body["disabled"]; ok {
 		var v bool
 		if err := json.Unmarshal(raw, &v); err != nil {

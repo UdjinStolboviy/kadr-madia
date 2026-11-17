@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -231,9 +232,11 @@ func validateImageParams(p *preset.ImageParams) string {
 
 // ───────────── preset versions ─────────────
 
-// handleSavePreset: POST /admin/api/projects/{id}/presets/{slug}/versions
-// { params } adds a new version (existing assets keep theirs); the preset is
-// created when the slug is new (kind image). Body: { params, description? }.
+// handleSavePresetVersion: POST /admin/api/projects/{id}/presets/{slug}/versions
+// { params, description? } adds a new version (existing assets keep theirs);
+// the preset is created when the slug is new (the kind comes from params.kind,
+// default image). Works for image and video presets, including the
+// compression-mode presets.
 func (s *Server) handleSavePresetVersion(w http.ResponseWriter, r *http.Request) {
 	p, ok := s.loadProject(w, r)
 	if !ok {
@@ -245,43 +248,52 @@ func (s *Server) handleSavePresetVersion(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var in struct {
-		Params      preset.ImageParams `json:"params"`
-		Description string             `json:"description"`
+		Params      json.RawMessage `json:"params"`
+		Description string          `json:"description"`
 	}
 	if err := httpx.DecodeJSON(w, r, &in); err != nil {
 		badJSON(w, err)
 		return
 	}
-	if msg := validateImageParams(&in.Params); msg != "" {
-		validationFailed(w, map[string]string{"params": msg})
-		return
-	}
-	if in.Params.Limits.MaxInputBytes <= 0 {
-		in.Params.Limits = preset.DefaultPresets0Limits()
-	}
-	raw, _ := json.Marshal(in.Params)
 	existing, err := s.store.GetPresetBySlug(r.Context(), p.ID, slug)
 	if err != nil && !errors.Is(err, db.ErrNotFound) {
 		s.internalError(w, r, err)
 		return
 	}
+	kind := "image"
+	if existing != nil {
+		kind = existing.Kind
+	} else {
+		var k struct{ Kind string }
+		_ = json.Unmarshal(in.Params, &k)
+		if k.Kind == "video" {
+			kind = "video"
+		}
+	}
+	raw, msg := normalizePresetParams(kind, in.Params)
+	if msg != "" {
+		validationFailed(w, map[string]string{"params": msg})
+		return
+	}
+	s.savePresetVersion(w, r, p, existing, slug, kind, strings.TrimSpace(in.Description), raw)
+}
+
+// savePresetVersion creates the preset or appends a version, and replies with the preset.
+func (s *Server) savePresetVersion(w http.ResponseWriter, r *http.Request, p *db.Project, existing *db.Preset, slug, kind, desc string, raw json.RawMessage) {
 	adminID := ""
 	if a := adminFrom(r.Context()); a != nil {
 		adminID = a.ID
 	}
 	var version int
-	err = s.store.InTx(r.Context(), func(tx *db.Store) error {
+	err := s.store.InTx(r.Context(), func(tx *db.Store) error {
 		if existing == nil {
-			np := &db.Preset{ID: db.NewID(db.PrefixPreset), ProjectID: p.ID, Slug: slug, Kind: "image",
-				Description: strings.TrimSpace(in.Description), CurrentVersion: 1, Params: raw, CreatedAt: s.now()}
+			np := &db.Preset{ID: db.NewID(db.PrefixPreset), ProjectID: p.ID, Slug: slug, Kind: kind,
+				Description: desc, CurrentVersion: 1, Params: raw, CreatedAt: s.now()}
 			version = 1
 			if err := tx.CreatePreset(r.Context(), np, adminID); err != nil {
 				return err
 			}
 			return s.audit(r, tx, "preset.create", &p.ID, &np.ID, map[string]any{"slug": slug})
-		}
-		if existing.Kind != "image" {
-			return errNotImagePreset
 		}
 		var err error
 		if version, err = tx.AddPresetVersion(r.Context(), existing.ID, raw, adminID, s.now()); err != nil {
@@ -289,10 +301,6 @@ func (s *Server) handleSavePresetVersion(w http.ResponseWriter, r *http.Request)
 		}
 		return s.audit(r, tx, "preset.version", &p.ID, &existing.ID, map[string]any{"slug": slug, "version": version})
 	})
-	if errors.Is(err, errNotImagePreset) {
-		validationFailed(w, map[string]string{"slug": "only image presets can be edited here"})
-		return
-	}
 	if err != nil {
 		s.internalError(w, r, err)
 		return
@@ -309,4 +317,94 @@ func (s *Server) handleSavePresetVersion(w http.ResponseWriter, r *http.Request)
 	httpx.WriteJSON(w, status, toPresetDTO(cur))
 }
 
-var errNotImagePreset = errors.New("not an image preset")
+// normalizePresetParams validates params for kind and returns canonical JSON.
+func normalizePresetParams(kind string, raw json.RawMessage) (json.RawMessage, string) {
+	if len(raw) == 0 {
+		return nil, "required"
+	}
+	if kind == "video" {
+		var v preset.VideoParams
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return nil, "must be valid video preset parameters JSON"
+		}
+		if msg := validateVideoParams(&v); msg != "" {
+			return nil, msg
+		}
+		b, _ := json.Marshal(v)
+		return b, ""
+	}
+	var ip preset.ImageParams
+	if err := json.Unmarshal(raw, &ip); err != nil {
+		return nil, "must be valid image preset parameters JSON"
+	}
+	if msg := validateImageParams(&ip); msg != "" {
+		return nil, msg
+	}
+	if ip.Limits.MaxInputBytes <= 0 {
+		ip.Limits = preset.DefaultPresets0Limits()
+	}
+	b, _ := json.Marshal(ip)
+	return b, ""
+}
+
+var bitrateRe = regexp.MustCompile(`^[1-9][0-9]{1,5}[kKmM]$`)
+
+// validateVideoParams returns a message for obviously invalid parameters.
+func validateVideoParams(v *preset.VideoParams) string {
+	if v.Kind != "" && v.Kind != "video" {
+		return `kind must be "video"`
+	}
+	v.Kind = "video"
+	if v.Video.Codec == "" {
+		v.Video.Codec = "h264"
+	}
+	if v.Video.Codec != "h264" {
+		return "video.codec must be h264"
+	}
+	if v.Video.MaxWidth < 160 || v.Video.MaxWidth > 4096 {
+		return "video.maxWidth must be 160–4096"
+	}
+	if v.Video.FPS < 1 || v.Video.FPS > 60 {
+		return "video.fps must be 1–60"
+	}
+	if v.Video.CRF < 14 || v.Video.CRF > 40 {
+		return "video.crf must be 14–40"
+	}
+	if v.Video.Maxrate != "" && !bitrateRe.MatchString(v.Video.Maxrate) {
+		return `video.maxrate must look like "900k" or "4M"`
+	}
+	if v.Video.Bufsize != "" && !bitrateRe.MatchString(v.Video.Bufsize) {
+		return `video.bufsize must look like "1800k" or "8M"`
+	}
+	switch v.Video.Preset {
+	case "ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower":
+	case "":
+		v.Video.Preset = "slow"
+	default:
+		return "video.preset is not an x264 preset"
+	}
+	switch v.Video.HW {
+	case "auto", "vaapi", "off":
+	case "":
+		v.Video.HW = "auto"
+	default:
+		return "video.hw must be auto, vaapi or off"
+	}
+	if v.Audio.Bitrate != "" && !bitrateRe.MatchString(v.Audio.Bitrate) {
+		return `audio.bitrate must look like "96k"`
+	}
+	if v.Audio.Channels < 0 || v.Audio.Channels > 2 {
+		return "audio.channels must be 1 or 2"
+	}
+	if v.Container.Format == "" {
+		v.Container.Format = "mp4"
+	}
+	v.Container.Faststart = true
+	if v.Poster.MaxBytes <= 0 {
+		v.Poster.MaxBytes = 15360
+	}
+	if v.Limits.MaxInputBytes <= 0 {
+		v.Limits = preset.VideoLimits{MaxInputBytes: 2 << 30, MaxDurationSec: 300, MaxWidth: 4096, MaxHeight: 4096}
+	}
+	return ""
+}

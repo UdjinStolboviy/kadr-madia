@@ -435,10 +435,11 @@ paths:
           application/json:
             schema:
               type: object
-              required: [url, preset, namespace, visibility]
+              required: [url, namespace, visibility]
               properties:
                 url: { type: string, format: uri }
                 preset: { type: string }
+                mode: { $ref: "#/components/schemas/CompressionMode" }
                 namespace: { $ref: "#/components/schemas/Namespace" }
                 visibility: { $ref: "#/components/schemas/Visibility" }
                 filename: { type: string }
@@ -475,11 +476,12 @@ paths:
           application/json:
             schema:
               type: object
-              required: [connection_id, file_id, preset, namespace, visibility]
+              required: [connection_id, file_id, namespace, visibility]
               properties:
                 connection_id: { type: string, examples: [con_01jd8x3k2m4n5p6q7r8s9t0v1w] }
                 file_id: { type: string }
                 preset: { type: string }
+                mode: { $ref: "#/components/schemas/CompressionMode" }
                 namespace: { $ref: "#/components/schemas/Namespace" }
                 visibility: { $ref: "#/components/schemas/Visibility" }
                 filename: { type: string }
@@ -830,11 +832,25 @@ components:
       additionalProperties: true
       examples: [{ entity: listing, entity_id: lst_77 }]
 
+    CompressionMode:
+      type: string
+      enum: [compact, balanced, quality]
+      description: |
+        Compression mode, resolved to the project's preset `image-<mode>` or
+        `video-<mode>` by the file type. `compact`: good quality at a very small
+        size; `balanced`: the golden middle; `quality`: ideal quality at the
+        smallest size that still achieves it. Every project can edit its mode
+        presets in the admin console.
+
     CreateUploadRequest:
       type: object
-      required: [preset, namespace, visibility, content_type, size]
+      required: [namespace, visibility, content_type, size]
       properties:
-        preset: { type: string, examples: [photo-lite] }
+        preset:
+          type: string
+          examples: [photo-lite]
+          description: Preset slug. Send either `preset` or `mode`; with neither, the project's default mode applies.
+        mode: { $ref: "#/components/schemas/CompressionMode" }
         namespace: { $ref: "#/components/schemas/Namespace" }
         visibility: { $ref: "#/components/schemas/Visibility" }
         filename: { type: string, maxLength: 255, examples: [IMG_2231.HEIC] }

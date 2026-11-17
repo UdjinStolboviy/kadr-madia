@@ -68,6 +68,9 @@ type Config struct {
 	Pipeline AssetService
 	// Wake nudges the job pool of a requeued job (optional).
 	Wake func(pool string)
+	// WebAuthnRPID / WebAuthnOrigins configure passkeys (empty → disabled, 503).
+	WebAuthnRPID    string
+	WebAuthnOrigins []string
 	// Now overrides the clock (tests).
 	Now func() time.Time
 }
@@ -88,6 +91,7 @@ type Server struct {
 	ipLimit    *auth.RateLimiter // per IP, catches email spraying
 	cookieName string
 	playSem    chan struct{}
+	wa         *webAuthnState
 }
 
 // Session cookie names (docs/ADMIN_API.md).
@@ -133,6 +137,7 @@ func New(cfg Config) *Server {
 		ipLimit:    auth.NewRateLimiter(30, time.Minute),
 		cookieName: name,
 		playSem:    make(chan struct{}, 2),
+		wa:         newWebAuthnState(cfg),
 	}
 }
 
@@ -165,6 +170,8 @@ func (s *Server) apiRouter() http.Handler {
 	})
 
 	r.Post("/auth/login", s.handleLogin)
+	r.Post("/auth/webauthn/login/begin", s.handleWebAuthnLoginBegin)
+	r.Post("/auth/webauthn/login/finish", s.handleWebAuthnLoginFinish)
 
 	r.Group(func(r chi.Router) {
 		r.Use(s.requireSession)
@@ -176,6 +183,10 @@ func (s *Server) apiRouter() http.Handler {
 		r.Post("/auth/totp/setup", s.handleTOTPSetup)
 		r.Post("/auth/totp/enable", s.handleTOTPEnable)
 		r.Post("/auth/totp/disable", s.handleTOTPDisable)
+		r.Post("/auth/webauthn/register/begin", s.handleWebAuthnRegisterBegin)
+		r.Post("/auth/webauthn/register/finish", s.handleWebAuthnRegisterFinish)
+		r.Get("/auth/webauthn/credentials", s.handleWebAuthnList)
+		r.Delete("/auth/webauthn/credentials/{id}", s.handleWebAuthnDelete)
 
 		r.Get("/projects", s.handleListProjects)
 		r.Post("/projects", s.handleCreateProject)
@@ -204,6 +215,8 @@ func (s *Server) apiRouter() http.Handler {
 		r.Delete("/projects/{id}/assets/{asset_id}", s.handleDeleteAsset)
 		r.Post("/playground", s.handlePlayground)
 		r.Post("/projects/{id}/presets/{slug}/versions", s.handleSavePresetVersion)
+		r.Post("/projects/{id}/presets/{slug}/reset", s.handleResetPreset)
+		r.Get("/projects/{id}/modes", s.handleListModes)
 		r.Get("/projects/{id}/analytics", s.handleAnalytics)
 		r.Get("/projects/{id}/signing-keys", s.handleListSigningKeys)
 		r.Post("/projects/{id}/signing-keys", s.handleCreateSigningKey)

@@ -90,6 +90,20 @@ Principle: **fewer pixels at decent quality beat many pixels of mush.**
 
 See [ADR-0007](adr/0007-libvips-cli-image-engine.md). In short: 0 MB RAM at idle, the full set of operations (grayscale, normalise, smart crop), no Pro-license questions, no CGO. imgproxy remains an option for future on-demand renditions.
 
+## 2b. Compression modes
+
+Three ready-made trade-offs for **images and videos**, seeded into every project as ordinary presets (`image-compact`, `image-balanced`, `image-quality`, `video-compact`, `video-balanced`, `video-quality`) and selectable with `"mode"` in `POST /v1/uploads`, `POST /v1/assets` and the imports. Kadr picks the image or video preset from the file type; when a request names neither `preset` nor `mode`, the project's **default mode** (`balanced` unless changed) is used.
+
+| Mode | Idea | Image | Video |
+|---|---|---|---|
+| `compact` | good quality, very small | max side 1080, byte budget ≤ 30 KB, AVIF q25–55 + WebP | 480p (854 px), CRF 30, ≤ 450 kbit/s, AAC 48k mono |
+| `balanced` | the golden middle (default) | max side 1440, SSIM target 0.975 within q35–65, AVIF + WebP | 720p, CRF 26, ≤ 1.2 Mbit/s, AAC 96k stereo |
+| `quality` | ideal quality at the smallest size that achieves it | max side 2048, SSIM target 0.99 within q45–85, AVIF 4:4:4 + WebP | 1080p, CRF 20, ≤ 5 Mbit/s, AAC 160k stereo |
+
+On the reference photo the three image modes produce ≈ 24 KB / 96 KB / 350 KB; the video modes on synthetic noisy 1080p ≈ 0.17 / 0.6 / 2.5 MB (tests `TestCompressionModesAreOrdered`, `TestVideoModesAreOrdered`). `quality` uses the SSIM search, so it stops at the lowest quality that still reaches the target instead of always using the maximum.
+
+**Per-project settings.** Each project owns its copies: edit any mode preset in the admin console (Compression modes tab — a new preset *version*; existing assets keep the version they were processed with), change the default mode, or *Reset* a preset to the built-in values. Projects created before modes existed get the six presets on the next start. The legacy purpose-specific presets (`photo-lite`, `photo-balanced`, `doc-lite`, `avatar`, `video-720p`, `video-480p-eco`) remain.
+
 ## 3. Video
 
 ```mermaid
@@ -135,9 +149,22 @@ At startup Kadr detects available encoders (`ffmpeg -encoders`, a 1-frame VAAPI 
 
 `-progress pipe:1` → parse `out_time_us` → `jobs.progress` (0–100) → admin (SSE). Products receive only final events (`asset.ready` / `asset.failed`).
 
+### HLS ladder (`"hls": true`)
+
+A video preset with `"hls": true` additionally produces an adaptive package next to the MP4 (the MP4 and poster are unchanged):
+
+- One ffmpeg run, software x264 (VAAPI is not used for the ladder), `split` + `scale` per variant, audio (AAC) in every variant.
+- Ladder rungs are defined by the short side: 360 / 480 / 720 / 1080, only those not larger than the source and whose width does not exceed the preset's `video.maxWidth` (default 1280), at most 4. A source below 360 gets a single variant at its own size; nothing is upscaled.
+- fMP4 (CMAF) segments of 4 s, `independent_segments`, VOD playlists. Keyframes are aligned across variants (`-g fps*4`, `-force_key_frames expr:gte(t,n_forced*4)`, `-sc_threshold 0`), so the player can switch at any segment boundary. The x264 preset is capped at `medium` (the `slow` default of the MP4 would make four variants too slow); bitrates per rung: 800k / 1400k / 2800k / 5000k maxrate on top of the preset CRF.
+- Layout (flat, relative URIs): `{project}/{blob_id}/hls/master.m3u8`, `v_360p.m3u8`, `init_360p.mp4`, `seg_360p_00000.m4s`, ...
+- Uploaded with `application/vnd.apple.mpegurl` (playlists), `video/mp4` (init) and `video/iso.segment` (segments) and the same Cache-Control as the other renditions of the blob.
+- One rendition row is recorded: name `hls`, format `m3u8`, `storage_key` = the master playlist, `bytes` = size of the whole package (also counted in the blob's total/quota). Segments have no rows: blob GC and visibility change enumerate the `hls/` prefix with `Driver.List`, so a package can never leak objects.
+- Job progress: 0-50 % MP4, 50-100 % ladder. A failing ladder fails the asset (the preset asked for it).
+
+**Private assets.** A per-object signature cannot work for HLS (a player requests dozens of segment URLs it derives from the playlist, without the query string). For a rendition of format `m3u8`, `POST /v1/sign-urls` therefore returns a directory-scoped URL: `...master.m3u8?exp=&kid=&sig=&prefix=1`, where `sig` signs the canonical string `GETP\n/{dir}/\n{exp}\n` (distinct from the per-object `GET\n/{key}\n{exp}\n{download}` form, which is unchanged). kadr-edge authorizes any object directly inside `{dir}/` for such a request and rewrites relative URIs in playlists to carry the same `exp/kid/sig/prefix`, so unmodified players (hls.js, Safari) work. Consequences: one URL grants the whole package until `exp`; `download` is ignored; the playlist is rewritten per request and not cached at the edge; the Node SDK has no helper for the prefix form yet (use `sign-urls`).
+
 ### Later (M5)
 
-- HLS ladder 360/480/720/1080 for videos > 60 s, fMP4 segments.
 - Timeline sprites (VTT) and a 3-second silent preview.
 - AV1 (SVT-AV1) as an extra rendition for long-form content.
 

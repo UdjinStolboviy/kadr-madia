@@ -47,6 +47,17 @@ func SignKey(secret, key string, exp int64, download string) string {
 	return base64.RawURLEncoding.EncodeToString(m.Sum(nil))
 }
 
+// SignKeyPrefix signs a directory-scoped URL (HLS packages): the canonical
+// string is GETP\n/{dir}/\n{exp}\n where dir is the directory of key. kadr-edge
+// accepts it for any sibling file when the URL carries prefix=1.
+func SignKeyPrefix(secret, key string, exp int64) string {
+	dir := strings.TrimLeft(key, "/")
+	dir = dir[:strings.LastIndex(dir, "/")+1]
+	m := hmac.New(sha256.New, []byte(secret))
+	m.Write([]byte("GETP\n/" + dir + "\n" + strconv.FormatInt(exp, 10) + "\n"))
+	return base64.RawURLEncoding.EncodeToString(m.Sum(nil))
+}
+
 // SignURLs signs private rendition URLs with the project's active signing key.
 func (s *Service) SignURLs(ctx context.Context, projectID string, items []SignItem) ([]SignedURL, error) {
 	if s.edgeBaseURL == "" {
@@ -87,9 +98,10 @@ func (s *Service) SignURLs(ctx context.Context, projectID string, items []SignIt
 			return nil, err
 		}
 		var key string
+		prefixMode := false // HLS playlists: one signature covers the whole package directory
 		for _, r := range rs {
 			if it.Rendition == "" || it.Rendition == r.Name || it.Rendition == r.Name+"."+r.Format {
-				key = r.StorageKey
+				key, prefixMode = r.StorageKey, r.Format == hlsRenditionFormat
 				break
 			}
 		}
@@ -98,9 +110,14 @@ func (s *Service) SignURLs(ctx context.Context, projectID string, items []SignIt
 		}
 		exp := s.now().Add(ttl).Unix()
 		u := strings.TrimRight(s.edgeBaseURL, "/") + "/" + escapeKey(key) + "?exp=" + strconv.FormatInt(exp, 10) +
-			"&kid=" + url.QueryEscape(k.ID) + "&sig=" + SignKey(string(secret), key, exp, it.Download)
-		if it.Download != "" {
-			u += "&download=" + url.QueryEscape(it.Download)
+			"&kid=" + url.QueryEscape(k.ID)
+		if prefixMode {
+			u += "&sig=" + SignKeyPrefix(string(secret), key, exp) + "&prefix=1"
+		} else {
+			u += "&sig=" + SignKey(string(secret), key, exp, it.Download)
+			if it.Download != "" {
+				u += "&download=" + url.QueryEscape(it.Download)
+			}
 		}
 		out[i] = SignedURL{URL: u, ExpiresAt: rfc3339(time.Unix(exp, 0))}
 	}

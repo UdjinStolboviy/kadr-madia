@@ -20,7 +20,7 @@ func newImageEngine(concurrency int, fake bool, log *slog.Logger) image.Engine {
 		log.Warn("using the fake image engine: renditions are placeholders, not images (--fake-engine)")
 		return fakeimage.New()
 	}
-	e, err := image.NewVipsCLI(image.VipsConfig{Nice: true, Timeout: 30 * time.Second, MaxConcurrency: concurrency})
+	e, err := image.NewVipsCLI(image.VipsConfig{Nice: true, Timeout: 90 * time.Second, MaxConcurrency: concurrency})
 	if err != nil {
 		log.Error("image engine unavailable; image jobs will fail until libvips is installed", "err", err)
 		return unavailableEngine{err: err}

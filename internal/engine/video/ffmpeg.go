@@ -299,7 +299,12 @@ func (e *FFmpeg) run(ctx context.Context, src SourceInfo, p preset.VideoParams, 
 		}
 	}
 	args = append(args, "-movflags", "+faststart", "-progress", "pipe:1", "-nostats", out)
+	return e.exec(ctx, args, src.DurationSec, progress)
+}
 
+// exec runs ffmpeg with args (which must include "-progress pipe:1"),
+// reporting progress against durationSec and classifying failures.
+func (e *FFmpeg) exec(ctx context.Context, args []string, durationSec float64, progress func(int)) error {
 	var cmd *exec.Cmd
 	if e.cfg.Nice {
 		cmd = exec.CommandContext(ctx, "nice", append([]string{"-n", "10", e.cfg.FFmpeg}, args...)...)
@@ -323,10 +328,10 @@ func (e *FFmpeg) run(ctx context.Context, src SourceInfo, p preset.VideoParams, 
 			continue
 		}
 		us, err := strconv.ParseInt(val, 10, 64)
-		if err != nil || src.DurationSec <= 0 {
+		if err != nil || durationSec <= 0 {
 			continue
 		}
-		pct := int(float64(us) / 1e6 / src.DurationSec * 100)
+		pct := int(float64(us) / 1e6 / durationSec * 100)
 		if pct > 99 {
 			pct = 99
 		}

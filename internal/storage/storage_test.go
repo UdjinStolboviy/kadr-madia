@@ -146,3 +146,20 @@ func TestRunChecksReportsFailures(t *testing.T) {
 		t.Fatalf("public: %+v", res.Checks)
 	}
 }
+
+func TestS3List(t *testing.T) {
+	ctx := context.Background()
+	_, d := newFake(t, "pub")
+	for _, k := range []string{"p/b1/hls/master.m3u8", "p/b1/hls/v0_00001.m4s", "p/b1/main.mp4", "p/b10/hls/x.m4s"} {
+		if err := d.Put(ctx, "pub", k, bytes.NewReader([]byte("x")), 1, PutOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := d.List(ctx, "pub", "p/b1/hls/")
+	if err != nil || len(got) != 2 {
+		t.Fatalf("list: %v %v", got, err)
+	}
+	if got, err = d.List(ctx, "pub", "nothing/"); err != nil || len(got) != 0 {
+		t.Fatalf("empty list: %v %v", got, err)
+	}
+}

@@ -43,7 +43,7 @@ kadr ──► R2 / webhooks / imports — outbound connections
 ```
 
 - `/v1` is not published through the tunnel at all.
-- Admin console: Cloudflare Access + own login (argon2id) + TOTP. Optional WebAuthn (M4).
+- Admin console: Cloudflare Access + own login (argon2id) + TOTP. Optional WebAuthn passkeys (discoverable, user-verified; counts as MFA; sign-count regression rejected; see ADMIN_API.md).
 - Additionally: the admin server verifies the `Cf-Access-Jwt-Assertion` header.
 
 ## 4. systemd sandbox

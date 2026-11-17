@@ -23,23 +23,25 @@ const MinPepperLen = 32
 
 // Config is the fully resolved runtime configuration.
 type Config struct {
-	PublicAddr     string // /v1, /metrics — LAN only
-	AdminAddr      string // /admin + embedded UI
-	DBPath         string
-	TmpDir         string
-	MasterKeyFile  string
-	APIKeyPepper   []byte
-	PoolImage      int
-	PoolVideo      int
-	VideoHW        string // auto | vaapi | off
-	TelegramToken  string // KADR_TELEGRAM_BOT_TOKEN (alerts)
-	TelegramChatID string // KADR_TELEGRAM_CHAT_ID
-	EdgeBaseURL    string // https://media.example.com — private delivery host (kadr-edge)
-	CFAccountID    string // KADR_CF_ACCOUNT_ID
-	CFAPIToken     string // KADR_CF_API_TOKEN
-	CFWorkerName   string // KADR_CF_WORKER_NAME (default kadr-edge)
-	LogLevel       slog.Level
-	Dev            bool
+	PublicAddr      string // /v1, /metrics — LAN only
+	AdminAddr       string // /admin + embedded UI
+	DBPath          string
+	TmpDir          string
+	MasterKeyFile   string
+	APIKeyPepper    []byte
+	PoolImage       int
+	PoolVideo       int
+	VideoHW         string   // auto | vaapi | off
+	TelegramToken   string   // KADR_TELEGRAM_BOT_TOKEN (alerts)
+	TelegramChatID  string   // KADR_TELEGRAM_CHAT_ID
+	EdgeBaseURL     string   // https://media.example.com — private delivery host (kadr-edge)
+	CFAccountID     string   // KADR_CF_ACCOUNT_ID
+	CFAPIToken      string   // KADR_CF_API_TOKEN
+	CFWorkerName    string   // KADR_CF_WORKER_NAME (default kadr-edge)
+	WebAuthnRPID    string   // KADR_WEBAUTHN_RP_ID (default localhost in dev; empty disables passkeys)
+	WebAuthnOrigins []string // KADR_WEBAUTHN_ORIGINS, comma separated
+	LogLevel        slog.Level
+	Dev             bool
 }
 
 // Getenv abstracts os.Getenv for tests.
@@ -80,6 +82,19 @@ func Load(getenv Getenv) (*Config, error) {
 	setStr(&c.CFWorkerName, getenv("KADR_CF_WORKER_NAME"))
 	setStr(&c.TelegramToken, getenv("KADR_TELEGRAM_BOT_TOKEN"))
 	setStr(&c.TelegramChatID, getenv("KADR_TELEGRAM_CHAT_ID"))
+	if dev {
+		c.WebAuthnRPID = "localhost"
+		c.WebAuthnOrigins = []string{"http://localhost:8081", "http://127.0.0.1:8081", "http://localhost:5173"}
+	}
+	setStr(&c.WebAuthnRPID, strings.TrimSpace(getenv("KADR_WEBAUTHN_RP_ID")))
+	if v := strings.TrimSpace(getenv("KADR_WEBAUTHN_ORIGINS")); v != "" {
+		c.WebAuthnOrigins = nil
+		for _, o := range strings.Split(v, ",") {
+			if o = strings.TrimRight(strings.TrimSpace(o), "/"); o != "" {
+				c.WebAuthnOrigins = append(c.WebAuthnOrigins, o)
+			}
+		}
+	}
 	setStr(&c.EdgeBaseURL, strings.TrimRight(getenv("KADR_EDGE_BASE_URL"), "/"))
 
 	if p := getenv("KADR_API_KEY_PEPPER"); p != "" {

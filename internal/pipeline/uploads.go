@@ -32,6 +32,7 @@ func ValidNamespace(ns string) bool { return namespaceRe.MatchString(ns) }
 // CreateUploadInput is the body of POST /v1/uploads.
 type CreateUploadInput struct {
 	Preset      string          `json:"preset"`
+	Mode        string          `json:"mode"` // compact | balanced | quality (instead of preset)
 	Namespace   string          `json:"namespace"`
 	Visibility  string          `json:"visibility"`
 	Filename    string          `json:"filename"`
@@ -59,7 +60,7 @@ type common struct {
 	metadata json.RawMessage
 }
 
-func (s *Service) validateCommon(ctx context.Context, projectID, presetSlug, ns, vis, filename string, metadata json.RawMessage, errs map[string]string) (*common, error) {
+func (s *Service) validateCommon(ctx context.Context, projectID, presetSlug, mode, hint, ns, vis, filename string, metadata json.RawMessage, errs map[string]string) (*common, error) {
 	c := &common{ns: strings.TrimSpace(ns), vis: strings.TrimSpace(vis)}
 	if !ValidNamespace(c.ns) {
 		errs["namespace"] = "required; 1–128 characters of [A-Za-z0-9._:@-], starting with a letter or digit"
@@ -79,10 +80,32 @@ func (s *Service) validateCommon(ctx context.Context, projectID, presetSlug, ns,
 		errs["metadata"] = msg
 	}
 	c.metadata = meta
-	presetSlug = strings.TrimSpace(presetSlug)
-	if presetSlug == "" {
-		errs["preset"] = "required"
+	presetSlug, mode = strings.TrimSpace(presetSlug), strings.TrimSpace(mode)
+	if presetSlug != "" && mode != "" {
+		errs["mode"] = "send either preset or mode, not both"
 		return c, nil
+	}
+	if presetSlug == "" {
+		// Compression mode: the preset is image-<mode> or video-<mode>, chosen
+		// by the kind of the file; the project's default mode applies when
+		// neither a preset nor a mode is given.
+		if mode == "" {
+			project, err := s.store.GetProject(ctx, projectID)
+			if err != nil {
+				return nil, err
+			}
+			mode = project.DefaultMode
+		}
+		if !preset.ValidMode(mode) {
+			errs["mode"] = "must be compact, balanced or quality"
+			return c, nil
+		}
+		kind := kindFromHint(hint)
+		if kind == "" {
+			errs["preset"] = "required: the file type could not be determined, send preset or a content type"
+			return c, nil
+		}
+		presetSlug = preset.ModeSlug(kind, mode)
 	}
 	p, err := s.store.GetPresetBySlug(ctx, projectID, presetSlug)
 	if errors.Is(err, db.ErrNotFound) {
@@ -131,7 +154,7 @@ func normalizeMetadata(raw json.RawMessage) (json.RawMessage, string) {
 // PUT. When sha256 matches a ready blob it returns a new ready asset instead.
 func (s *Service) CreateUpload(ctx context.Context, projectID string, in CreateUploadInput) (*CreateUploadResult, error) {
 	errs := map[string]string{}
-	c, err := s.validateCommon(ctx, projectID, in.Preset, in.Namespace, in.Visibility, in.Filename, in.Metadata, errs)
+	c, err := s.validateCommon(ctx, projectID, in.Preset, in.Mode, in.ContentType+" "+in.Filename, in.Namespace, in.Visibility, in.Filename, in.Metadata, errs)
 	if err != nil {
 		return nil, err
 	}
@@ -444,6 +467,7 @@ func (s *Service) AbortUpload(ctx context.Context, projectID, uploadID string) e
 // ServerUploadInput describes POST /v1/assets (multipart/form-data).
 type ServerUploadInput struct {
 	Preset      string
+	Mode        string
 	Namespace   string
 	Visibility  string
 	Metadata    json.RawMessage
@@ -492,7 +516,7 @@ func (s *Service) StageServerUpload(r io.Reader) (*Staged, error) {
 // upload and waits up to wait. The caller must Discard st afterwards.
 func (s *Service) CreateServerAsset(ctx context.Context, projectID string, in ServerUploadInput, st *Staged, wait time.Duration) (*AssetView, error) {
 	errs := map[string]string{}
-	c, err := s.validateCommon(ctx, projectID, in.Preset, in.Namespace, in.Visibility, in.Filename, in.Metadata, errs)
+	c, err := s.validateCommon(ctx, projectID, in.Preset, in.Mode, in.ContentType+" "+in.Filename, in.Namespace, in.Visibility, in.Filename, in.Metadata, errs)
 	if err != nil {
 		return nil, err
 	}
@@ -760,4 +784,32 @@ func (s *Service) abortMultipart(ctx context.Context, u *db.Upload, tgt *target)
 	if err := tgt.driver.AbortMultipart(context.WithoutCancel(ctx), mp); err != nil {
 		s.log.WarnContext(ctx, "abort multipart upload", "upload_id", u.ID, "err", err)
 	}
+}
+
+var extKinds = map[string]string{
+	"jpg": "image", "jpeg": "image", "png": "image", "webp": "image", "heic": "image", "heif": "image", "avif": "image",
+	"gif": "image", "tif": "image", "tiff": "image",
+	"mp4": "video", "mov": "video", "m4v": "video", "webm": "video", "mkv": "video", "avi": "video", "mpg": "video", "mpeg": "video", "3gp": "video",
+}
+
+// kindFromHint guesses "image" or "video" from text containing a content type
+// and/or a file name or URL; "" when unknown.
+func kindFromHint(hint string) string {
+	for _, f := range strings.Fields(strings.ToLower(hint)) {
+		switch {
+		case strings.HasPrefix(f, "image/"):
+			return "image"
+		case strings.HasPrefix(f, "video/"):
+			return "video"
+		}
+	}
+	for _, f := range strings.Fields(strings.ToLower(hint)) {
+		f, _, _ = strings.Cut(f, "?")
+		if i := strings.LastIndex(f, "."); i >= 0 && i < len(f)-1 {
+			if k := extKinds[f[i+1:]]; k != "" {
+				return k
+			}
+		}
+	}
+	return ""
 }

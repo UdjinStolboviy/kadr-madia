@@ -114,6 +114,10 @@ Scope `uploads:write`. For backend processes (scanners, imports): files ≤ 25 M
 
 **Errors:** as for tickets, plus `too_large` (413, over 25 MB), `unsupported_content_type` (415, the body is not multipart/form-data), `invalid_multipart` (400).
 
+### Compression modes
+
+Instead of `preset` any upload or import may send `"mode": "compact" | "balanced" | "quality"` (see [PIPELINES.md §2b](PIPELINES.md)). The preset becomes `image-<mode>` or `video-<mode>` depending on the content type (or the file name/URL extension for server-side uploads and imports). Sending both `preset` and `mode` is a `422`. With neither, the project's default mode is used. The asset's `preset` field reports the resulting preset.
+
 ### `POST /v1/imports/url` — import from a URL
 
 `{ "url": "https://…", "preset": "photo-lite", "namespace": "org_8f2c", "visibility": "public", "filename"?, "metadata"? }` → `202` with the asset in `processing`; `asset.ready` / `asset.failed` follow. Scope `imports:write`.

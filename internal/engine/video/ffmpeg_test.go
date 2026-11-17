@@ -141,3 +141,46 @@ func indexOf(b []byte, s string) int {
 	}
 	return -1
 }
+
+func TestVideoModesAreOrdered(t *testing.T) {
+	e := engine(t)
+	dir := t.TempDir()
+	// Noisy content so that bitrate differences between modes show.
+	src := filepath.Join(dir, "in.mp4")
+	if out, err := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+		"testsrc2=s=1920x1080:r=30:d=3,noise=alls=30:allf=t", "-f", "lavfi", "-i", "sine=d=3", "-c:v", "libx264", "-crf", "12",
+		"-c:a", "aac", "-shortest", src).CombinedOutput(); err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	sizes := map[string]int64{}
+	widths := map[string]int{}
+	for _, mode := range preset.Modes {
+		var p preset.VideoParams
+		for _, d := range preset.ModePresets() {
+			if d.Slug == preset.ModeSlug("video", mode) {
+				if err := jsonUnmarshal(d.Params, &p); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		p.Video.Preset, p.Video.HW = "veryfast", "off" // speed only; rate control as in the mode
+		info, err := e.Probe(context.Background(), src, p.Limits)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wd := filepath.Join(dir, mode)
+		_ = os.MkdirAll(wd, 0o755)
+		out, err := e.Transcode(context.Background(), info, p, wd, nil)
+		if err != nil {
+			t.Fatalf("%s: %v", mode, err)
+		}
+		sizes[mode], widths[mode] = out.Bytes, out.Width
+		t.Logf("%-8s %8d bytes %dpx", mode, out.Bytes, out.Width)
+	}
+	if !(sizes[preset.ModeCompact] < sizes[preset.ModeBalanced] && sizes[preset.ModeBalanced] < sizes[preset.ModeQuality]) {
+		t.Fatalf("sizes not ordered: %v", sizes)
+	}
+	if widths[preset.ModeCompact] != 854 || widths[preset.ModeBalanced] != 1280 || widths[preset.ModeQuality] != 1920 {
+		t.Fatalf("widths: %v", widths)
+	}
+}

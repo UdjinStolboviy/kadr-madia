@@ -510,3 +510,19 @@ export interface CreateCloudConnectionRequest {
   /** rclone OAuth token JSON. */
   token: string;
 }
+
+// ---- WebAuthn passkeys ------------------------------------------------------
+
+export interface Passkey {
+  id: string;
+  name: string;
+  transports: string[];
+  created_at: ISODateTime;
+  last_used_at: ISODateTime | null;
+}
+
+export interface WebAuthnCeremony {
+  ceremony_id: string;
+  /** JSON-serialized PublicKeyCredential{Creation,Request}Options ({ publicKey: … }). */
+  options: { publicKey: Record<string, unknown> };
+}

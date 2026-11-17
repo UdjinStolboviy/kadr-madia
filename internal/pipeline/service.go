@@ -330,6 +330,8 @@ func renditionContentType(format string) string {
 		return "image/gif"
 	case "mp4":
 		return "video/mp4"
+	case "m3u8":
+		return "application/vnd.apple.mpegurl"
 	}
 	return "application/octet-stream"
 }

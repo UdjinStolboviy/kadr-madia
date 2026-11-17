@@ -10,8 +10,19 @@ export function canonicalString(key: string, exp: number, download?: string): st
   return `GET\n/${key}\n${exp}\n${download ?? ""}`;
 }
 
+/**
+ * Canonical string of the directory-scoped mode (`prefix=1`, HLS packages):
+ *   GETP\n/{dir}/\n{exp}\n
+ * `dir` is the decoded directory of the requested key with a trailing slash.
+ * The signature authorizes every object directly in that directory; the
+ * distinct "GETP" verb keeps it from ever matching a per-object signature.
+ */
+export function canonicalPrefixString(dir: string, exp: number): string {
+  return `GETP\n/${dir}\n${exp}\n`;
+}
+
 export type VerifyResult =
-  | { ok: true; key: string; exp: number; kid: string; download?: string }
+  | { ok: true; key: string; exp: number; kid: string; download?: string; prefix?: boolean }
   | { ok: false; reason: string };
 
 const enc = new TextEncoder();
@@ -84,8 +95,10 @@ export async function verifySignedRequest(url: URL, env: Env, nowMs: number): Pr
   if (expRaw === null || kid === null || sig === null) return { ok: false, reason: "missing_params" };
   if (!/^\d{1,15}$/.test(expRaw)) return { ok: false, reason: "malformed" };
   const exp = Number(expRaw);
+  const prefix = p.get("prefix") === "1";
   const dl = p.get("download");
-  const download = dl === null || dl === "" ? undefined : dl;
+  // Directory-scoped signatures do not cover a download name: it is ignored.
+  const download = prefix || dl === null || dl === "" ? undefined : dl;
 
   const key = keyFromPath(url.pathname, env.PATH_PREFIX);
   if (key === null) return { ok: false, reason: "malformed" };
@@ -107,10 +120,12 @@ export async function verifySignedRequest(url: URL, env: Env, nowMs: number): Pr
     "HMAC",
     cryptoKey,
     sigBytes,
-    enc.encode(canonicalString(key, exp, download)),
+    enc.encode(prefix ? canonicalPrefixString(key.slice(0, key.lastIndexOf("/") + 1), exp) : canonicalString(key, exp, download)),
   );
   if (!valid) return { ok: false, reason: "bad_signature" };
   if (Math.floor(nowMs / 1000) > exp) return { ok: false, reason: "expired" };
 
-  return download === undefined ? { ok: true, key, exp, kid } : { ok: true, key, exp, kid, download };
+  const base = { ok: true as const, key, exp, kid };
+  if (prefix) return { ...base, prefix: true };
+  return download === undefined ? base : { ...base, download };
 }

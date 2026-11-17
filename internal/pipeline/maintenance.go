@@ -167,6 +167,11 @@ func (s *Service) gcBlob(ctx context.Context, b *db.Blob) error {
 	}
 	bucket := tgt.bucket(b.Visibility)
 	for _, r := range rs {
+		if r.Format == hlsRenditionFormat { // HLS package: segments are not rows, list the prefix
+			if err := deleteHLSPackage(ctx, tgt.driver, bucket, r.StorageKey); err != nil {
+				return fmt.Errorf("gc blob %s hls: %w", b.ID, err)
+			}
+		}
 		if err := tgt.driver.Delete(ctx, bucket, r.StorageKey); err != nil {
 			return fmt.Errorf("gc blob %s: %w", b.ID, err)
 		}

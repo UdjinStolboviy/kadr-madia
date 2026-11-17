@@ -495,9 +495,22 @@ export interface components {
         Metadata: {
             [key: string]: unknown;
         };
+        /**
+         * @description Compression mode, resolved to the project's preset `image-<mode>` or
+         *     `video-<mode>` by the file type. `compact`: good quality at a very small
+         *     size; `balanced`: the golden middle; `quality`: ideal quality at the
+         *     smallest size that still achieves it. Every project can edit its mode
+         *     presets in the admin console.
+         * @enum {string}
+         */
+        CompressionMode: "compact" | "balanced" | "quality";
         CreateUploadRequest: {
-            /** @example photo-lite */
-            preset: string;
+            /**
+             * @description Preset slug. Send either `preset` or `mode`; with neither, the project's default mode applies.
+             * @example photo-lite
+             */
+            preset?: string;
+            mode?: components["schemas"]["CompressionMode"];
             namespace: components["schemas"]["Namespace"];
             visibility: components["schemas"]["Visibility"];
             /** @example IMG_2231.HEIC */
@@ -1307,7 +1320,8 @@ export interface operations {
                 "application/json": {
                     /** Format: uri */
                     url: string;
-                    preset: string;
+                    preset?: string;
+                    mode?: components["schemas"]["CompressionMode"];
                     namespace: components["schemas"]["Namespace"];
                     visibility: components["schemas"]["Visibility"];
                     filename?: string;
@@ -1350,7 +1364,8 @@ export interface operations {
                     /** @example con_01jd8x3k2m4n5p6q7r8s9t0v1w */
                     connection_id: string;
                     file_id: string;
-                    preset: string;
+                    preset?: string;
+                    mode?: components["schemas"]["CompressionMode"];
                     namespace: components["schemas"]["Namespace"];
                     visibility: components["schemas"]["Visibility"];
                     filename?: string;

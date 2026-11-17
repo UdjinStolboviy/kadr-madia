@@ -85,6 +85,7 @@ export async function handle(
   if (!v.ok) return text(403, "forbidden"); // reason deliberately not disclosed
   const { key, exp, download } = v;
   const isHead = request.method === "HEAD";
+  if (v.prefix && key.endsWith(".m3u8")) return servePlaylist(env, url, key, exp, nowMs, isHead);
   const cache: CacheLike | undefined = deps.cache;
   const cacheKey = cacheKeyFor(url);
   const inm = request.headers.get("If-None-Match");
@@ -145,6 +146,38 @@ export async function handle(
   const h = baseHeaders(meta, exp, nowMs, download);
   h.set("Content-Length", String(meta.size));
   return streamOrCache(obj.body, h, meta, cache, cacheKey, ctx);
+}
+
+/**
+ * Directory-scoped signatures (HLS): players resolve playlist URIs without
+ * the query string, so relative references in a playlist get this request's
+ * exp/kid/sig/prefix appended. Playlists are small, never cached at the edge
+ * (the cached copy would be the unrewritten one) and never ranged.
+ */
+export function rewritePlaylist(body: string, query: string): string {
+  const isRelative = (u: string) => u !== "" && !u.startsWith("/") && !/^[A-Za-z][A-Za-z0-9+.-]*:/.test(u);
+  const add = (u: string) => (isRelative(u) ? `${u}${u.includes("?") ? "&" : "?"}${query}` : u);
+  return body
+    .split("\n")
+    .map((line) => {
+      const t = line.replace(/\r$/, "");
+      if (t.startsWith("#")) return t.replace(/URI="([^"]*)"/g, (_m, u: string) => `URI="${add(u)}"`);
+      return t === "" ? t : add(t);
+    })
+    .join("\n");
+}
+
+async function servePlaylist(env: Env, url: URL, key: string, exp: number, nowMs: number, isHead: boolean): Promise<Response> {
+  const obj = await env.PRIVATE.get(key);
+  if (!obj) return text(404, "not found");
+  const q = new URLSearchParams();
+  for (const k of ["exp", "kid", "sig", "prefix"]) q.set(k, url.searchParams.get(k) ?? "");
+  const body = rewritePlaylist(await new Response(obj.body).text(), q.toString());
+  const ttl = Math.max(0, Math.min(60, exp - Math.floor(nowMs / 1000)));
+  const h = new Headers(BASE_HEADERS);
+  h.set("Content-Type", obj.httpMetadata?.contentType || "application/vnd.apple.mpegurl");
+  h.set("Cache-Control", `private, max-age=${ttl}`);
+  return new Response(isHead ? null : body, { status: 200, headers: h });
 }
 
 function ifRangeRejects(ifRange: string | null, meta: Meta): boolean {

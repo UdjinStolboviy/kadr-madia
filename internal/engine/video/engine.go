@@ -24,6 +24,32 @@ type Engine interface {
 	Transcode(ctx context.Context, src SourceInfo, params preset.VideoParams, workDir string, progress func(pct int)) (*Output, error)
 }
 
+// HLSEngine is implemented by engines that can also produce an adaptive HLS
+// package. It is optional so Engine stays unchanged; callers type-assert.
+type HLSEngine interface {
+	// PackageHLS writes an fMP4 (CMAF) HLS ladder into <workDir>/hls: a
+	// master.m3u8, one playlist per variant, init and segment files, all in
+	// that single flat directory. progress receives values in [0,100].
+	PackageHLS(ctx context.Context, src SourceInfo, params preset.VideoParams, workDir string, progress func(pct int)) (*HLSOutput, error)
+}
+
+// HLSOutput is the result of PackageHLS.
+type HLSOutput struct {
+	Dir      string       // <workDir>/hls
+	Master   string       // file name of the master playlist, relative to Dir
+	Files    []string     // every file, relative to Dir (slash separated), master first
+	Bytes    int64        // total size of all files
+	Variants []HLSVariant // ladder, lowest first
+	Encoder  string
+}
+
+// HLSVariant describes one rung of the ladder.
+type HLSVariant struct {
+	Name          string // e.g. "720p"
+	Width, Height int
+	MaxrateKbps   int
+}
+
 // SourceInfo describes a validated source video.
 type SourceInfo struct {
 	Path        string

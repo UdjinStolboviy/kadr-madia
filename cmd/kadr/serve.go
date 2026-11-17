@@ -128,6 +128,11 @@ func cmdServe(ctx context.Context, args []string, stderr io.Writer) error {
 		Store: store, Queue: q, Engine: imgEngine, Video: newVideoEngine(log), EdgeBaseURL: cfg.EdgeBaseURL, Keyring: keyring,
 		Logger: log, Metrics: set, TmpDir: cfg.TmpDir, Webhooks: dispatcher,
 	})
+	if n, err := svc.EnsureModePresets(ctx); err != nil {
+		log.Warn("ensure compression mode presets", "err", err)
+	} else if n > 0 {
+		log.Info("added compression mode presets to existing projects", "count", n)
+	}
 	if err := svc.CleanStaleWorkDirs(ctx); err != nil {
 		log.Warn("clean stale work dirs", "err", err)
 	}
@@ -153,6 +158,7 @@ func cmdServe(ctx context.Context, args []string, stderr io.Writer) error {
 		Store: store, Keyring: keyring, Logger: log, Metrics: set, Dev: cfg.Dev, Pepper: cfg.APIKeyPepper,
 		Build: admin.BuildInfo{Version: version, Commit: commit, StartedAt: started},
 		Caps:  caps, TmpDir: cfg.TmpDir, Pipeline: svc, Wake: q.Notify, Edge: &edgepublish.Publisher{AccountID: cfg.CFAccountID, APIToken: cfg.CFAPIToken, WorkerName: cfg.CFWorkerName}, Playground: playground, UI: ui, FallbackHTML: web.FallbackHTML(), Webhooks: dispatcher,
+		WebAuthnRPID: cfg.WebAuthnRPID, WebAuthnOrigins: cfg.WebAuthnOrigins,
 	})
 	publicHandler := public.Handler(public.Config{
 		Store: store, Logger: log, Metrics: set, Pipeline: svc, TmpDir: cfg.TmpDir,

@@ -204,6 +204,38 @@ on(
   true,
 );
 
+// ---- WebAuthn (mock: no real ceremony; the browser prompt is skipped) -------
+const mockPasskeys: { id: string; name: string; transports: string[]; created_at: string; last_used_at: string | null }[] = [];
+const ceremonyOptions = () => ({
+  ceremony_id: randomBase62(32),
+  options: { publicKey: { challenge: "bW9jay1jaGFsbGVuZ2U", rp: { id: "localhost", name: "Kadr" }, user: { id: "bW9jaw", name: "admin", displayName: "admin" }, pubKeyCredParams: [{ type: "public-key", alg: -7 }], allowCredentials: [] } },
+});
+on("POST", "/auth/webauthn/login/begin", () => json(200, ceremonyOptions()), true);
+on("POST", "/auth/webauthn/login/finish", () => {
+  if (mockPasskeys.length === 0) throw new HttpError(401, "invalid_credentials", "passkey sign-in failed");
+  const session = { csrf: randomBase62(32) };
+  setSession(session);
+  db.admin.last_login_at = nowIso();
+  audit("auth.login", db.admin.email, null, { method: "passkey" });
+  persist();
+  return json(200, { admin: publicAdmin(), csrf_token: session.csrf });
+}, true);
+on("POST", "/auth/webauthn/register/begin", () => json(200, ceremonyOptions()));
+on("POST", "/auth/webauthn/register/finish", ({ body }) => {
+  const b = body as { name?: string };
+  const k = { id: `wak_${randomBase62(10).toLowerCase()}`, name: b.name ?? "Passkey", transports: ["internal"], created_at: nowIso(), last_used_at: null };
+  mockPasskeys.push(k);
+  audit("auth.webauthn_register", k.id);
+  return json(201, k);
+});
+on("GET", "/auth/webauthn/credentials", () => json(200, { data: mockPasskeys }));
+on("DELETE", "/auth/webauthn/credentials/:id", ({ params }) => {
+  const i = mockPasskeys.findIndex((k) => k.id === params[0]);
+  if (i < 0) throw new HttpError(404, "not_found", "passkey not found");
+  mockPasskeys.splice(i, 1);
+  return noContent();
+});
+
 on("POST", "/auth/logout", () => {
   setSession(null);
   return noContent();

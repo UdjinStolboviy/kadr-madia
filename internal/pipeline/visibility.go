@@ -77,6 +77,16 @@ func (s *Service) changeVisibility(ctx context.Context, a *db.Asset, to string, 
 			nr := *r
 			nr.BlobID = nb.ID
 			nr.StorageKey = strings.Replace(r.StorageKey, old.ID, nb.ID, 1)
+			if r.Format == hlsRenditionFormat { // the master row stands for the whole package
+				keys, err := s.copyHLSPackage(ctx, tgt.driver, srcBucket, dstBucket, r.StorageKey, old.ID, nb.ID, cache)
+				copied = append(copied, keys...)
+				if err != nil {
+					cleanup()
+					return nil, apiErr(http.StatusBadGateway, CodeStorageError, "could not copy the HLS package: %v", err)
+				}
+				newRends = append(newRends, &nr)
+				continue
+			}
 			if err := tgt.driver.Copy(ctx, srcBucket, r.StorageKey, dstBucket, nr.StorageKey,
 				storage.PutOptions{ContentType: renditionContentType(r.Format), CacheControl: cache}); err != nil {
 				cleanup()

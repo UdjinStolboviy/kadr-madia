@@ -27,6 +27,7 @@ const (
 type ImportURLInput struct {
 	URL        string          `json:"url"`
 	Preset     string          `json:"preset"`
+	Mode       string          `json:"mode"`
 	Namespace  string          `json:"namespace"`
 	Visibility string          `json:"visibility"`
 	Filename   string          `json:"filename"`
@@ -38,6 +39,7 @@ type ImportCloudInput struct {
 	ConnectionID string          `json:"connection_id"`
 	FileID       string          `json:"file_id"`
 	Preset       string          `json:"preset"`
+	Mode         string          `json:"mode"`
 	Namespace    string          `json:"namespace"`
 	Visibility   string          `json:"visibility"`
 	Filename     string          `json:"filename"`
@@ -48,7 +50,7 @@ type ImportCloudInput struct {
 // in the processing state.
 func (s *Service) ImportURL(ctx context.Context, projectID string, in ImportURLInput) (*AssetView, error) {
 	errs := map[string]string{}
-	c, err := s.validateCommon(ctx, projectID, in.Preset, in.Namespace, in.Visibility, in.Filename, in.Metadata, errs)
+	c, err := s.validateCommon(ctx, projectID, in.Preset, in.Mode, in.URL+" "+in.Filename, in.Namespace, in.Visibility, in.Filename, in.Metadata, errs)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +66,7 @@ func (s *Service) ImportURL(ctx context.Context, projectID string, in ImportURLI
 // ImportCloud queues a download of one file through rclone.
 func (s *Service) ImportCloud(ctx context.Context, projectID string, in ImportCloudInput) (*AssetView, error) {
 	errs := map[string]string{}
-	c, err := s.validateCommon(ctx, projectID, in.Preset, in.Namespace, in.Visibility, in.Filename, in.Metadata, errs)
+	c, err := s.validateCommon(ctx, projectID, in.Preset, in.Mode, in.FileID+" "+in.Filename, in.Namespace, in.Visibility, in.Filename, in.Metadata, errs)
 	if err != nil {
 		return nil, err
 	}
