@@ -26,6 +26,7 @@ import (
 	"github.com/UdjinStolboviy/kadr-madia/internal/auth"
 	"github.com/UdjinStolboviy/kadr-madia/internal/crypto"
 	"github.com/UdjinStolboviy/kadr-madia/internal/db"
+	"github.com/UdjinStolboviy/kadr-madia/internal/webhook"
 )
 
 const (
@@ -36,10 +37,11 @@ const (
 var testPepper = []byte("test-pepper-test-pepper-test-pepper")
 
 type env struct {
-	t      *testing.T
-	store  *db.Store
-	admin  http.Handler
-	public http.Handler
+	t        *testing.T
+	store    *db.Store
+	admin    http.Handler
+	public   http.Handler
+	webhooks *webhook.Dispatcher
 }
 
 func newEnv(t *testing.T, ui fstest.MapFS) *env {
@@ -70,13 +72,15 @@ func newEnv(t *testing.T, ui fstest.MapFS) *env {
 	set := metrics.NewSet()
 	cfg := Config{Store: store, Keyring: kr, Logger: log, Metrics: set, Dev: true, Pepper: testPepper,
 		Build: BuildInfo{Version: "test", Commit: "abc", StartedAt: time.Now()}, TmpDir: t.TempDir(),
-		FallbackHTML: []byte("<p>fallback</p>")}
+		FallbackHTML: []byte("<p>fallback</p>"),
+		Webhooks:     webhook.New(webhook.Config{Store: store, Keyring: kr, Logger: log})}
+	disp := cfg.Webhooks
 	if ui != nil {
 		cfg.UI = ui
 	}
 	pub := public.Handler(public.Config{Store: store, Logger: log, Metrics: set,
 		Verifier: &auth.KeyVerifier{Store: store, Pepper: testPepper}})
-	return &env{t: t, store: store, admin: New(cfg).Handler(), public: pub}
+	return &env{t: t, store: store, admin: New(cfg).Handler(), public: pub, webhooks: disp}
 }
 
 type client struct {
@@ -314,7 +318,13 @@ func TestProjectsKeysPresetsAndPublicPing(t *testing.T) {
 	if rec := ping(""); rec.Code != 401 {
 		t.Fatalf("ping no key: %d", rec.Code)
 	}
-	if rec := ping(secret[:len(secret)-1] + "x"); rec.Code != 401 {
+	// Flip the last character to a value guaranteed to differ from the original.
+	last := secret[len(secret)-1]
+	bad := byte('x')
+	if last == 'x' {
+		bad = 'y'
+	}
+	if rec := ping(secret[:len(secret)-1] + string(bad)); rec.Code != 401 {
 		t.Fatalf("ping bad key: %d", rec.Code)
 	}
 	req := httptest.NewRequest("GET", "/v1/assets", nil)

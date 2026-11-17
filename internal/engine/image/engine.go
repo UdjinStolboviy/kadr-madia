@@ -67,7 +67,7 @@ type Rendition struct {
 // Error codes surfaced to API clients as asset.failed error.code.
 const (
 	CodeUnsupportedMedia = "unsupported_media"
-	CodeTooLarge         = "too_large"      // bytes over limits.MaxInputBytes
+	CodeTooLarge         = "too_large"       // bytes over limits.MaxInputBytes
 	CodeTooManyPixels    = "too_many_pixels" // width*height over limits.MaxInputPixels
 	CodeCorrupt          = "corrupt"
 	CodeTimeout          = "timeout"

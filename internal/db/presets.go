@@ -68,3 +68,69 @@ func (s *Store) ListPresets(ctx context.Context, projectID string) ([]*Preset, e
 	}
 	return out, mapErr(rows.Err())
 }
+
+// GetPresetBySlug returns a non-archived preset of a project with the params
+// of its current version.
+func (s *Store) GetPresetBySlug(ctx context.Context, projectID, slug string) (*Preset, error) {
+	var p Preset
+	var desc sql.NullString
+	var params string
+	var archived sql.NullInt64
+	var created int64
+	err := s.r.QueryRowContext(ctx,
+		`SELECT p.id, p.project_id, p.slug, p.kind, p.description, p.current_version, v.params_json, p.archived_at, p.created_at
+		 FROM presets p JOIN preset_versions v ON v.preset_id = p.id AND v.version = p.current_version
+		 WHERE p.project_id = ? AND p.slug = ? AND p.archived_at IS NULL`, projectID, slug).
+		Scan(&p.ID, &p.ProjectID, &p.Slug, &p.Kind, &desc, &p.CurrentVersion, &params, &archived, &created)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	p.Description = desc.String
+	p.Params = json.RawMessage(params)
+	p.ArchivedAt = fromNullMs(archived)
+	p.CreatedAt = fromMs(created)
+	return &p, nil
+}
+
+// PresetVersion is one immutable version of a preset.
+type PresetVersion struct {
+	PresetID string
+	Slug     string
+	Kind     string
+	Version  int
+	Params   json.RawMessage
+}
+
+// GetPresetVersion returns a specific version of a preset (archived presets
+// included, so in-flight jobs keep working).
+func (s *Store) GetPresetVersion(ctx context.Context, presetID string, version int) (*PresetVersion, error) {
+	var v PresetVersion
+	var params string
+	err := s.r.QueryRowContext(ctx,
+		`SELECT p.id, p.slug, p.kind, v.version, v.params_json FROM presets p
+		 JOIN preset_versions v ON v.preset_id = p.id WHERE p.id = ? AND v.version = ?`, presetID, version).
+		Scan(&v.PresetID, &v.Slug, &v.Kind, &v.Version, &params)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	v.Params = json.RawMessage(params)
+	return &v, nil
+}
+
+// PresetSlugs returns id → slug for the presets of a project (archived included).
+func (s *Store) PresetSlugs(ctx context.Context, projectID string) (map[string]string, error) {
+	rows, err := s.r.QueryContext(ctx, `SELECT id, slug FROM presets WHERE project_id = ?`, projectID)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id, slug string
+		if err := rows.Scan(&id, &slug); err != nil {
+			return nil, mapErr(err)
+		}
+		out[id] = slug
+	}
+	return out, mapErr(rows.Err())
+}

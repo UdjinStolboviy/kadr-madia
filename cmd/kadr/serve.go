@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log/slog"
@@ -18,15 +19,30 @@ import (
 	"github.com/UdjinStolboviy/kadr-madia/internal/auth"
 	"github.com/UdjinStolboviy/kadr-madia/internal/capabilities"
 	"github.com/UdjinStolboviy/kadr-madia/internal/db"
+	"github.com/UdjinStolboviy/kadr-madia/internal/pipeline"
+	"github.com/UdjinStolboviy/kadr-madia/internal/queue"
 	"github.com/UdjinStolboviy/kadr-madia/internal/sdnotify"
+	"github.com/UdjinStolboviy/kadr-madia/internal/webhook"
 	"github.com/UdjinStolboviy/kadr-madia/web"
 )
 
-const shutdownTimeout = 30 * time.Second
+const (
+	shutdownTimeout = 30 * time.Second
+	// jobDrainTimeout is how long running jobs may finish after a shutdown
+	// signal before their leases are released back to the queue.
+	jobDrainTimeout     = 20 * time.Second
+	webhookDrainTimeout = 10 * time.Second
+)
 
 func cmdServe(ctx context.Context, args []string, stderr io.Writer) error {
-	if len(args) > 0 {
-		return fmt.Errorf("%w: serve takes no arguments", errUsage)
+	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fakeEngine := fs.Bool("fake-engine", false, "use a fake image engine that writes placeholder files (development without libvips)")
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("%w: %v", errUsage, err)
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("%w: serve takes no positional arguments", errUsage)
 	}
 	cfg, err := loadConfig()
 	if err != nil {
@@ -81,6 +97,22 @@ func cmdServe(ctx context.Context, args []string, stderr io.Writer) error {
 		return float64(free)
 	})
 
+	// Media pipeline: queue, image engine, webhooks.
+	q := queue.New(store, nil)
+	dispatcher := webhook.New(webhook.Config{Store: store, Keyring: keyring, Logger: log, Metrics: set})
+	svc := pipeline.New(pipeline.Config{
+		Store: store, Queue: q, Engine: newImageEngine(cfg.PoolImage, *fakeEngine, log), Keyring: keyring,
+		Logger: log, Metrics: set, TmpDir: cfg.TmpDir, Webhooks: dispatcher,
+	})
+	if err := svc.CleanStaleWorkDirs(ctx); err != nil {
+		log.Warn("clean stale work dirs", "err", err)
+	}
+	runner := queue.NewRunner(q, queue.RunnerConfig{
+		Pools:  map[string]int{queue.PoolImage: cfg.PoolImage, queue.PoolMaintenance: 1},
+		Logger: log, Metrics: set,
+	})
+	svc.Register(runner)
+
 	ui := web.Dist()
 	if ui == nil {
 		log.Warn("admin UI not embedded (web/dist missing at build time); serving fallback page")
@@ -88,10 +120,10 @@ func cmdServe(ctx context.Context, args []string, stderr io.Writer) error {
 	adminSrv := admin.New(admin.Config{
 		Store: store, Keyring: keyring, Logger: log, Metrics: set, Dev: cfg.Dev, Pepper: cfg.APIKeyPepper,
 		Build: admin.BuildInfo{Version: version, Commit: commit, StartedAt: started},
-		Caps:  caps, TmpDir: cfg.TmpDir, UI: ui, FallbackHTML: web.FallbackHTML(),
+		Caps:  caps, TmpDir: cfg.TmpDir, UI: ui, FallbackHTML: web.FallbackHTML(), Webhooks: dispatcher,
 	})
 	publicHandler := public.Handler(public.Config{
-		Store: store, Logger: log, Metrics: set,
+		Store: store, Logger: log, Metrics: set, Pipeline: svc, TmpDir: cfg.TmpDir,
 		Verifier: &auth.KeyVerifier{Store: store, Pepper: cfg.APIKeyPepper},
 	})
 
@@ -125,11 +157,17 @@ func cmdServe(ctx context.Context, args []string, stderr io.Writer) error {
 
 	bgCtx, bgCancel := context.WithCancel(ctx)
 	var bg sync.WaitGroup
-	bg.Add(1)
+	bg.Add(2)
 	go func() {
 		defer bg.Done()
 		sessionJanitor(bgCtx, store, log)
 	}()
+	go func() {
+		defer bg.Done()
+		q.RunScheduler(bgCtx, pipeline.Schedules(), log)
+	}()
+	runner.Start(ctx)
+	dispatcher.Start(ctx)
 
 	if ok, err := sdnotify.Notify(sdnotify.Ready); err != nil {
 		log.Warn("sd_notify READY failed", "err", err)
@@ -160,7 +198,14 @@ func cmdServe(ctx context.Context, args []string, stderr io.Writer) error {
 		}(s)
 	}
 	wg.Wait()
+	// HTTP is drained; stop claiming jobs, let running ones finish (their
+	// leases are released after jobDrainTimeout), then stop webhooks.
 	bgCancel()
+	var drain sync.WaitGroup
+	drain.Add(2)
+	go func() { defer drain.Done(); runner.Shutdown(jobDrainTimeout) }()
+	go func() { defer drain.Done(); dispatcher.Shutdown(webhookDrainTimeout) }()
+	drain.Wait()
 	bg.Wait()
 	log.Info("kadr stopped")
 	return runErr

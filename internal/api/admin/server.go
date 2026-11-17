@@ -25,6 +25,7 @@ import (
 	"github.com/UdjinStolboviy/kadr-madia/internal/db"
 	"github.com/UdjinStolboviy/kadr-madia/internal/observability"
 	"github.com/UdjinStolboviy/kadr-madia/internal/storage"
+	"github.com/UdjinStolboviy/kadr-madia/internal/webhook"
 )
 
 // BuildInfo describes the running binary.
@@ -54,6 +55,9 @@ type Config struct {
 	NewDriver func(storage.Config) (storage.Driver, error)
 	// HTTPClient is used by storage tests for presigned PUT and public GET.
 	HTTPClient *http.Client
+	// Webhooks delivers test events and wakes up on manual retries
+	// (optional; the test endpoint returns 503 without it).
+	Webhooks *webhook.Dispatcher
 	// Now overrides the clock (tests).
 	Now func() time.Time
 }
@@ -162,6 +166,12 @@ func (s *Server) apiRouter() http.Handler {
 		r.Post("/projects/{id}/api-keys", s.handleCreateAPIKey)
 		r.Get("/projects/{id}/presets", s.handleListPresets)
 		r.Delete("/api-keys/{key_id}", s.handleRevokeAPIKey)
+		r.Get("/projects/{id}/webhooks", s.handleListWebhooks)
+		r.Post("/projects/{id}/webhooks", s.handleCreateWebhook)
+		r.Delete("/webhooks/{id}", s.handleDeleteWebhook)
+		r.Post("/webhooks/{id}/test", s.handleTestWebhook)
+		r.Get("/projects/{id}/deliveries", s.handleListDeliveries)
+		r.Post("/deliveries/{id}/retry", s.handleRetryDelivery)
 
 		r.Get("/storage-profiles", s.handleListStorageProfiles)
 		r.Post("/storage-profiles", s.handleCreateStorageProfile)

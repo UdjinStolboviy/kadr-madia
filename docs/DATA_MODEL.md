@@ -1,6 +1,6 @@
 # Data Model
 
-Full schema: [`internal/db/migrations/0001_init.sql`](../internal/db/migrations/0001_init.sql).
+Full schema: [`internal/db/migrations/0001_init.sql`](../internal/db/migrations/0001_init.sql) plus [`0002_images.sql`](../internal/db/migrations/0002_images.sql) (M1: `assets.preset_id/preset_version`, `namespaces.quota_alert_level`, indexes).
 
 ## Diagram
 
@@ -55,4 +55,4 @@ kadr-system/litestream/kadr.db/…                       # database replica
 - Short transactions; no network calls (R2, webhooks) inside a transaction.
 - Queries live in one place per aggregate, ready for `sqlc`; the `Store` interface hides the dialect to keep the Postgres path open (S3 in the ROADMAP).
 - Nightly `PRAGMA optimize` and `wal_checkpoint(TRUNCATE)`; `VACUUM INTO` for snapshots.
-- Retention: `events` 30 days, `webhook_deliveries` 30 days, `jobs` (succeeded) 7 days, `idempotency_keys` 24 h, `audit_log` 1 year.
+- Retention: `events` 30 days, `webhook_deliveries` 30 days, `jobs` (succeeded/cancelled) 7 days, `jobs` (dead) 30 days, `idempotency_keys` 24 h, `audit_log` 1 year.

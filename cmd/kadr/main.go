@@ -27,7 +27,7 @@ var (
 const usage = `Usage: kadr <command> [arguments]
 
 Commands:
-  serve                       run the API and admin servers
+  serve [--fake-engine]       run the API and admin servers (--fake-engine: no libvips needed)
   migrate up                  apply pending database migrations
   migrate status              list migrations and their state
   admin create --email EMAIL  create an administrator (password prompted, or --password-stdin)

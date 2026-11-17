@@ -1,11 +1,13 @@
 // Package public implements the LAN-only API listener: health, metrics and
-// the /v1 project API (M1+). In M0 /v1 only offers GET /v1/ping to verify
-// API keys; every other /v1 route returns 501.
+// the /v1 project API (docs/API.md, api/openapi.yaml).
 package public
 
 import (
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/go-chi/chi/v5"
@@ -14,6 +16,7 @@ import (
 	"github.com/UdjinStolboviy/kadr-madia/internal/auth"
 	"github.com/UdjinStolboviy/kadr-madia/internal/db"
 	"github.com/UdjinStolboviy/kadr-madia/internal/observability"
+	"github.com/UdjinStolboviy/kadr-madia/internal/pipeline"
 )
 
 // Config holds the dependencies of the public server.
@@ -22,13 +25,28 @@ type Config struct {
 	Verifier *auth.KeyVerifier
 	Logger   *slog.Logger
 	Metrics  *metrics.Set
+	// Pipeline serves the media endpoints. When nil only /v1/ping is
+	// available and every other /v1 route returns 501.
+	Pipeline *pipeline.Service
+	// TmpDir is used to spool large idempotent request bodies.
+	TmpDir string
+	Now    func() time.Time
 }
+
+// maxMultipartOverhead is allowed on top of the file in POST /v1/assets.
+const maxMultipartOverhead = 1 << 20
 
 // Handler builds the public listener handler.
 func Handler(cfg Config) http.Handler {
 	log := cfg.Logger
 	if log == nil {
 		log = slog.Default()
+	}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
+	if cfg.TmpDir == "" {
+		cfg.TmpDir = os.TempDir()
 	}
 	r := chi.NewRouter()
 	r.Use(observability.RequestID)
@@ -42,6 +60,14 @@ func Handler(cfg Config) http.Handler {
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(auth.APIKeyMiddleware(cfg.Verifier, log))
 		r.Get("/ping", handlePing)
+		if cfg.Pipeline != nil {
+			h := &handlers{svc: cfg.Pipeline, log: log}
+			spool := filepath.Join(cfg.TmpDir, "spool")
+			r.Group(func(r chi.Router) {
+				r.Use(idempotency(cfg.Store, spool, pipeline.MaxServerUploadBytes+maxMultipartOverhead, cfg.Now, log))
+				h.routes(r)
+			})
+		}
 		r.NotFound(notImplemented)
 		r.MethodNotAllowed(notImplemented)
 	})

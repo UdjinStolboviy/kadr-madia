@@ -92,3 +92,31 @@ Secret format: `kd_{live|test}_{8 base62 chars — prefix}_{32 base62 chars}`; t
 ## Audit (M0 — read-only)
 
 `GET /admin/api/audit?limit=50&cursor=` → `200 { items: [{ id, actor_type, actor_id, project_id, action, target, details, ip, created_at }], next_cursor }`
+
+## Webhooks (M1)
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| GET | `/admin/api/projects/{id}/webhooks` | — | `200 { items: WebhookEndpoint[] }` |
+| POST | `/admin/api/projects/{id}/webhooks` | `{ url, events? }` | `201 { webhook: WebhookEndpoint, secret }` — `secret` is shown **once** · `409 limit_reached` (20 endpoints per project) |
+| DELETE | `/admin/api/webhooks/{id}` | — | `204` (its deliveries are deleted too) |
+| POST | `/admin/api/webhooks/{id}/test` | — | `200 Delivery` — records a `webhook.test` event with one delivery to this endpoint and attempts it synchronously |
+
+`WebhookEndpoint`: `{ id, project_id, url, events: string[], disabled: boolean, created_at }`
+
+`url`: absolute `http(s)` URL without credentials (receivers usually live on the private network). `events`: exact types (`asset.ready`, `asset.failed`, `asset.updated`, `asset.deleted`, `upload.expired`, `quota.warning`, `quota.exceeded`, `namespace.purged`), prefix wildcards (`asset.*`, `upload.*`, `quota.*`, `namespace.*`) or `*`; default `["*"]`.
+
+Secret format: `whsec_<base64 of 32 random bytes>`. It is stored encrypted (`webhook_endpoints.secret_enc`, AES-256-GCM envelope bound to the endpoint id). Requests follow [Standard Webhooks](https://www.standardwebhooks.com/): headers `webhook-id` (the event id `evt_…`), `webhook-timestamp` (unix seconds of the attempt) and `webhook-signature: v1,<base64(HMAC-SHA256(key, "{webhook-id}.{webhook-timestamp}.{body}"))>`, where `key` is the base64-decoded part after `whsec_`. Timeout 10 s; any non-2xx response (redirects are not followed) is a failure. Retries after 10 s, 30 s, 2 min, 10 min, 30 min, 1 h, 3 h, 6 h, 12 h; after the 10th failed attempt the delivery is `dead`.
+
+## Webhook deliveries (M1)
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| GET | `/admin/api/projects/{id}/deliveries?status=&limit=50&cursor=` | — | `200 { items: Delivery[], next_cursor }` (newest event first) |
+| POST | `/admin/api/deliveries/{id}/retry` | — | `200 Delivery` — resets the attempt counter and schedules an immediate attempt · `409 in_progress` while an attempt is running |
+
+`status`: `pending` · `delivering` · `delivered` · `dead`.
+
+`Delivery`: `{ id, event_id, event_type, endpoint_id, endpoint_url, status, attempts, next_attempt_at (pending only), last_status_code, last_error, last_duration_ms, delivered_at, created_at }` (`created_at` is the event time).
+
+Audit actions: `webhook.create`, `webhook.delete`, `webhook.test`, `delivery.retry`.

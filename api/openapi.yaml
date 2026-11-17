@@ -1,0 +1,916 @@
+openapi: 3.1.0
+info:
+  title: Kadr API
+  version: 1.0.0-m1
+  summary: Self-hosted media platform — public project API (/v1).
+  description: |
+    LAN-only API used by product backends. Media bytes never pass through it
+    for browser uploads: clients PUT directly to object storage with a
+    presigned ticket, then call `complete`.
+
+    - Authentication: `Authorization: Bearer kd_live_…` (or `kd_test_…`).
+    - JSON with `snake_case` fields; timestamps are RFC 3339 in UTC.
+    - Errors are RFC 9457 `application/problem+json` with a machine `code`.
+    - Every POST accepts `Idempotency-Key` (kept 24 h). Only 2xx responses are
+      stored and replayed (with `Idempotent-Replayed: true`); errors release
+      the key so the request can be retried. Reusing a key with a different
+      method, path, query or body returns `422 idempotency_mismatch`; a key
+      whose first request is still running returns `409 idempotency_in_progress`.
+      The request hash covers the raw body, so a retried multipart request
+      must resend identical bytes (same boundary).
+    - IDs are prefixed ULIDs: `upl_…`, `ast_…`, `blb_…`, `evt_…`.
+  license:
+    name: Proprietary
+servers:
+  - url: http://kadr.internal:8080
+    description: Private network only
+security:
+  - apiKey: []
+tags:
+  - name: uploads
+  - name: assets
+  - name: presets
+  - name: namespaces
+  - name: system
+
+paths:
+  /v1/ping:
+    get:
+      tags: [system]
+      operationId: ping
+      summary: Verify an API key
+      responses:
+        "200":
+          description: The key is valid.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, project, project_id, environment, key_id, scopes]
+                properties:
+                  ok: { type: boolean, const: true }
+                  project: { type: string, examples: [acme] }
+                  project_id: { type: string }
+                  environment: { type: string, enum: [live, test] }
+                  key_id: { type: string }
+                  scopes: { type: array, items: { $ref: "#/components/schemas/Scope" } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/uploads:
+    post:
+      tags: [uploads]
+      operationId: createUpload
+      summary: Create an upload ticket
+      description: |
+        Validates the request against the preset, reserves `size` bytes of the
+        project and namespace quota and returns a presigned PUT URL valid for
+        15 minutes. `Content-Type` and `Content-Length` are part of the
+        signature: the client must send exactly the returned `headers`.
+
+        When `sha256` matches a ready blob within the same project, visibility
+        and preset version, a new ready asset referencing it is created and
+        returned with `200` — no upload is needed.
+
+        Scope: `uploads:write`. Files over 64 MB need multipart uploads, which
+        arrive in M2 (`413 too_large` until then).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateUploadRequest" }
+      responses:
+        "201":
+          description: Upload required.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UploadTicket" }
+        "200":
+          description: Deduplicated — the content is already stored.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [asset]
+                properties:
+                  asset: { $ref: "#/components/schemas/Asset" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "402": { $ref: "#/components/responses/QuotaExceeded" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/PresetNotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMedia" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /v1/uploads/{upload_id}/complete:
+    post:
+      tags: [uploads]
+      operationId: completeUpload
+      summary: Finish an upload and start processing
+      description: |
+        Verifies the uploaded object (HEAD, exact size), creates the asset and
+        enqueues processing, then waits up to `wait` for the asset to become
+        `ready` or `failed`. If processing takes longer the asset is returned
+        with `status: processing` and an `asset.ready` / `asset.failed`
+        webhook follows. Idempotent: repeated calls return the same asset.
+
+        Scope: `uploads:write`.
+      parameters:
+        - $ref: "#/components/parameters/UploadId"
+        - $ref: "#/components/parameters/Wait"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The asset (ready, failed or still processing).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Asset" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`upload_incomplete` (the object is not uploaded yet), `upload_aborted`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "410":
+          description: "`upload_expired` — the ticket expired without a file."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "422":
+          description: "`size_mismatch` (the object size differs from the ticket; the upload is failed and its quota released) or `validation_failed` (bad `wait`)."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "502":
+          description: "`storage_error` — the uploaded object could not be verified."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /v1/uploads/{upload_id}:
+    delete:
+      tags: [uploads]
+      operationId: abortUpload
+      summary: Cancel a pending upload
+      description: Deletes the temporary object and releases the quota reservation. Cancelling twice is a no-op. Scope `uploads:write`.
+      parameters:
+        - $ref: "#/components/parameters/UploadId"
+      responses:
+        "204": { description: Cancelled. }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`upload_not_pending` — complete was already called."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /v1/assets:
+    post:
+      tags: [assets]
+      operationId: createAsset
+      summary: Server-side upload (multipart/form-data, ≤ 25 MB)
+      description: |
+        For backend processes on the private network: the file is sent to
+        Kadr directly, staged on local disk and processed through the same
+        queue as ticket uploads. Parts may arrive in any order.
+        Deduplicated content returns a ready asset immediately.
+
+        Scope: `uploads:write`.
+      parameters:
+        - $ref: "#/components/parameters/Wait"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [preset, namespace, visibility, file]
+              properties:
+                preset: { type: string, examples: [doc-lite] }
+                namespace: { $ref: "#/components/schemas/Namespace" }
+                visibility: { $ref: "#/components/schemas/Visibility" }
+                metadata:
+                  type: string
+                  description: JSON object (≤ 16 KB) serialized as a string.
+                  examples: ['{"entity":"receipt","entity_id":"rcp_123"}']
+                filename:
+                  type: string
+                  description: Overrides the file name of the `file` part.
+                file:
+                  type: string
+                  contentMediaType: application/octet-stream
+            encoding:
+              file:
+                contentType: image/*
+      responses:
+        "201":
+          description: The new asset (ready, failed or still processing).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Asset" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "402": { $ref: "#/components/responses/QuotaExceeded" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/PresetNotFound" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMedia" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+    get:
+      tags: [assets]
+      operationId: listAssets
+      summary: List assets
+      description: Newest first, cursor-paginated. Deleted assets are never listed. Scope `assets:read`.
+      parameters:
+        - name: namespace
+          in: query
+          schema: { $ref: "#/components/schemas/Namespace" }
+        - name: kind
+          in: query
+          schema: { $ref: "#/components/schemas/Kind" }
+        - name: status
+          in: query
+          schema: { type: string, enum: [processing, ready, failed] }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Asset" }
+                  next_cursor:
+                    type: [string, "null"]
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /v1/assets/{asset_id}:
+    get:
+      tags: [assets]
+      operationId: getAsset
+      summary: Get an asset
+      description: Scope `assets:read`. Deleted assets return 404.
+      parameters:
+        - $ref: "#/components/parameters/AssetId"
+      responses:
+        "200":
+          description: The asset.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Asset" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [assets]
+      operationId: updateAsset
+      summary: Update asset metadata
+      description: |
+        Replaces `metadata` and emits `asset.updated`. Changing `visibility`
+        (a cross-bucket copy) arrives in M3 and returns `501 not_implemented`
+        until then; sending the current visibility is accepted.
+        Scope `assets:write`.
+      parameters:
+        - $ref: "#/components/parameters/AssetId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                metadata: { $ref: "#/components/schemas/Metadata" }
+                visibility: { $ref: "#/components/schemas/Visibility" }
+      responses:
+        "200":
+          description: The updated asset.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Asset" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "501":
+          description: "`not_implemented` — visibility changes."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+    delete:
+      tags: [assets]
+      operationId: deleteAsset
+      summary: Delete an asset
+      description: |
+        Soft-deletes the asset, releases its quota and emits `asset.deleted`.
+        Stored files are removed by refcount GC once no asset references the
+        blob. Processing assets cannot be deleted (`409 asset_processing`).
+        Scope `assets:delete`.
+      parameters:
+        - $ref: "#/components/parameters/AssetId"
+      responses:
+        "204": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/presets:
+    get:
+      tags: [presets]
+      operationId: listPresets
+      summary: List presets
+      description: Active presets of the project with the parameters of their current version. Any valid key.
+      responses:
+        "200":
+          description: Presets.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Preset" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+
+  /v1/presets/{slug}:
+    get:
+      tags: [presets]
+      operationId: getPreset
+      summary: Get a preset
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string, examples: [photo-lite] }
+      responses:
+        "200":
+          description: The preset.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Preset" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/PresetNotFound" }
+
+  /v1/namespaces/{namespace}/usage:
+    get:
+      tags: [namespaces]
+      operationId: getNamespaceUsage
+      summary: Namespace usage and limits
+      description: Unknown namespaces report zero usage. Scope `assets:read` or `namespaces:admin`.
+      parameters:
+        - $ref: "#/components/parameters/NamespacePath"
+      responses:
+        "200":
+          description: Usage.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NamespaceUsage" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /v1/namespaces/{namespace}/quota:
+    put:
+      tags: [namespaces]
+      operationId: setNamespaceQuota
+      summary: Set namespace limits
+      description: |
+        Replaces all limits (`null` = unlimited). Usage counts the stored bytes
+        of the namespace's assets (renditions; a deduplicated asset counts its
+        blob again) plus reservations of uploads in flight. Scope `namespaces:admin`.
+      parameters:
+        - $ref: "#/components/parameters/NamespacePath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuotaInput" }
+      responses:
+        "200":
+          description: Usage after the change.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NamespaceUsage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+webhooks:
+  asset.ready:
+    post:
+      summary: Processing finished
+      operationId: onAssetReady
+      parameters: &webhookHeaders
+        - { $ref: "#/components/parameters/WebhookId" }
+        - { $ref: "#/components/parameters/WebhookTimestamp" }
+        - { $ref: "#/components/parameters/WebhookSignature" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AssetReadyEvent" }
+      responses: &webhookResponses
+        "2XX": { description: Accepted. Any other status (or no answer within 10 s) is retried. }
+  asset.failed:
+    post:
+      summary: Processing failed
+      operationId: onAssetFailed
+      parameters: *webhookHeaders
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AssetFailedEvent" }
+      responses: *webhookResponses
+  asset.updated:
+    post:
+      summary: Asset metadata (later also visibility) changed
+      operationId: onAssetUpdated
+      parameters: *webhookHeaders
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AssetUpdatedEvent" }
+      responses: *webhookResponses
+  asset.deleted:
+    post:
+      summary: Asset deleted
+      operationId: onAssetDeleted
+      parameters: *webhookHeaders
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AssetDeletedEvent" }
+      responses: *webhookResponses
+  upload.expired:
+    post:
+      summary: A ticket expired without a file
+      operationId: onUploadExpired
+      parameters: *webhookHeaders
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UploadExpiredEvent" }
+      responses: *webhookResponses
+  quota.warning:
+    post:
+      summary: Namespace usage reached 80 % of its byte quota (once per crossing)
+      operationId: onQuotaWarning
+      parameters: *webhookHeaders
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuotaEvent" }
+      responses: *webhookResponses
+  quota.exceeded:
+    post:
+      summary: Namespace usage reached 100 % of its byte quota (once per crossing)
+      operationId: onQuotaExceeded
+      parameters: *webhookHeaders
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuotaEvent" }
+      responses: *webhookResponses
+
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: "kd_{live|test}_{8 base62}_{32 base62}"
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: 1–255 printable ASCII characters, unique per logical request.
+      schema: { type: string, minLength: 1, maxLength: 255 }
+    UploadId:
+      name: upload_id
+      in: path
+      required: true
+      schema: { type: string, pattern: "^upl_[0-9a-z]{26}$" }
+    AssetId:
+      name: asset_id
+      in: path
+      required: true
+      schema: { type: string, pattern: "^ast_[0-9a-z]{26}$" }
+    NamespacePath:
+      name: namespace
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/Namespace" }
+    Wait:
+      name: wait
+      in: query
+      required: false
+      description: How long to wait for processing — a duration (`5s`, `1500ms`) or seconds (`5`). Default `0`, capped at `30s`.
+      schema: { type: string, examples: [5s] }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    Cursor:
+      name: cursor
+      in: query
+      description: The `next_cursor` of the previous page.
+      schema: { type: string }
+    WebhookId:
+      name: webhook-id
+      in: header
+      required: true
+      description: The event id (`evt_…`). Identical across retries — deduplicate on it.
+      schema: { type: string }
+    WebhookTimestamp:
+      name: webhook-timestamp
+      in: header
+      required: true
+      description: Unix seconds of the attempt. Reject values more than 5 minutes off.
+      schema: { type: string, pattern: "^[0-9]+$" }
+    WebhookSignature:
+      name: webhook-signature
+      in: header
+      required: true
+      description: |
+        Space-separated list of `v1,<base64>` signatures, where the value is
+        HMAC-SHA256 over `{webhook-id}.{webhook-timestamp}.{raw body}` keyed
+        with the base64-decoded part of the endpoint secret after `whsec_`
+        (Standard Webhooks).
+      schema: { type: string }
+
+  responses:
+    BadRequest:
+      description: "`invalid_json`, `invalid_multipart`, `invalid_idempotency_key`."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Unauthenticated:
+      description: "`unauthenticated` — missing or invalid API key."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Forbidden:
+      description: "`insufficient_scope` or `project_disabled`."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotFound:
+      description: "`not_found`."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    PresetNotFound:
+      description: "`preset_not_found`."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Conflict:
+      description: "`asset_processing`, `storage_not_configured`, `idempotency_in_progress`."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    QuotaExceeded:
+      description: "`quota_exceeded` — the project or namespace quota would be exceeded."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    TooLarge:
+      description: "`too_large` — over 64 MB (multipart arrives in M2), over the preset's `maxInputBytes`, or over 25 MB for server-side uploads."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    UnsupportedMedia:
+      description: "`unsupported_media` — content type not accepted by the preset, or a non-image preset."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    ValidationFailed:
+      description: "`validation_failed` with per-field `errors`, or `idempotency_mismatch`."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+
+  schemas:
+    Problem:
+      type: object
+      description: RFC 9457 problem details.
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, examples: ["about:blank"] }
+        title: { type: string, examples: [Payment Required] }
+        status: { type: integer }
+        code:
+          type: string
+          examples: [quota_exceeded]
+        detail: { type: string }
+        errors:
+          type: object
+          additionalProperties: { type: string }
+          description: Field → message, for `validation_failed`.
+
+    Scope:
+      type: string
+      enum: ["uploads:write", "assets:read", "assets:write", "assets:delete", "urls:sign", "namespaces:admin", "imports:write"]
+    Namespace:
+      type: string
+      description: Opaque id chosen by the product (organization, household, user …).
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$"
+      examples: [org_8f2c]
+    Visibility:
+      type: string
+      enum: [public, private]
+    Kind:
+      type: string
+      enum: [image, video]
+    Metadata:
+      type: object
+      description: Free-form JSON object stored with the asset (≤ 16 KB).
+      additionalProperties: true
+      examples: [{ entity: listing, entity_id: lst_77 }]
+
+    CreateUploadRequest:
+      type: object
+      required: [preset, namespace, visibility, content_type, size]
+      properties:
+        preset: { type: string, examples: [photo-lite] }
+        namespace: { $ref: "#/components/schemas/Namespace" }
+        visibility: { $ref: "#/components/schemas/Visibility" }
+        filename: { type: string, maxLength: 255, examples: [IMG_2231.HEIC] }
+        content_type:
+          type: string
+          description: Must map to a format in the preset's `limits.accept` (jpeg, png, webp, heic, avif, gif, tiff).
+          examples: [image/jpeg]
+        size:
+          type: integer
+          minimum: 1
+          maximum: 67108864
+          description: Exact size in bytes; signed into the PUT.
+        sha256:
+          type: string
+          pattern: "^[0-9a-fA-F]{64}$"
+          description: Optional hex SHA-256 of the file. Enables dedup and is verified after download.
+        metadata: { $ref: "#/components/schemas/Metadata" }
+
+    UploadTicket:
+      type: object
+      required: [upload_id, method, url, headers, expires_at]
+      properties:
+        upload_id: { type: string, examples: [upl_01jd8x3k2m4n5p6q7r8s9t0v1w] }
+        method: { type: string, enum: [PUT] }
+        url:
+          type: string
+          format: uri
+          description: Presigned URL of `tmp/{project}/{upload_id}` in the private bucket.
+        headers:
+          type: object
+          description: Headers the client must send with the PUT (at least Content-Type and Content-Length).
+          additionalProperties: { type: string }
+          examples: [{ Content-Type: image/jpeg, Content-Length: "384211" }]
+        expires_at: { type: string, format: date-time }
+
+    Asset:
+      type: object
+      required: [id, status, kind, namespace, visibility, preset, preset_version, original, renditions, placeholder,
+        duration_sec, poster, metadata, savings_ratio, created_at, ready_at]
+      properties:
+        id: { type: string, examples: [ast_01jd8x3k2m4n5p6q7r8s9t0v1w] }
+        status: { type: string, enum: [processing, ready, failed] }
+        kind: { $ref: "#/components/schemas/Kind" }
+        namespace: { $ref: "#/components/schemas/Namespace" }
+        visibility: { $ref: "#/components/schemas/Visibility" }
+        preset: { type: string, examples: [photo-lite] }
+        preset_version: { type: integer, minimum: 1 }
+        original: { $ref: "#/components/schemas/Original" }
+        renditions:
+          type: array
+          description: Empty unless `status` is `ready`.
+          items: { $ref: "#/components/schemas/Rendition" }
+        placeholder:
+          oneOf:
+            - $ref: "#/components/schemas/Placeholder"
+            - type: "null"
+        duration_sec: { type: [number, "null"], description: Video only. }
+        poster:
+          description: Video only (M2).
+          oneOf:
+            - $ref: "#/components/schemas/Rendition"
+            - type: "null"
+        metadata: { $ref: "#/components/schemas/Metadata" }
+        savings_ratio:
+          type: [number, "null"]
+          description: 1 − (sum of rendition bytes / original bytes), rounded to 3 decimals.
+          examples: [0.991]
+        error:
+          $ref: "#/components/schemas/AssetError"
+        created_at: { type: string, format: date-time }
+        ready_at: { type: [string, "null"], format: date-time }
+
+    Original:
+      type: object
+      required: [filename, content_type, bytes, width, height]
+      properties:
+        filename: { type: [string, "null"] }
+        content_type:
+          type: [string, "null"]
+          description: Detected from magic bytes once processed; the declared type before.
+        bytes: { type: integer }
+        width: { type: [integer, "null"] }
+        height: { type: [integer, "null"] }
+
+    Rendition:
+      type: object
+      description: |
+        Public renditions carry `url` (the storage profile's public base URL +
+        key, immutable). Private renditions carry `key` instead, to be signed
+        by the SDK (`signUrl`) or `POST /v1/signed-urls` (M3).
+      required: [name, format, bytes, width, height]
+      properties:
+        name: { type: string, examples: [main] }
+        format: { type: string, examples: [avif, webp] }
+        bytes: { type: integer }
+        width: { type: [integer, "null"] }
+        height: { type: [integer, "null"] }
+        url:
+          type: string
+          format: uri
+          examples: ["https://cdn.example.com/acme/blb_01jd8x3k2m4n5p6q7r8s9t0v1w/main.avif"]
+        key:
+          type: string
+          examples: [acme/blb_01jd8x3k2m4n5p6q7r8s9t0v1w/main.avif]
+
+    Placeholder:
+      type: object
+      required: [thumbhash, dominant_color]
+      properties:
+        thumbhash:
+          type: [string, "null"]
+          description: Standard base64 of the ThumbHash bytes.
+          contentEncoding: base64
+        dominant_color:
+          type: [string, "null"]
+          pattern: "^#[0-9a-f]{6}$"
+
+    AssetError:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          description: Present when `status` is `failed`.
+          enum: [unsupported_media, too_large, too_many_pixels, corrupt, timeout, engine_failure, source_missing, checksum_mismatch, internal]
+        detail: { type: string }
+
+    Preset:
+      type: object
+      required: [slug, kind, description, version, params, created_at]
+      properties:
+        slug: { type: string }
+        kind: { $ref: "#/components/schemas/Kind" }
+        description: { type: string }
+        version: { type: integer, description: Current (immutable) version. }
+        params:
+          type: object
+          description: Preset parameters (docs/PIPELINES.md §1).
+          additionalProperties: true
+        created_at: { type: string, format: date-time }
+
+    NamespaceUsage:
+      type: object
+      required: [namespace, used_bytes, reserved_bytes, asset_count, video_sec_month, quota_bytes, quota_assets, quota_video_sec_month]
+      properties:
+        namespace: { $ref: "#/components/schemas/Namespace" }
+        used_bytes: { type: integer }
+        reserved_bytes: { type: integer, description: Declared bytes of uploads in flight. }
+        asset_count: { type: integer }
+        video_sec_month: { type: integer, description: Video seconds processed this calendar month (UTC). }
+        quota_bytes: { type: [integer, "null"] }
+        quota_assets: { type: [integer, "null"] }
+        quota_video_sec_month: { type: [integer, "null"] }
+
+    QuotaInput:
+      type: object
+      properties:
+        quota_bytes: { type: [integer, "null"], minimum: 0 }
+        quota_assets: { type: [integer, "null"], minimum: 0 }
+        quota_video_sec_month: { type: [integer, "null"], minimum: 0 }
+
+    EventEnvelope:
+      type: object
+      required: [type, timestamp, data]
+      properties:
+        type: { type: string }
+        timestamp: { type: string, format: date-time }
+        data: { type: object }
+
+    AssetReadyEvent:
+      allOf:
+        - $ref: "#/components/schemas/EventEnvelope"
+        - type: object
+          properties:
+            type: { const: asset.ready }
+            data:
+              type: object
+              required: [asset, metadata]
+              properties:
+                asset: { $ref: "#/components/schemas/Asset" }
+                metadata: { $ref: "#/components/schemas/Metadata" }
+    AssetFailedEvent:
+      allOf:
+        - $ref: "#/components/schemas/EventEnvelope"
+        - type: object
+          properties:
+            type: { const: asset.failed }
+            data:
+              type: object
+              required: [asset, metadata, error]
+              properties:
+                asset: { $ref: "#/components/schemas/Asset" }
+                metadata: { $ref: "#/components/schemas/Metadata" }
+                error: { $ref: "#/components/schemas/AssetError" }
+    AssetUpdatedEvent:
+      allOf:
+        - $ref: "#/components/schemas/EventEnvelope"
+        - type: object
+          properties:
+            type: { const: asset.updated }
+            data:
+              type: object
+              required: [asset, metadata, changes]
+              properties:
+                asset: { $ref: "#/components/schemas/Asset" }
+                metadata: { $ref: "#/components/schemas/Metadata" }
+                changes:
+                  type: array
+                  items: { type: string, enum: [metadata, visibility] }
+    AssetDeletedEvent:
+      allOf:
+        - $ref: "#/components/schemas/EventEnvelope"
+        - type: object
+          properties:
+            type: { const: asset.deleted }
+            data:
+              type: object
+              required: [asset, metadata]
+              properties:
+                asset:
+                  description: The asset as it was, with `status` set to `deleted`.
+                  $ref: "#/components/schemas/Asset"
+                metadata: { $ref: "#/components/schemas/Metadata" }
+    UploadExpiredEvent:
+      allOf:
+        - $ref: "#/components/schemas/EventEnvelope"
+        - type: object
+          properties:
+            type: { const: upload.expired }
+            data:
+              type: object
+              required: [upload_id, namespace, preset, visibility, filename, expires_at, metadata]
+              properties:
+                upload_id: { type: string }
+                namespace: { $ref: "#/components/schemas/Namespace" }
+                preset: { type: string }
+                visibility: { $ref: "#/components/schemas/Visibility" }
+                filename: { type: [string, "null"] }
+                expires_at: { type: string, format: date-time }
+                metadata: { $ref: "#/components/schemas/Metadata" }
+    QuotaEvent:
+      allOf:
+        - $ref: "#/components/schemas/EventEnvelope"
+        - type: object
+          properties:
+            type: { enum: [quota.warning, quota.exceeded] }
+            data:
+              type: object
+              required: [namespace, used_bytes, quota_bytes, ratio]
+              properties:
+                namespace: { $ref: "#/components/schemas/Namespace" }
+                used_bytes: { type: integer }
+                quota_bytes: { type: integer }
+                ratio: { type: number, description: used / quota, 3 decimals (truncated). }
