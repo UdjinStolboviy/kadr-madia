@@ -77,3 +77,10 @@ func (s *Store) SetAdminTOTP(ctx context.Context, id string, secretEnc []byte, e
 	}
 	return nil
 }
+
+// CountAdmins returns the number of administrators.
+func (s *Store) CountAdmins(ctx context.Context) (int, error) {
+	var n int
+	err := s.r.QueryRowContext(ctx, `SELECT count(*) FROM admins`).Scan(&n)
+	return n, mapErr(err)
+}

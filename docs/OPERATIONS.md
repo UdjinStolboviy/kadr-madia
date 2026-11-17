@@ -142,3 +142,20 @@ Migrations are forward-only and backward compatible with the previous version (e
 | Scale | 5,000,000 | 50,000 | ~250 → needs S2 workers / VAAPI | ~100 GB + ~100 GB → ~$3/month |
 
 Proxmox uplink: every video pulls its source from R2 (50–150 MB) and pushes ~2–3 MB back; 5,000 videos/month ≈ 500 GB of inbound traffic on the home/VPS connection — account for this in the ISP plan.
+
+
+## First administrator (generated on deploy)
+
+`make deploy HOST=… VERSION=… [ADMIN_URL=https://admin.example.com] [ADMIN_EMAIL=you@example.com]` runs `kadr admin bootstrap` after the migrations. On the **first** deploy (no administrator exists) it creates an `owner` with a random 24-character password and prints a box in the deploy console:
+
+```
+================================================================
+  KADR ADMIN CONSOLE — FIRST LOGIN (shown once, save it now)
+================================================================
+  URL:       https://admin.example.com
+  Email:     admin@kadr.local
+  Password:  …
+================================================================
+```
+
+The password is shown only there (it is hashed with argon2id and not stored or logged anywhere else). Later deploys print `administrator already exists; no credentials generated`. The default email is `admin@kadr.local`; override with `ADMIN_EMAIL` / `KADR_BOOTSTRAP_ADMIN_EMAIL`. Lost the password? Create another owner with `kadr admin create --email … --password-stdin` on the host. Change the password and enable TOTP or a passkey after the first sign-in.

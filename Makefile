@@ -49,11 +49,11 @@ release: ## Build a versioned artifact: make release VERSION=0.3.0
 	cd dist && shasum -a 256 kadr-$(VERSION)-linux-amd64 > kadr-$(VERSION)-linux-amd64.sha256
 	@echo "release artifacts in dist/"
 
-deploy: ## Deploy dist/kadr-$(VERSION)-linux-amd64: make deploy HOST=kadr.internal VERSION=0.3.0
+deploy: ## Deploy dist/kadr-$(VERSION)-linux-amd64: make deploy HOST=kadr.internal VERSION=0.3.0 [ADMIN_URL=https://admin.example.com] [ADMIN_EMAIL=you@example.com]
 	@if [ -z "$(HOST)" ]; then echo "usage: make deploy HOST=host VERSION=x.y.z"; exit 2; fi
 	@test -f dist/kadr-$(VERSION)-linux-amd64 || { echo "dist/kadr-$(VERSION)-linux-amd64 not found; run make release VERSION=$(VERSION)"; exit 1; }
 	$(SCP) dist/kadr-$(VERSION)-linux-amd64 $(HOST):/tmp/kadr-$(VERSION)
-	$(SSH) $(HOST) 'sudo bash -s -- deploy $(VERSION) $(REMOTE_ROOT)' < scripts/remote-release.sh
+	$(SSH) $(HOST) 'sudo env KADR_ADMIN_URL="$(ADMIN_URL)" KADR_BOOTSTRAP_ADMIN_EMAIL="$(ADMIN_EMAIL)" bash -s -- deploy $(VERSION) $(REMOTE_ROOT)' < scripts/remote-release.sh
 
 rollback: ## Switch to the previous release: make rollback HOST=kadr.internal
 	@if [ -z "$(HOST)" ]; then echo "usage: make rollback HOST=host"; exit 2; fi

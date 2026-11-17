@@ -62,6 +62,11 @@ case "$action" in
     log "running migrations"
     run_as_kadr "$dest/kadr" migrate up
 
+    # First deploy: create the owner account with a generated password and
+    # print it here (once). Later deploys print a one-line notice instead.
+    log "ensuring an administrator exists"
+    run_as_kadr "$dest/kadr" admin bootstrap ${KADR_ADMIN_URL:+--url "$KADR_ADMIN_URL"} ${KADR_BOOTSTRAP_ADMIN_EMAIL:+--email "$KADR_BOOTSTRAP_ADMIN_EMAIL"}
+
     switch_to "$dest"
     systemctl restart kadr
     wait_ready
