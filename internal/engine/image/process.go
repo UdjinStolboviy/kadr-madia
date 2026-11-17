@@ -2,12 +2,15 @@ package image
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/UdjinStolboviy/kadr-madia/internal/preset"
@@ -16,14 +19,19 @@ import (
 // Process implements Engine (docs/PIPELINES.md §2):
 //
 //  1. `vips thumbnail`: decode the first page with shrink-on-load,
-//     autorotate, convert to sRGB, resize with lanczos3 (fit inside, never
-//     enlarge) or smart-crop to the target aspect;
-//  2. optional grayscale, normalise (1st–99th percentile stretch), sharpen;
+//     autorotate, convert to 8-bit sRGB, resize with lanczos3 (fit inside,
+//     never enlarge) or smart-crop to the target aspect;
+//  2. optional grayscale, normalise (1st–99th percentile stretch, computed
+//     in Go from the raw raster), sharpen;
 //  3. the result is the intermediate `.v` raster, decoded once;
-//  4. every output is encoded from the intermediate with the preset's
-//     quality strategy (budget | fixed | ssim); metadata is stripped at save;
-//  5. ThumbHash and dominant color come from a ≤100 px PNG of the
-//     intermediate, decoded in Go.
+//  4. the outputs are encoded concurrently from the intermediate, each with
+//     the preset's quality strategy (budget | fixed | ssim); metadata is
+//     stripped at save;
+//  5. meanwhile ThumbHash and dominant color are computed in Go from the
+//     intermediate's raw pixels.
+//
+// Child processes dominate the cost (docs/adr/0014), so steps that can be
+// done in Go on the uncompressed .v raster are.
 //
 // All temporary files live in a hidden directory inside workDir that is
 // removed before returning; only the final renditions remain.
@@ -56,7 +64,7 @@ func (e *VipsCLI) Process(ctx context.Context, src SourceInfo, params preset.Ima
 	}
 	defer os.RemoveAll(tmp)
 
-	p := &proc{e: e, ctx: ctx, tmp: tmp, rasters: map[int]raster{}}
+	p := newProc(e, ctx, tmp)
 	in, _, err := safeInputPath(src.Path, tmp)
 	if err != nil {
 		return nil, engineErr("prepare source path", err)
@@ -65,12 +73,19 @@ func (e *VipsCLI) Process(ctx context.Context, src SourceInfo, params preset.Ima
 	if err != nil {
 		return nil, err
 	}
-	p.inter = inter
-	p.rasters[max(inter.W, inter.H)] = inter
+	p.setInter(inter)
+	if params.Quality.Mode == "ssim" {
+		if p.ssimRef, err = p.grayFor(inter.Path); err != nil {
+			return nil, err
+		}
+	}
 
-	out := &Output{}
+	// Output names are fixed before the lanes start so they stay
+	// deterministic.
 	used := map[string]int{}
-	for _, o := range params.Outputs {
+	names := make([]string, len(params.Outputs))
+	bases := make([]string, len(params.Outputs))
+	for i, o := range params.Outputs {
 		base := o.Name
 		if base == "" {
 			base = "main"
@@ -80,46 +95,91 @@ func (e *VipsCLI) Process(ctx context.Context, src SourceInfo, params preset.Ima
 			fileName = fmt.Sprintf("%s-%d.%s", base, n+1, o.Format)
 		}
 		used[base+"."+o.Format]++
-		r, err := p.encodeOutput(o, params.Quality, filepath.Join(workDir, fileName))
-		if err != nil {
-			return nil, err
-		}
-		r.Name = base
-		out.Renditions = append(out.Renditions, r)
+		names[i], bases[i] = fileName, base
+	}
+
+	// One lane per output; the first failure cancels the others.
+	laneCtx, cancelLanes := context.WithCancel(ctx)
+	defer cancelLanes()
+	p.ctx = laneCtx
+	out := &Output{Renditions: make([]Rendition, len(params.Outputs))}
+	var (
+		wg       sync.WaitGroup
+		errOnce  sync.Once
+		firstErr error
+	)
+	fail := func(err error) {
+		errOnce.Do(func() { firstErr = err; cancelLanes() })
+	}
+	for i, o := range params.Outputs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r, err := p.encodeOutput(o, params.Quality, filepath.Join(workDir, names[i]))
+			if err != nil {
+				fail(err)
+				return
+			}
+			r.Name = bases[i]
+			out.Renditions[i] = r
+		}()
 	}
 
 	if params.Placeholder.ThumbHash || params.Placeholder.DominantColor {
 		hash, color, err := p.placeholder()
 		if err != nil {
-			return nil, err
-		}
-		if params.Placeholder.ThumbHash {
-			out.ThumbHash = hash
-		}
-		if params.Placeholder.DominantColor {
-			out.DominantColor = color
+			fail(err)
+		} else {
+			if params.Placeholder.ThumbHash {
+				out.ThumbHash = hash
+			}
+			if params.Placeholder.DominantColor {
+				out.DominantColor = color
+			}
 		}
 	}
-	out.CPUMillis = p.cpu
+	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	out.CPUMillis = atomic.LoadInt64(&p.cpu)
 	return out, nil
 }
 
-// proc holds the state of one Process call.
+// proc holds the state of one Process call. Output lanes run concurrently;
+// the fields below the mutex are shared between them.
 type proc struct {
-	e       *VipsCLI
-	ctx     context.Context
-	tmp     string
-	cpu     int64
-	seq     int
-	inter   raster
-	rasters map[int]raster // long side → raster derived from inter
-	ssimRef *grayPlane     // lazily computed reference for ssim mode
+	e     *VipsCLI
+	ctx   context.Context
+	tmp   string
+	cpu   int64 // atomic
+	seq   atomic.Int64
+	inter raster
 
-	// Test seams for the budget search; nil means the real vips calls.
-	lastEncode time.Duration // duration of the latest ssim-mode encode
+	mu      sync.Mutex
+	rasters map[int]*rasterEntry // long side → raster derived from inter
+	ssimRef *grayPlane           // set before the lanes start (ssim mode)
 
-	encodeHook func(o preset.ImageOutput, r raster, q int) (string, int64, error)
+	// Test seams; nil means the real vips calls.
+	encodeHook func(o preset.ImageOutput, r raster, q, effort int) (string, int64, error)
 	rasterHook func(side int) (raster, error)
+}
+
+type rasterEntry struct {
+	once sync.Once
+	r    raster
+	err  error
+}
+
+func newProc(e *VipsCLI, ctx context.Context, tmp string) *proc {
+	return &proc{e: e, ctx: ctx, tmp: tmp, rasters: map[int]*rasterEntry{}}
+}
+
+func (p *proc) setInter(r raster) {
+	p.inter = r
+	ent := &rasterEntry{r: r}
+	ent.once.Do(func() {})
+	p.rasters[max(r.W, r.H)] = ent
 }
 
 // raster is a decoded image file in the temp directory.
@@ -130,34 +190,24 @@ type raster struct {
 }
 
 func (p *proc) tmpFile(ext string) string {
-	p.seq++
-	return filepath.Join(p.tmp, fmt.Sprintf("t%03d%s", p.seq, ext))
+	return filepath.Join(p.tmp, fmt.Sprintf("t%03d%s", p.seq.Add(1), ext))
 }
 
-// vips runs a vips operation on files the engine wrote itself.
+// vips runs a vips operation on files the engine wrote itself with the
+// engine's ThreadsPerJob.
 func (p *proc) vips(args ...string) (string, error) {
-	return p.e.runIn(p.ctx, &p.cpu, p.tmp, false, p.e.vips, args...)
+	return p.e.runIn(p.ctx, &p.cpu, p.tmp, false, 0, p.e.vips, args...)
+}
+
+// vipsN is vips with an explicit thread count.
+func (p *proc) vipsN(threads int, args ...string) (string, error) {
+	return p.e.runIn(p.ctx, &p.cpu, p.tmp, false, threads, p.e.vips, args...)
 }
 
 // vipsSource runs a vips operation that reads the user-supplied source,
 // with untrusted loaders blocked.
 func (p *proc) vipsSource(args ...string) (string, error) {
-	return p.e.runIn(p.ctx, &p.cpu, p.tmp, true, p.e.vips, args...)
-}
-
-func (p *proc) header(path string) (raster, error) {
-	if strings.HasSuffix(path, ".v") {
-		r, err := readVHeader(path)
-		if err != nil {
-			return raster{}, engineErr("read header", err)
-		}
-		return r, nil
-	}
-	h, err := p.e.readHeader(p.ctx, &p.cpu, path, false)
-	if err != nil {
-		return raster{}, engineErr("read header", err)
-	}
-	return raster{Path: path, W: h.Width, H: h.Height, Bands: h.Bands}, nil
+	return p.e.runIn(p.ctx, &p.cpu, p.tmp, true, 0, p.e.vips, args...)
 }
 
 // prepare runs steps 1–3 and returns the intermediate raster.
@@ -211,16 +261,26 @@ func (p *proc) prepare(in string, src SourceInfo, params preset.ImageParams) (ra
 		return raster{}, &Error{Code: CodeCorrupt, Detail: "cannot decode image", Err: err}
 	}
 
-	// Guarantee 8-bit sRGB regardless of the source (16-bit PNG, CMYK, gray).
-	cur := p.tmpFile(".v")
-	if _, err := p.vips("colourspace", base, cur, "srgb"); err != nil {
-		return raster{}, engineErr("convert to sRGB", err)
-	}
-	info, err := p.header(cur)
+	// Guarantee 8-bit sRGB regardless of the source (16-bit PNG, CMYK,
+	// gray). `thumbnail --export-profile srgb` already produces it for every
+	// input we have seen, so the extra process only runs when the header
+	// says otherwise.
+	cur := base
+	h, err := readVFileHeader(base)
 	if err != nil {
-		return raster{}, err
+		return raster{}, engineErr("read header", err)
 	}
-	hasAlpha := info.Bands == 2 || info.Bands == 4
+	if !h.is8bitSRGB() {
+		next := p.tmpFile(".v")
+		if _, err := p.vips("colourspace", base, next, "srgb"); err != nil {
+			return raster{}, engineErr("convert to sRGB", err)
+		}
+		cur = next
+		if h, err = readVFileHeader(cur); err != nil {
+			return raster{}, engineErr("read header", err)
+		}
+	}
+	hasAlpha := h.Bands == 2 || h.Bands == 4
 
 	if params.Color.Grayscale {
 		next := p.tmpFile(".v")
@@ -244,39 +304,23 @@ func (p *proc) prepare(in string, src SourceInfo, params preset.ImageParams) (ra
 		}
 		cur = next
 	}
-	return p.header(cur)
+	r, err := readVHeader(cur)
+	if err != nil {
+		return raster{}, engineErr("read header", err)
+	}
+	return r, nil
 }
 
 // normalise stretches luminance so the 1st percentile maps to 0 and the
 // 99th to 255. The same linear transform is applied to every color band;
-// alpha is left untouched.
+// alpha is left untouched. The percentiles are computed in Go from the raw
+// .v pixels (one `vips linear` process instead of four).
 func (p *proc) normalise(cur string, gray, hasAlpha bool) (string, error) {
-	lum := cur
-	if !gray {
-		lum = p.tmpFile(".v")
-		if _, err := p.vips("colourspace", cur, lum, "b-w"); err != nil {
-			return "", engineErr("normalise: luminance", err)
-		}
-	}
-	band := p.tmpFile(".v")
-	if _, err := p.vips("extract_band", lum, band, "0"); err != nil {
-		return "", engineErr("normalise: extract band", err)
-	}
-	percent := func(pc string) (float64, error) {
-		out, err := p.vips("percent", band, pc)
-		if err != nil {
-			return 0, engineErr("normalise: percent", err)
-		}
-		return strconv.ParseFloat(strings.TrimSpace(out), 64)
-	}
-	lo, err := percent("1")
+	img, err := readVImage(cur)
 	if err != nil {
-		return "", err
+		return "", engineErr("normalise: read raster", err)
 	}
-	hi, err := percent("99")
-	if err != nil {
-		return "", err
-	}
+	lo, hi := lumaPercentiles(img, gray, 1, 99)
 	if hi-lo < 1 || (lo <= 0 && hi >= 255) {
 		return cur, nil // flat image or already full range
 	}
@@ -330,59 +374,102 @@ func parseAspect(s string) (float64, error) {
 func ftoa(f float64) string { return strconv.FormatFloat(f, 'f', -1, 64) }
 
 // rasterAt returns the intermediate resized so its long side is side.
-// Results are cached so AVIF and WebP share downscaled rasters.
+// Results are shared between the output lanes (AVIF and WebP often settle
+// on the same downscaled side); each side is produced once.
 func (p *proc) rasterAt(side int) (raster, error) {
 	if p.rasterHook != nil {
 		return p.rasterHook(side)
-	}
-	if r, ok := p.rasters[side]; ok {
-		return r, nil
 	}
 	long := max(p.inter.W, p.inter.H)
 	if side >= long {
 		return p.inter, nil
 	}
-	path := p.tmpFile(".v")
-	scale := float64(side) / float64(long)
-	if _, err := p.vips("resize", p.inter.Path, path, ftoa(scale), "--kernel", "lanczos3"); err != nil {
-		return raster{}, engineErr("resize", err)
+	p.mu.Lock()
+	ent, ok := p.rasters[side]
+	if !ok {
+		ent = &rasterEntry{}
+		p.rasters[side] = ent
 	}
-	r, err := p.header(path)
-	if err != nil {
-		return raster{}, err
-	}
-	p.rasters[side] = r
-	return r, nil
+	p.mu.Unlock()
+	ent.once.Do(func() {
+		path := p.tmpFile(".v")
+		scale := float64(side) / float64(long)
+		if _, err := p.vipsN(1, "resize", p.inter.Path, path, ftoa(scale), "--kernel", "lanczos3"); err != nil {
+			ent.err = engineErr("resize", err)
+			return
+		}
+		r, err := readVHeader(path)
+		if err != nil {
+			ent.err = engineErr("read header", err)
+			return
+		}
+		ent.r = r
+	})
+	return ent.r, ent.err
 }
 
-// encode writes r with format o at quality q to a temp file and returns its
-// path and size.
-func (p *proc) encode(o preset.ImageOutput, r raster, q int) (string, int64, error) {
+// AVIF effort used for search encodes. At effort 0 an 800 px aom encode
+// takes ≈ 70 ms of CPU against ≈ 600 ms at effort 4, and its size-vs-q
+// curve has the same shape, ≈ 0–25 % larger (docs/adr/0014).
+const avifSearchEffort = 0
+
+// Ratios of final-effort (default 4) to search-effort AVIF size at the same
+// q, measured on the fixtures at q 40–60: typically ≈ 0.6–0.85 (photos and
+// documents ≈ 0.75–0.8), but ≥ 1 on pure noise. finalRatioTypical predicts
+// the q step-up for the final encode; finalRatioMin decides when a qMin
+// miss at search effort may still fit at final effort.
+const (
+	finalRatioTypical = 0.80
+	finalRatioMin     = 0.75
+	maxFinalStepUp    = 6
+)
+
+// finalEffort is the encoder effort for the delivered file.
+func finalEffort(o preset.ImageOutput) int {
+	if o.Format == FormatAVIF {
+		if o.Effort <= 0 {
+			return 4
+		}
+		return min(o.Effort, 9)
+	}
+	return min(o.Effort, 6) // WebP: 0 means the libwebp default
+}
+
+// searchEffort is the effort for search encodes: cheaper for AVIF, the
+// final one for WebP (whose encodes are already cheap).
+func searchEffort(o preset.ImageOutput) int {
+	if o.Format == FormatAVIF {
+		return min(avifSearchEffort, finalEffort(o))
+	}
+	return finalEffort(o)
+}
+
+// encode writes r with format o at quality q and effort to a temp file
+// and returns its path and size. threads is VIPS_CONCURRENCY for the
+// child (0 = ThreadsPerJob); libvips hands it to the AV1 encoder.
+func (p *proc) encode(o preset.ImageOutput, r raster, q, effort, threads int) (string, int64, error) {
 	if p.encodeHook != nil {
-		return p.encodeHook(o, r, q)
+		return p.encodeHook(o, r, q, effort)
 	}
 	out := p.tmpFile("." + o.Format)
 	var args []string
 	switch o.Format {
 	case FormatAVIF:
-		effort := o.Effort
-		if effort <= 0 {
-			effort = 4
-		}
 		args = []string{"heifsave", r.Path, out,
-			"--Q", strconv.Itoa(q), "--compression", "av1", "--effort", strconv.Itoa(min(effort, 9)),
+			"--Q", strconv.Itoa(q), "--compression", "av1", "--effort", strconv.Itoa(effort),
 			"--subsample-mode", subsampleMode(o.Chroma)}
 	case FormatWebP:
 		args = []string{"webpsave", r.Path, out, "--Q", strconv.Itoa(q)}
 		if o.SmartSubsample {
 			args = append(args, "--smart-subsample")
 		}
-		if o.Effort > 0 {
-			args = append(args, "--effort", strconv.Itoa(min(o.Effort, 6)))
+		if effort > 0 {
+			args = append(args, "--effort", strconv.Itoa(effort))
 		}
+		threads = 1 // libwebp encodes on one thread
 	}
 	args = append(args, p.e.keepFlag...)
-	if _, err := p.vips(args...); err != nil {
+	if _, err := p.vipsN(threads, args...); err != nil {
 		return "", 0, engineErr("encode "+o.Format, err)
 	}
 	st, err := os.Stat(out)
@@ -431,16 +518,16 @@ func (p *proc) encodeOutput(o preset.ImageOutput, qp preset.Quality, dst string)
 		return Rendition{}, engineErr("move rendition", err)
 	}
 	// Dimensions are read back from the encoded file, not assumed.
-	info, err := p.header(dst)
+	w, h, err := encodedDims(dst, o.Format)
 	if err != nil {
-		return Rendition{}, err
+		return Rendition{}, engineErr("read rendition dimensions", err)
 	}
 	return Rendition{
 		Format:     o.Format,
 		Path:       dst,
 		Bytes:      res.bytes,
-		Width:      info.W,
-		Height:     info.H,
+		Width:      w,
+		Height:     h,
 		Quality:    res.q,
 		Iterations: res.iterations,
 		OverBudget: res.overBudget,
@@ -451,6 +538,7 @@ type encResult struct {
 	path       string
 	bytes      int64
 	q          int
+	effort     int
 	iterations int
 	overBudget bool
 }
@@ -467,9 +555,9 @@ const (
 
 // nearDeadline reports whether fewer than three encodes' worth of time
 // remain before the Process timeout.
-func (p *proc) nearDeadline() bool {
+func (p *proc) nearDeadline(lastEncode time.Duration) bool {
 	dl, ok := p.ctx.Deadline()
-	return ok && time.Until(dl) < 3*p.lastEncode+time.Second
+	return ok && time.Until(dl) < 3*lastEncode+time.Second
 }
 
 func (p *proc) encodeFixed(o preset.ImageOutput, qp preset.Quality) (encResult, error) {
@@ -477,7 +565,7 @@ func (p *proc) encodeFixed(o preset.ImageOutput, qp preset.Quality) (encResult, 
 	if q <= 0 {
 		q = defaultFixedQ
 	}
-	path, n, err := p.encode(o, p.inter, clampQ(q))
+	path, n, err := p.encode(o, p.inter, clampQ(q), finalEffort(o), 0)
 	if err != nil {
 		return encResult{}, err
 	}
@@ -486,18 +574,82 @@ func (p *proc) encodeFixed(o preset.ImageOutput, qp preset.Quality) (encResult, 
 
 func clampQ(q int) int { return max(1, min(100, q)) }
 
-// encodeBudget implements ADR-0009: binary-search the highest quality in
-// [qMin, qMax] whose output fits maxBytes at the current size; when even
-// qMin does not fit, shrink the long side by downscaleStep and repeat, down
-// to minSide. If the budget is unreachable the minSide/qMin result is
-// returned with OverBudget set.
+// encKey identifies an encode within one output's search.
+type encKey struct{ side, q, effort int }
+
+// encoder runs and memoises the encodes of one output, counting them.
+type encoder struct {
+	p          *proc
+	o          preset.ImageOutput
+	cache      map[encKey]encResult
+	iterations int
+}
+
+func (en *encoder) at(r raster, side, q, effort, threads int) (encResult, error) {
+	k := encKey{side, q, effort}
+	if res, ok := en.cache[k]; ok {
+		return res, nil
+	}
+	res, err := en.run(r, q, effort, threads)
+	if err != nil {
+		return encResult{}, err
+	}
+	en.iterations++
+	if os.Getenv("KADR_DEBUG_ENC") != "" {
+		fmt.Fprintf(os.Stderr, "DBG %s side=%d q=%d e=%d bytes=%d\n", en.o.Format, side, q, effort, res.bytes)
+	}
+	en.cache[k] = res
+	return res, nil
+}
+
+func (en *encoder) run(r raster, q, effort, threads int) (encResult, error) {
+	path, n, err := en.p.encode(en.o, r, q, effort, threads)
+	if err != nil {
+		return encResult{}, err
+	}
+	return encResult{path: path, bytes: n, q: q, effort: effort}, nil
+}
+
+// atBoth runs the final-effort and search-effort encodes at q
+// concurrently (the speculative first step of a two-stage AVIF search).
+func (en *encoder) atBoth(r raster, side, q, final, search int) (f, s encResult, err error) {
+	var (
+		wg   sync.WaitGroup
+		sErr error
+	)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s, sErr = en.run(r, q, search, 1)
+	}()
+	f, err = en.run(r, q, final, 0)
+	wg.Wait()
+	if err == nil {
+		err = sErr
+	}
+	if err != nil {
+		return encResult{}, encResult{}, err
+	}
+	en.iterations += 2
+	en.cache[encKey{side, q, final}] = f
+	en.cache[encKey{side, q, search}] = s
+	return f, s, nil
+}
+
+// encodeBudget implements ADR-0009 with the search of ADR-0014: find the
+// highest quality in [qMin, qMax] (within searchTol) whose output fits
+// maxBytes at the current size; when even qMin does not fit, move down the
+// ladder side·downscaleStep^k to minSide. If the budget is unreachable the
+// minSide/qMin result is returned with OverBudget set.
 //
-// Two refinements over the pseudo-code in docs/PIPELINES.md, both assuming
-// (as the binary search already does) that size grows with quality:
-//   - on downscaled sides qMin is tried first, so a side that cannot fit
-//     costs one encode instead of a full search;
-//   - the last step searches at exactly minSide instead of encoding
-//     minSide/qMin blindly, so a fitting result at minSide is still found.
+//   - The search (search.go) predicts q from a log-linear size model
+//     instead of bisecting, starting at qMax.
+//   - AVIF is searched at a cheap effort; the delivered file is one encode
+//     at the preset effort with q stepped up by the expected size ratio,
+//     verified against the budget (refineFinal).
+//   - A ladder rung is skipped without an encode when even the
+//     proportional-to-pixels estimate from the larger side (which
+//     underestimates real sizes) is over budget at qMin.
 func (p *proc) encodeBudget(o preset.ImageOutput, qp preset.Quality) (encResult, error) {
 	qMin, qMax := qp.QMin, qp.QMax
 	if qMin <= 0 {
@@ -521,82 +673,143 @@ func (p *proc) encodeBudget(o preset.ImageOutput, qp preset.Quality) (encResult,
 	if minSide <= 0 || minSide > long {
 		minSide = long
 	}
+	final, search := finalEffort(o), searchEffort(o)
+	twoStage := final != search
+	slope := slopeWebP
+	if o.Format == FormatAVIF {
+		slope = slopeAVIF
+	}
 
-	iterations := 0
-	side := long
+	en := &encoder{p: p, o: o, cache: map[encKey]encResult{}}
+	done := func(res encResult) (encResult, error) {
+		res.iterations = en.iterations
+		return res, nil
+	}
+	side, start := long, qMax
+	if twoStage {
+		// Speculate: most photos fit at qMax, and then the final-effort
+		// encode is the answer. It runs alongside the search-effort probe
+		// at qMax, so a miss costs CPU but no latency, and its size
+		// calibrates the final step (refineFinal).
+		f, _, err := en.atBoth(p.inter, side, qMax, final, search)
+		if err != nil {
+			return encResult{}, err
+		}
+		if f.bytes <= maxBytes {
+			return done(f)
+		}
+	}
 	for {
 		r, err := p.rasterAt(side)
 		if err != nil {
 			return encResult{}, err
 		}
-		var best, floor *encResult // floor: qMin result that did not fit
-		try := func(q int) (bool, error) {
-			path, n, err := p.encode(o, r, q)
-			if err != nil {
-				return false, err
-			}
-			iterations++
-			res := &encResult{path: path, bytes: n, q: q}
-			if n <= maxBytes {
-				if best != nil {
-					_ = os.Remove(best.path)
+		sr, err := searchQ(qMin, qMax, start, maxBytes, slope, func(q int) (int64, error) {
+			res, err := en.at(r, side, q, search, 1)
+			return res.bytes, err
+		})
+		if err != nil {
+			return encResult{}, err
+		}
+		if sr.found(qMin) {
+			best := en.cache[encKey{side, sr.fit, search}]
+			if twoStage {
+				if best, err = p.refineFinal(en, r, side, sr, qMax, maxBytes); err != nil {
+					return encResult{}, err
 				}
-				best = res
-				return true, nil
 			}
-			if q == qMin {
-				floor = res
-			} else {
-				_ = os.Remove(path)
-			}
-			return false, nil
+			return done(best)
 		}
-		lo, hi := qMin, qMax
-		if side != long {
-			ok, err := try(qMin)
+
+		floor := en.cache[encKey{side, qMin, search}]
+		searchFloorBytes := floor.bytes
+		// The final effort is usually smaller: a near miss at qMin may fit.
+		if twoStage && (float64(floor.bytes)*finalRatioMin <= float64(maxBytes) || side == minSide) {
+			f, err := en.at(r, side, qMin, final, 0)
 			if err != nil {
 				return encResult{}, err
 			}
-			if ok {
-				lo = qMin + 1
-			} else {
-				hi = qMin - 1 // skip the search
+			if f.bytes <= maxBytes {
+				return done(f)
 			}
-		}
-		for lo <= hi {
-			q := (lo + hi) / 2
-			ok, err := try(q)
-			if err != nil {
-				return encResult{}, err
+			if f.bytes < floor.bytes {
+				floor = f
 			}
-			if ok {
-				lo = q + 1
-			} else {
-				hi = q - 1
-			}
-		}
-		if best != nil {
-			if floor != nil {
-				_ = os.Remove(floor.path)
-			}
-			best.iterations = iterations
-			return *best, nil
 		}
 		if side == minSide {
-			// Unreachable budget: keep the minSide/qMin result.
-			floor.iterations = iterations
+			// Unreachable budget: keep the smallest minSide/qMin result.
 			floor.overBudget = true
-			return *floor, nil
+			return done(floor)
 		}
-		_ = os.Remove(floor.path)
-		side = max(minSide, int(math.Floor(float64(side)*step)))
+
+		// Next rung, skipping rungs that cannot fit even if size fell in
+		// proportion to the pixel count.
+		next := max(minSide, int(math.Floor(float64(side)*step)))
+		area := func(s int) float64 { return float64(s) * float64(s) }
+		for next > minSide && float64(searchFloorBytes)*area(next)/area(side) > float64(maxBytes) {
+			next = max(minSide, int(math.Floor(float64(next)*step)))
+		}
+		// Start where the scaled curve of this side predicts a fit.
+		scaled := float64(searchFloorBytes) * area(next) / area(side)
+		start = qMax
+		if q, ok := modelQ(sample{qMin, int64(scaled)}, curveSlope(sr.samples, slope), float64(maxBytes)*(1-searchAim)); ok {
+			start = max(qMin, min(qMax, q))
+		}
+		side = next
 	}
+}
+
+// refineFinal produces the delivered AVIF after a search at the cheap
+// effort found q0 = sr.fit at this side. The final effort compresses
+// better, so it first tries q0 stepped up by the q-equivalent of
+// finalRatioTypical; when that misses it tries once more at the q the
+// measured final-effort size predicts. If neither fits, the search-effort
+// encode at q0 (which fits) is delivered. At most two final encodes.
+func (p *proc) refineFinal(en *encoder, r raster, side int, sr searchResult, qMax int, maxBytes int64) (encResult, error) {
+	final, search := finalEffort(en.o), searchEffort(en.o)
+	q0 := sr.fit
+	base := en.cache[encKey{side, q0, search}]
+	sl := curveSlope(sr.samples, slopeAVIF)
+	ratio := finalRatioTypical
+	fTop, okF := en.cache[encKey{side, qMax, final}]
+	sTop, okS := en.cache[encKey{side, qMax, search}]
+	if okF && okS && sTop.bytes > 0 {
+		// Measured at qMax by the speculative step.
+		ratio = float64(fTop.bytes) / float64(sTop.bytes)
+		if ratio >= 1 {
+			return base, nil // final effort is not smaller here (noise-like content)
+		}
+	}
+	stepUp := min(maxFinalStepUp, max(0, int(math.Floor(math.Log(1/ratio)/sl))))
+	qF := min(qMax, q0+stepUp)
+	f, err := en.at(r, side, qF, final, 0)
+	if err != nil {
+		return encResult{}, err
+	}
+	if f.bytes <= maxBytes {
+		return f, nil
+	}
+	if q1, ok := modelQ(sample{qF, f.bytes}, sl, float64(maxBytes)*(1-searchAim)); ok {
+		q1 = min(q1, qF-1)
+		if q1 > q0 {
+			f, err := en.at(r, side, q1, final, 0)
+			if err != nil {
+				return encResult{}, err
+			}
+			if f.bytes <= maxBytes {
+				return f, nil
+			}
+		}
+	}
+	return base, nil
 }
 
 // encodeSSIM finds the lowest quality whose output reaches the SSIM target
 // against the intermediate (see ssim.go). Quality is searched in
-// [qMin, qMax] (defaults 30–85); if even qMax misses the target, the qMax
-// result is used.
+// [qMin, qMax] (defaults 30–85) by bisection to within ssimQTolerance; if
+// even qMax misses the target, the qMax result is used. AVIF is searched
+// at the cheap effort and delivered as one encode at the preset effort at
+// the chosen q, verified against the target (one step up if it misses).
 func (p *proc) encodeSSIM(o preset.ImageOutput, qp preset.Quality) (encResult, error) {
 	target := qp.Target
 	if target <= 0 || target >= 1 {
@@ -613,16 +826,27 @@ func (p *proc) encodeSSIM(o preset.ImageOutput, qp preset.Quality) (encResult, e
 	if lo > hi {
 		lo, hi = hi, lo
 	}
-	if p.ssimRef == nil {
-		ref, err := p.grayFor(p.inter.Path)
+	final, search := finalEffort(o), searchEffort(o)
+	en := &encoder{p: p, o: o, cache: map[encKey]encResult{}}
+	side := max(p.inter.W, p.inter.H)
+	var lastEncode time.Duration
+	score := func(q, effort, threads int) (encResult, float64, error) {
+		start := time.Now()
+		res, err := en.at(p.inter, side, q, effort, threads)
+		lastEncode = time.Since(start)
 		if err != nil {
-			return encResult{}, err
+			return encResult{}, 0, err
 		}
-		p.ssimRef = ref
+		cand, err := p.grayFor(res.path)
+		if err != nil {
+			return encResult{}, 0, err
+		}
+		return res, ssim(p.ssimRef, cand), nil
 	}
+
 	qTop := hi
 	var best *encResult
-	iterations := 0
+	missedTop := false
 	for lo <= hi {
 		// Stop once the passing q is known within ssimQTolerance: finer
 		// steps change bytes by a few percent but cost a full encode.
@@ -631,89 +855,101 @@ func (p *proc) encodeSSIM(o preset.ImageOutput, qp preset.Quality) (encResult, e
 		}
 		// Deadline guard: keep the best passing result rather than fail
 		// the job when another encode would likely overrun the timeout.
-		if best != nil && p.nearDeadline() {
+		if best != nil && p.nearDeadline(lastEncode) {
 			break
 		}
 		q := (lo + hi) / 2
-		start := time.Now()
-		path, n, err := p.encode(o, p.inter, q)
-		p.lastEncode = time.Since(start)
+		res, s, err := score(q, search, 1)
 		if err != nil {
 			return encResult{}, err
 		}
-		iterations++
-		cand, err := p.grayFor(path)
-		if err != nil {
-			return encResult{}, err
-		}
-		if ssim(p.ssimRef, cand) >= target {
-			if best != nil {
-				_ = os.Remove(best.path)
-			}
-			best = &encResult{path: path, bytes: n, q: q}
+		if s >= target {
+			best = &res
 			hi = q - 1
 		} else if q == qTop {
-			best = &encResult{path: path, bytes: n, q: q} // fallback, kept
+			best, missedTop = &res, true // fallback
 			break
 		} else {
-			_ = os.Remove(path)
 			lo = q + 1
 		}
 	}
 	if best == nil {
-		path, n, err := p.encode(o, p.inter, qTop)
+		res, _, err := score(qTop, search, 1)
 		if err != nil {
 			return encResult{}, err
 		}
-		iterations++
-		best = &encResult{path: path, bytes: n, q: qTop}
+		best, missedTop = &res, true
 	}
-	best.iterations = iterations
-	return *best, nil
+	out := *best
+	if final != search && !p.nearDeadline(lastEncode) {
+		f, s, err := score(best.q, final, 0)
+		if err != nil {
+			return encResult{}, err
+		}
+		out = f
+		if s < target && !missedTop && best.q < qTop && !p.nearDeadline(lastEncode) {
+			q2 := min(qTop, best.q+ssimQTolerance)
+			if f2, _, err := score(q2, final, 0); err == nil {
+				out = f2
+			} else {
+				return encResult{}, err
+			}
+		}
+	}
+	out.iterations = en.iterations
+	return out, nil
 }
 
-// grayFor decodes any image vips can read into a downscaled luma plane via a
+// grayFor returns a downscaled luma plane of an image: the engine's own
+// .v rasters are read directly, anything else is decoded by vips through a
 // temporary PNG.
 func (p *proc) grayFor(path string) (*grayPlane, error) {
-	png := p.tmpFile(".png")
-	if _, err := p.vips("pngsave", path, png, "--compression", "1"); err != nil {
-		return nil, engineErr("decode for ssim", err)
+	var img *rgbaPlane
+	var err error
+	if strings.HasSuffix(path, ".v") {
+		img, err = readVImage(path)
 	}
-	defer os.Remove(png)
-	img, err := decodeFile(png)
-	if err != nil {
-		return nil, engineErr("decode for ssim", err)
+	if img == nil {
+		if err != nil && !errors.Is(err, errVUnsupported) {
+			return nil, engineErr("decode for ssim", err)
+		}
+		png := p.tmpFile(".png")
+		if _, err := p.vipsN(1, "pngsave", path, png, "--compression", "1"); err != nil {
+			return nil, engineErr("decode for ssim", err)
+		}
+		defer os.Remove(png)
+		if img, err = decodeFile(png); err != nil {
+			return nil, engineErr("decode for ssim", err)
+		}
 	}
 	g := img.luma()
 	return g.boxDown(ssimFactor(g.W, g.H)), nil
 }
 
 // placeholder computes the ThumbHash and dominant color from a ≤100 px
-// version of the intermediate.
+// version of the intermediate, area-averaged in Go from the raw .v pixels.
 func (p *proc) placeholder() ([]byte, string, error) {
-	long := max(p.inter.W, p.inter.H)
-	png := p.tmpFile(".png")
-	var err error
-	if long > 100 {
-		_, err = p.vips("resize", p.inter.Path, png, ftoa(100/float64(long)), "--kernel", "lanczos3")
-	} else {
-		_, err = p.vips("pngsave", p.inter.Path, png)
+	img, err := readVImage(p.inter.Path)
+	if errors.Is(err, errVUnsupported) {
+		img, err = p.placeholderViaVips()
 	}
 	if err != nil {
 		return nil, "", engineErr("placeholder raster", err)
 	}
-	img, err := decodeFile(png)
-	if err != nil {
-		return nil, "", engineErr("placeholder decode", err)
-	}
-	if img.W > 100 || img.H > 100 { // rounding guard
-		return nil, "", engineErr("placeholder raster", fmt.Errorf("unexpected size %dx%d", img.W, img.H))
-	}
+	img = downRGBA(img, 100)
 	hash, err := rgbaToThumbHash(img.W, img.H, img.Pix)
 	if err != nil {
 		return nil, "", engineErr("thumbhash", err)
 	}
 	return hash, dominantColor(img), nil
+}
+
+func (p *proc) placeholderViaVips() (*rgbaPlane, error) {
+	png := p.tmpFile(".png")
+	if _, err := p.vipsN(1, "pngsave", p.inter.Path, png); err != nil {
+		return nil, err
+	}
+	return decodeFile(png)
 }
 
 // dominantColor is the alpha-weighted mean color of the placeholder raster,

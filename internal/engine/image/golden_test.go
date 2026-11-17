@@ -107,6 +107,20 @@ func ssimFloor(presetSlug, fixtureName string) float64 {
 	return 0.88
 }
 
+// maxEncodes bounds the encodes per rendition (each is a child process,
+// the main cost of the CLI engine; docs/adr/0014). budget: ≤ 6 when the
+// budget fits at full size, more only with downscaling; ssim: bisection
+// to ssimQTolerance plus up to two final-effort encodes.
+func maxEncodes(q preset.Quality) int {
+	switch q.Mode {
+	case "budget":
+		return 12
+	case "ssim":
+		return 8
+	}
+	return 1
+}
+
 type goldenRow struct {
 	fixture, preset string
 	r               Rendition
@@ -152,6 +166,9 @@ func TestGoldenPresets(t *testing.T) {
 							t.Errorf("rendition %d is %s/%s, want %s/%s", i, r.Name, r.Format, want.Name, want.Format)
 						}
 						checkRendition(t, e, np, src, fx, r)
+						if limit := maxEncodes(np.Params.Quality); r.Iterations < 1 || r.Iterations > limit {
+							t.Errorf("%s: %d encodes, want 1..%d", r.Format, r.Iterations, limit)
+						}
 						s := renditionSSIM(t, e, np, src, r)
 						if floor := ssimFloor(np.Slug, fx); s < floor {
 							t.Errorf("%s: SSIM %.4f below floor %.2f", r.Format, s, floor)
@@ -506,17 +523,23 @@ func TestProcessFixedAndCentreCrop(t *testing.T) {
 func ptrTo[T any](v T) *T { return &v }
 
 // BenchmarkPresets reports the time of one Process call per preset on
-// photo.jpg. Run: go test -run x -bench Presets ./internal/engine/image
+// photo.jpg, or on the file named by KADR_BENCH_IMAGE (e.g. a 12 MP HEIC
+// for the M1 latency target). Run:
+//
+//	KADR_VIPS_THREADS=2 go test -run x -bench Presets ./internal/engine/image
 func BenchmarkPresets(b *testing.B) {
 	e := newTestEngine(b)
-	path := fixture(b, "photo.jpg")
+	path := os.Getenv("KADR_BENCH_IMAGE")
+	if path == "" {
+		path = fixture(b, "photo.jpg")
+	}
 	for _, np := range imagePresets(b) {
 		b.Run(np.Slug, func(b *testing.B) {
 			src, err := e.Probe(context.Background(), path, np.Params.Limits)
 			if err != nil {
 				b.Fatal(err)
 			}
-			var cpu int64
+			var cpu, encodes int64
 			for b.Loop() {
 				dir := b.TempDir()
 				out, err := e.Process(context.Background(), src, np.Params, dir)
@@ -524,8 +547,12 @@ func BenchmarkPresets(b *testing.B) {
 					b.Fatal(err)
 				}
 				cpu += out.CPUMillis
+				for _, r := range out.Renditions {
+					encodes += int64(r.Iterations)
+				}
 			}
 			b.ReportMetric(float64(cpu)/float64(b.N), "cpu-ms/op")
+			b.ReportMetric(float64(encodes)/float64(b.N), "encodes/op")
 		})
 	}
 }

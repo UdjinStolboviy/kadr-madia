@@ -3,10 +3,8 @@ package image
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,9 +29,13 @@ type VipsConfig struct {
 	// MaxConcurrency bounds how many Probe/Process calls run at once
 	// (default 2).
 	MaxConcurrency int
-	// ThreadsPerJob is VIPS_CONCURRENCY for child processes (default 1).
-	// It also sets the AV1 encoder thread count. Cores used ≈
-	// MaxConcurrency × ThreadsPerJob.
+	// ThreadsPerJob is VIPS_CONCURRENCY for the decode/resize step and the
+	// final AVIF encode of each output, which libvips also passes to the AV1
+	// encoder as its thread count (default 1). Within one Process call the
+	// AVIF and WebP searches and the placeholder run concurrently, and the
+	// cheap search encodes use one thread each, so a job uses about
+	// ThreadsPerJob + 1 cores at its peak. Cores used ≈ MaxConcurrency ×
+	// (ThreadsPerJob + 1).
 	ThreadsPerJob int
 }
 
@@ -181,12 +183,16 @@ func (c *cmdError) Unwrap() error { return c.err }
 // run executes bin with args (never through a shell) and returns stdout.
 // The CPU time of the child is added to *cpuMillis.
 func (e *VipsCLI) run(ctx context.Context, cpuMillis *int64, bin string, args ...string) (string, error) {
-	return e.runIn(ctx, cpuMillis, "", true, bin, args...)
+	return e.runIn(ctx, cpuMillis, "", true, 1, bin, args...)
 }
 
 // runIn is run with a working/temp directory; untrusted selects the
-// blocked-loader environment (see childEnv).
-func (e *VipsCLI) runIn(ctx context.Context, cpuMillis *int64, tmpDir string, untrusted bool, bin string, args ...string) (string, error) {
+// blocked-loader environment (see childEnv) and threads the child's
+// VIPS_CONCURRENCY (0 means the engine's ThreadsPerJob).
+func (e *VipsCLI) runIn(ctx context.Context, cpuMillis *int64, tmpDir string, untrusted bool, threads int, bin string, args ...string) (string, error) {
+	if threads <= 0 {
+		threads = e.threads
+	}
 	if err := ctx.Err(); err != nil {
 		return "", classifyCtx(err)
 	}
@@ -195,7 +201,7 @@ func (e *VipsCLI) runIn(ctx context.Context, cpuMillis *int64, tmpDir string, un
 		argv = append([]string{e.nice, "-n", "10"}, argv...)
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	cmd.Env = childEnv(tmpDir, untrusted, e.threads)
+	cmd.Env = childEnv(tmpDir, untrusted, threads)
 	cmd.Dir = tmpDir
 	cmd.WaitDelay = 2 * time.Second
 	var stdout, stderr bytes.Buffer
@@ -247,45 +253,11 @@ type header struct {
 // readHeader runs `vipsheader -a` on path. It reads only the header; no
 // pixels are decoded. untrusted must be true for user-supplied files.
 func (e *VipsCLI) readHeader(ctx context.Context, cpu *int64, path string, untrusted bool) (header, error) {
-	out, err := e.runIn(ctx, cpu, "", untrusted, e.vipsheader, "-a", path)
+	out, err := e.runIn(ctx, cpu, "", untrusted, 1, e.vipsheader, "-a", path)
 	if err != nil {
 		return header{}, err
 	}
 	return parseHeader(out), nil
-}
-
-// readVHeader reads width, height and bands from the fixed 64-byte header of
-// a libvips native .v file, avoiding a vipsheader process for the engine's
-// own intermediates.
-func readVHeader(path string) (raster, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return raster{}, err
-	}
-	defer f.Close()
-	var b [16]byte
-	if _, err := io.ReadFull(f, b[:]); err != nil {
-		return raster{}, fmt.Errorf("read .v header: %w", err)
-	}
-	var bo binary.ByteOrder
-	switch {
-	case b[0] == 0xb6 && b[1] == 0xa6 && b[2] == 0xf2 && b[3] == 0x08:
-		bo = binary.LittleEndian
-	case b[0] == 0x08 && b[1] == 0xf2 && b[2] == 0xa6 && b[3] == 0xb6:
-		bo = binary.BigEndian
-	default:
-		return raster{}, errors.New("not a vips .v file")
-	}
-	r := raster{
-		Path:  path,
-		W:     int(int32(bo.Uint32(b[4:8]))),
-		H:     int(int32(bo.Uint32(b[8:12]))),
-		Bands: int(int32(bo.Uint32(b[12:16]))),
-	}
-	if r.W <= 0 || r.H <= 0 || r.Bands <= 0 {
-		return raster{}, errors.New("invalid .v header")
-	}
-	return r, nil
 }
 
 func parseHeader(out string) header {
