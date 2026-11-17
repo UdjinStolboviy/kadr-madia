@@ -84,6 +84,7 @@ export interface Project {
   quota_bytes: number | null;
   used_bytes: number;
   disabled: boolean;
+  default_mode?: CompressionMode;
   created_at: ISODateTime;
   updated_at: ISODateTime;
 }
@@ -103,6 +104,7 @@ export interface UpdateProjectRequest {
   quota_bytes?: number | null;
   allowed_origins?: string[];
   disabled?: boolean;
+  default_mode?: CompressionMode;
 }
 
 export const SLUG_RE = /^[a-z][a-z0-9-]{1,31}$/;
@@ -209,6 +211,38 @@ export interface Preset {
   current_version: number;
   params: Record<string, unknown>;
   created_at: ISODateTime;
+}
+
+// ---- Compression modes ------------------------------------------------------
+
+export const COMPRESSION_MODES = ["compact", "balanced", "quality"] as const;
+export type CompressionMode = (typeof COMPRESSION_MODES)[number];
+
+export interface ModeInfo {
+  mode: CompressionMode;
+  description: string;
+  image: Preset;
+  video: Preset;
+  customized: { image: boolean; video: boolean };
+}
+
+export interface ModesResponse {
+  default_mode: CompressionMode;
+  modes: ModeInfo[];
+}
+
+/** Video preset params (docs/PIPELINES.md section 2). */
+export interface VideoParams {
+  kind?: string;
+  video: { codec?: string; maxWidth: number; fps: number; crf: number; maxrate?: string; bufsize?: string; preset?: string; hw?: string };
+  audio: { codec?: string; bitrate?: string; channels?: number; sampleRate?: number };
+  container?: { format?: string; faststart?: boolean };
+  poster?: { atSec?: number; preset?: string; maxBytes?: number };
+  limits?: Record<string, unknown>;
+  retainOriginal?: boolean;
+  /** Also produce an adaptive HLS ladder. */
+  hls?: boolean;
+  [k: string]: unknown;
 }
 
 // ---- System -----------------------------------------------------------------
@@ -409,7 +443,7 @@ export interface PlaygroundResult {
 }
 
 export interface SavePresetVersionRequest {
-  params: ImageParams;
+  params: ImageParams | VideoParams;
   description?: string;
 }
 

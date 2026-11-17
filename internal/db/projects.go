@@ -61,6 +61,7 @@ func originsJSON(o []string) string {
 
 // CreateProject inserts a project. Returns ErrConflict if the slug is taken.
 func (s *Store) CreateProject(ctx context.Context, p *Project) error {
+	p.DefaultMode = defaultModeOr(p.DefaultMode)
 	_, err := s.w.ExecContext(ctx,
 		`INSERT INTO projects (id, slug, name, environment, storage_profile_id, allowed_origins, quota_bytes,
 		  default_mode, disabled_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,

@@ -34,6 +34,7 @@ export const qk = {
   project: (id: string) => ["projects", id] as const,
   apiKeys: (projectId: string) => ["projects", projectId, "api-keys"] as const,
   presets: (projectId: string) => ["projects", projectId, "presets"] as const,
+  modes: (projectId: string) => ["projects", projectId, "modes"] as const,
   storage: ["storage-profiles"] as const,
   system: ["system"] as const,
   audit: ["audit"] as const,
@@ -64,6 +65,12 @@ export const projectQuery = (id: string) =>
 
 export const apiKeysQuery = (projectId: string) =>
   queryOptions({ queryKey: qk.apiKeys(projectId), queryFn: () => api.apiKeys.list(projectId).then((r) => r.items) });
+
+export const modesQuery = (projectId: string) =>
+  queryOptions({
+    queryKey: qk.modes(projectId),
+    queryFn: () => api.projects.modes(projectId),
+  });
 
 export const presetsQuery = (projectId: string) =>
   queryOptions({
@@ -234,8 +241,23 @@ export function useSavePresetVersion(projectId: string) {
       api.projects.savePresetVersion(projectId, v.slug, { params: v.params, description: v.description }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: qk.presets(projectId) });
+      void qc.invalidateQueries({ queryKey: qk.modes(projectId) });
       void qc.invalidateQueries({ queryKey: qk.audit });
     },
+  });
+}
+
+export function useResetPreset(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (slug: string) => api.projects.resetPreset(projectId, slug),
+    onSuccess: (p) => {
+      toast.success(`Reset ${p.slug} to defaults`);
+      void qc.invalidateQueries({ queryKey: qk.presets(projectId) });
+      void qc.invalidateQueries({ queryKey: qk.modes(projectId) });
+      void qc.invalidateQueries({ queryKey: qk.audit });
+    },
+    onError: onErrorToast("Couldn't reset preset"),
   });
 }
 
@@ -290,6 +312,17 @@ export function useRotateSigningKey(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => api.signingKeys.rotate(projectId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.signingKeys(projectId) });
+      void qc.invalidateQueries({ queryKey: qk.audit });
+    },
+  });
+}
+
+export function usePublishSigningKeys(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.signingKeys.publish(),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: qk.signingKeys(projectId) });
       void qc.invalidateQueries({ queryKey: qk.audit });

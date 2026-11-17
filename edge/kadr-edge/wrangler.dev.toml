@@ -1,0 +1,11 @@
+# Local-only config for `wrangler dev --local` and the integration test.
+# Same Worker and binding names as wrangler.toml, but no custom-domain route
+# (wrangler dev cannot infer a host from the "media.<domain>" placeholder).
+name = "kadr-edge"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+workers_dev = false
+
+[[r2_buckets]]
+binding = "PRIVATE"
+bucket_name = "kadr-private"

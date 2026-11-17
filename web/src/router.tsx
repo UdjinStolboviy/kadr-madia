@@ -70,8 +70,8 @@ const projectsRoute = createRoute({
   component: lazyRouteComponent(() => import("@/routes/projects")),
 });
 
-export type ProjectTab = "settings" | "keys" | "presets" | "webhooks" | "signing" | "cloud";
-const TABS: ProjectTab[] = ["settings", "keys", "presets", "webhooks", "signing", "cloud"];
+export type ProjectTab = "settings" | "keys" | "presets" | "modes" | "webhooks" | "signing" | "cloud";
+const TABS: ProjectTab[] = ["settings", "keys", "presets", "modes", "webhooks", "signing", "cloud"];
 
 export const projectDetailRoute = createRoute({
   getParentRoute: () => appRoute,
@@ -131,7 +131,10 @@ const analyticsRoute = createRoute({
 const playgroundRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/playground",
-  validateSearch: projectSearch,
+  validateSearch: (s: Record<string, unknown>): { project?: string; preset?: string } => ({
+    ...projectSearch(s),
+    ...(typeof s.preset === "string" && s.preset ? { preset: s.preset } : {}),
+  }),
   component: lazyRouteComponent(() => import("@/routes/playground")),
 });
 

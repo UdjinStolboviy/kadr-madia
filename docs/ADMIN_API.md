@@ -191,3 +191,15 @@ Audit actions: `webhook.create`, `webhook.delete`, `webhook.test`, `delivery.ret
 | PATCH | `/admin/api/projects/{id}` | `{ default_mode: "compact"\|"balanced"\|"quality" }` | `200 Project` (also exposes `default_mode`) |
 | POST | `/admin/api/projects/{id}/presets/{slug}/versions` | `{ params, description? }` | image **and video** presets (validated: video `maxWidth` 160–4096, `fps` 1–60, `crf` 14–40, bitrates like `900k`/`4M`, x264 preset names, audio channels 1–2) |
 | POST | `/admin/api/projects/{id}/presets/{slug}/reset` | — | `200 Preset` — restores a built-in preset (incl. the six mode presets) as a new version |
+
+## Billing / metering (M5, preview)
+
+Kadr meters usage per project and day (`usage_daily`) and computes an **invoice preview** from unit prices; pushing invoices to a payment provider (Stripe) is not implemented.
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| GET | `/admin/api/billing/rates` | — | `200 { currency, per_gb_stored_month, per_gb_ingested, per_video_minute, per_1000_uploads, minimum_monthly_fee }` |
+| PUT | `/admin/api/billing/rates` | the same object | `200` (audit `billing.rates`) |
+| GET | `/admin/api/projects/{id}/billing?month=YYYY-MM[&format=csv]` | — | `200 { project_id, month, currency, lines: [{ item, quantity, unit, unit_price, amount }], subtotal, total, usage, days }`; `format=csv` downloads the per-day metering rows |
+
+Storage is billed on the project's current footprint (`used_bytes`); ingest, video minutes and uploads on the month's metered usage; `total = max(subtotal, minimum_monthly_fee)`.

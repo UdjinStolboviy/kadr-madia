@@ -417,7 +417,7 @@ function Results({ result, before, params, projectId, presets, baseSlug }: {
 }
 
 export default function PlaygroundPage() {
-  const { project } = route.useSearch();
+  const { project, preset: presetParam } = route.useSearch();
   const navigate = route.useNavigate();
   const setProject = useCallback((id: string) => void navigate({ search: { project: id }, replace: true }), [navigate]);
   const { projects, list, active } = useActiveProject(project, setProject);
@@ -442,12 +442,12 @@ export default function PlaygroundPage() {
   );
 
   // Pick the project's first image preset when presets load or the project changes.
-  const firstSlug = imagePresets[0]?.slug;
+  const initial = imagePresets.find((p) => p.slug === presetParam) ?? imagePresets[0];
   const [seeded, setSeeded] = useState<string | null>(null);
-  const seedKey = `${active?.id ?? ""}:${firstSlug ?? ""}`;
+  const seedKey = `${active?.id ?? ""}:${initial?.slug ?? ""}`;
   if (active && presets.isSuccess && seeded !== seedKey) {
     setSeeded(seedKey);
-    const first = imagePresets[0];
+    const first = initial;
     setBaseSlug(first?.slug);
     setParams(normalize(first?.params));
   }

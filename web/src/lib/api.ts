@@ -19,6 +19,7 @@ import type {
   ItemsResponse,
   Job,
   JobFilters,
+  ModesResponse,
   LoginRequest,
   PlaygroundResult,
   Preset,
@@ -242,6 +243,9 @@ export const api = {
     presets: (id: string) => request<ItemsResponse<Preset>>(`/projects/${enc(id)}/presets`),
     savePresetVersion: (id: string, slug: string, body: SavePresetVersionRequest) =>
       request<Preset>(`/projects/${enc(id)}/presets/${enc(slug)}/versions`, { method: "POST", body }),
+    modes: (id: string) => request<ModesResponse>(`/projects/${enc(id)}/modes`),
+    resetPreset: (id: string, slug: string) =>
+      request<Preset>(`/projects/${enc(id)}/presets/${enc(slug)}/reset`, { method: "POST" }),
     analytics: (id: string, days: number) => request<Analytics>(`/projects/${enc(id)}/analytics`, { query: { days } }),
   },
 
@@ -285,6 +289,7 @@ export const api = {
     rotate: (projectId: string) =>
       request<CreateSigningKeyResponse>(`/projects/${enc(projectId)}/signing-keys`, { method: "POST" }),
     retire: (kid: string) => request<void>(`/signing-keys/${enc(kid)}`, { method: "DELETE" }),
+    publish: () => request<{ published: number }>("/signing-keys/publish", { method: "POST" }),
   },
 
   cloud: {
