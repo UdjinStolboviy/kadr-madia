@@ -13,6 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useT } from "@/i18n/react";
 import { api, errorMessage, isApiError } from "@/lib/api";
 import { formatBytes, formatMs } from "@/lib/format";
 import { presetsQuery, useSavePresetVersion } from "@/lib/queries";
@@ -88,6 +89,7 @@ function Toggle({ id, label, checked, onChange }: { id: string; label: string; c
 }
 
 function ParamsForm({ params, onChange }: { params: ImageParams; onChange: (p: ImageParams) => void }) {
+  const t = useT();
   const q = params.quality;
   const setQ = (patch: Partial<ImageParams["quality"]>) => onChange({ ...params, quality: { ...q, ...patch } });
   const setResize = (patch: Partial<ImageParams["resize"]>) => onChange({ ...params, resize: { ...params.resize, ...patch } });
@@ -100,54 +102,54 @@ function ParamsForm({ params, onChange }: { params: ImageParams; onChange: (p: I
   return (
     <div className="grid gap-4">
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Max width" htmlFor="pg-w">
+        <Field label={t("playground.form.maxWidth")} htmlFor="pg-w">
           <NumInput id="pg-w" value={params.resize.maxWidth} min={16} max={8192} onChange={(v) => setResize({ maxWidth: v ?? 0 })} />
         </Field>
-        <Field label="Max height" htmlFor="pg-h">
+        <Field label={t("playground.form.maxHeight")} htmlFor="pg-h">
           <NumInput id="pg-h" value={params.resize.maxHeight} min={16} max={8192} onChange={(v) => setResize({ maxHeight: v ?? 0 })} />
         </Field>
       </div>
-      <Field label="Fit" htmlFor="pg-fit">
+      <Field label={t("playground.form.fit")} htmlFor="pg-fit">
         <Select value={params.resize.fit} onValueChange={(v) => setResize({ fit: v })}>
           <SelectTrigger id="pg-fit" className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="inside">inside — keep aspect ratio</SelectItem>
-            <SelectItem value="cover">cover — crop to fill</SelectItem>
+            <SelectItem value="inside">{t("playground.form.fitInside")}</SelectItem>
+            <SelectItem value="cover">{t("playground.form.fitCover")}</SelectItem>
           </SelectContent>
         </Select>
       </Field>
       <div className="flex flex-wrap gap-x-6 gap-y-2">
         <Toggle
           id="pg-gray"
-          label="Grayscale"
+          label={t("playground.form.grayscale")}
           checked={params.color.grayscale}
           onChange={(v) => onChange({ ...params, color: { ...params.color, grayscale: v } })}
         />
         <Toggle
           id="pg-norm"
-          label="Normalise"
+          label={t("playground.form.normalise")}
           checked={params.color.normalise}
           onChange={(v) => onChange({ ...params, color: { ...params.color, normalise: v } })}
         />
       </div>
 
       <div className="grid gap-3 rounded-lg border p-3">
-        <Field label="Quality mode" htmlFor="pg-mode">
+        <Field label={t("playground.form.qualityMode")} htmlFor="pg-mode">
           <Select value={q.mode} onValueChange={(v) => setQ({ mode: v as ImageParams["quality"]["mode"] })}>
             <SelectTrigger id="pg-mode" className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="budget">budget — fit a byte budget</SelectItem>
-              <SelectItem value="ssim">ssim — target similarity</SelectItem>
-              <SelectItem value="fixed">fixed — constant quality</SelectItem>
+              <SelectItem value="budget">{t("playground.form.modeBudget")}</SelectItem>
+              <SelectItem value="ssim">{t("playground.form.modeSsim")}</SelectItem>
+              <SelectItem value="fixed">{t("playground.form.modeFixed")}</SelectItem>
             </SelectContent>
           </Select>
         </Field>
         {q.mode === "budget" && (
-          <Field label="Max size (KB)" htmlFor="pg-maxb">
+          <Field label={t("playground.form.maxSize")} htmlFor="pg-maxb">
             <NumInput
               id="pg-maxb"
               value={q.maxBytes === undefined ? undefined : Math.round(q.maxBytes / 1024)}
@@ -158,21 +160,21 @@ function ParamsForm({ params, onChange }: { params: ImageParams; onChange: (p: I
           </Field>
         )}
         {q.mode === "ssim" && (
-          <Field label="Target SSIM" htmlFor="pg-target" hint="0.95–0.999 — higher keeps more detail.">
+          <Field label={t("playground.form.targetSsim")} htmlFor="pg-target" hint={t("playground.form.targetSsimHint")}>
             <NumInput id="pg-target" value={q.target} min={0.8} max={1} step={0.001} onChange={(v) => setQ({ target: v })} />
           </Field>
         )}
         {q.mode === "fixed" && (
-          <Field label="Quality (q)" htmlFor="pg-q">
+          <Field label={t("playground.form.quality")} htmlFor="pg-q">
             <NumInput id="pg-q" value={q.q} min={1} max={100} onChange={(v) => setQ({ q: v })} />
           </Field>
         )}
         {q.mode !== "fixed" && (
           <div className="grid grid-cols-2 gap-3">
-            <Field label="q max" htmlFor="pg-qmax">
+            <Field label={t("playground.form.qMax")} htmlFor="pg-qmax">
               <NumInput id="pg-qmax" value={q.qMax} min={1} max={100} onChange={(v) => setQ({ qMax: v })} />
             </Field>
-            <Field label="q min" htmlFor="pg-qmin">
+            <Field label={t("playground.form.qMin")} htmlFor="pg-qmin">
               <NumInput id="pg-qmin" value={q.qMin} min={1} max={100} onChange={(v) => setQ({ qMin: v })} />
             </Field>
           </div>
@@ -180,7 +182,7 @@ function ParamsForm({ params, onChange }: { params: ImageParams; onChange: (p: I
       </div>
 
       <fieldset className="grid gap-2">
-        <legend className="mb-1 text-sm font-medium">Outputs</legend>
+        <legend className="mb-1 text-sm font-medium">{t("playground.form.outputs")}</legend>
         <div className="flex flex-wrap gap-x-6 gap-y-2">
           {FORMATS.map((f) => (
             <Toggle key={f} id={`pg-out-${f}`} label={f.toUpperCase()} checked={hasFormat(f)} onChange={(v) => toggleFormat(f, v)} />
@@ -192,6 +194,7 @@ function ParamsForm({ params, onChange }: { params: ImageParams; onChange: (p: I
 }
 
 function BeforeAfter({ before, after }: { before: string; after: PlaygroundRendition }) {
+  const t = useT();
   const [pos, setPos] = useState(50);
   const afterSrc = useMemo(() => `data:${after.content_type};base64,${after.data}`, [after]);
   const ratio = after.width / Math.max(1, after.height);
@@ -201,7 +204,7 @@ function BeforeAfter({ before, after }: { before: string; after: PlaygroundRendi
         className="relative mx-auto overflow-hidden rounded-lg border bg-muted select-none"
         style={{ aspectRatio: String(ratio), width: `min(100%, calc(70vh * ${ratio}))` }}
       >
-        <img src={before} alt="Original" className="absolute inset-0 size-full object-contain" draggable={false} />
+        <img src={before} alt={t("playground.compare.original")} className="absolute inset-0 size-full object-contain" draggable={false} />
         <img
           src={afterSrc}
           alt={`${after.name} ${after.format}`}
@@ -212,7 +215,7 @@ function BeforeAfter({ before, after }: { before: string; after: PlaygroundRendi
         <div className="pointer-events-none absolute inset-y-0 w-0.5 bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.3)]" style={{ left: `${pos}%` }}>
           <div className="absolute top-1/2 left-1/2 size-7 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-white shadow" />
         </div>
-        <span className="pointer-events-none absolute top-2 left-2 rounded bg-black/60 px-1.5 py-0.5 text-[11px] text-white">Original</span>
+        <span className="pointer-events-none absolute top-2 left-2 rounded bg-black/60 px-1.5 py-0.5 text-[11px] text-white">{t("playground.compare.original")}</span>
         <span className="pointer-events-none absolute top-2 right-2 rounded bg-black/60 px-1.5 py-0.5 text-[11px] text-white">
           {after.format.toUpperCase()}
         </span>
@@ -223,7 +226,7 @@ function BeforeAfter({ before, after }: { before: string; after: PlaygroundRendi
           step={0.1}
           value={pos}
           onChange={(e) => setPos(Number(e.target.value))}
-          aria-label="Before / after position"
+          aria-label={t("playground.compare.position")}
           className="absolute inset-0 size-full cursor-ew-resize opacity-0"
         />
       </div>
@@ -246,26 +249,27 @@ function SaveDialog({
   baseSlug: string | undefined;
   params: ImageParams;
 }) {
+  const t = useT();
   const NEW = "__new";
   const [target, setTarget] = useState(baseSlug ?? NEW);
   const [newSlug, setNewSlug] = useState("");
   const [description, setDescription] = useState("");
   const save = useSavePresetVersion(projectId);
   const slug = target === NEW ? newSlug.trim() : target;
-  const slugError = target === NEW && newSlug !== "" && !SLUG_RE.test(newSlug.trim()) ? "Lowercase letters, digits and dashes, starting with a letter (2–32)." : undefined;
+  const slugError = target === NEW && newSlug !== "" && !SLUG_RE.test(newSlug.trim()) ? t("playground.save.slugError") : undefined;
   const fieldErr = isApiError(save.error) ? (save.error.fieldErrors.params ?? save.error.fieldErrors.slug) : undefined;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Save as new version</DialogTitle>
+          <DialogTitle>{t("playground.save.title")}</DialogTitle>
           <DialogDescription>
-            Adds a version to an existing preset, or creates a new one. Existing assets keep the version they were processed with.
+            {t("playground.save.description")}
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
-          <Field label="Preset" htmlFor="pg-save-slug">
+          <Field label={t("playground.save.preset")} htmlFor="pg-save-slug">
             <Select value={target} onValueChange={setTarget}>
               <SelectTrigger id="pg-save-slug" className="w-full">
                 <SelectValue />
@@ -276,16 +280,16 @@ function SaveDialog({
                     {p.slug} <span className="text-xs text-muted-foreground">→ v{p.current_version + 1}</span>
                   </SelectItem>
                 ))}
-                <SelectItem value={NEW}>New preset…</SelectItem>
+                <SelectItem value={NEW}>{t("playground.save.newPreset")}</SelectItem>
               </SelectContent>
             </Select>
           </Field>
           {target === NEW && (
             <>
-              <Field label="New preset slug" htmlFor="pg-save-new" error={slugError}>
+              <Field label={t("playground.save.newSlug")} htmlFor="pg-save-new" error={slugError}>
                 <Input id="pg-save-new" value={newSlug} onChange={(e) => setNewSlug(e.target.value)} placeholder="hero-banner" className="font-mono" />
               </Field>
-              <Field label="Description" htmlFor="pg-save-desc">
+              <Field label={t("playground.save.descriptionLabel")} htmlFor="pg-save-desc">
                 <Input id="pg-save-desc" value={description} onChange={(e) => setDescription(e.target.value)} />
               </Field>
             </>
@@ -298,7 +302,7 @@ function SaveDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("playground.save.cancel")}
           </Button>
           <Button
             disabled={!slug || !!slugError || save.isPending}
@@ -307,7 +311,7 @@ function SaveDialog({
                 { slug, params, description: target === NEW ? description.trim() || undefined : undefined },
                 {
                   onSuccess: (p) => {
-                    toast.success(`Saved ${p.slug} v${p.current_version}`);
+                    toast.success(t("playground.save.saved", { slug: p.slug, version: p.current_version }));
                     onOpenChange(false);
                   },
                 },
@@ -315,7 +319,7 @@ function SaveDialog({
             }
           >
             {save.isPending && <Loader2 className="animate-spin" />}
-            Save version
+            {t("playground.save.submit")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -331,6 +335,7 @@ function Results({ result, before, params, projectId, presets, baseSlug }: {
   presets: Preset[];
   baseSlug: string | undefined;
 }) {
+  const t = useT();
   const [picked, setPicked] = useState(0);
   const [saveOpen, setSaveOpen] = useState(false);
   const idx = Math.min(picked, result.renditions.length - 1);
@@ -340,11 +345,16 @@ function Results({ result, before, params, projectId, presets, baseSlug }: {
     <div className="grid gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="text-sm text-muted-foreground">
-          Source {result.source.format.toUpperCase()} · {result.source.width}×{result.source.height} · {formatBytes(result.source.bytes)} ·
-          processed in {formatMs(result.elapsed_ms)}
+          {t("playground.results.source", {
+            format: result.source.format.toUpperCase(),
+            width: result.source.width,
+            height: result.source.height,
+            size: formatBytes(result.source.bytes),
+            time: formatMs(result.elapsed_ms),
+          })}
         </div>
         <Button onClick={() => setSaveOpen(true)}>
-          <Save /> Save as new version
+          <Save /> {t("playground.results.saveAsNew")}
         </Button>
       </div>
 
@@ -354,12 +364,12 @@ function Results({ result, before, params, projectId, presets, baseSlug }: {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b text-left text-xs text-muted-foreground">
-              <th className="px-4 py-2 font-medium">Rendition</th>
-              <th className="px-2 py-2 font-medium">Size</th>
-              <th className="hidden px-2 py-2 font-medium sm:table-cell">Dimensions</th>
+              <th className="px-4 py-2 font-medium">{t("playground.results.rendition")}</th>
+              <th className="px-2 py-2 font-medium">{t("playground.results.size")}</th>
+              <th className="hidden px-2 py-2 font-medium sm:table-cell">{t("playground.results.dimensions")}</th>
               <th className="px-2 py-2 font-medium">SSIM</th>
-              <th className="hidden px-2 py-2 font-medium md:table-cell">Quality</th>
-              <th className="hidden px-2 py-2 font-medium md:table-cell">Iterations</th>
+              <th className="hidden px-2 py-2 font-medium md:table-cell">{t("playground.results.quality")}</th>
+              <th className="hidden px-2 py-2 font-medium md:table-cell">{t("playground.results.iterations")}</th>
               <th className="px-4 py-2 font-medium" />
             </tr>
           </thead>
@@ -392,7 +402,7 @@ function Results({ result, before, params, projectId, presets, baseSlug }: {
                 <td className="px-4 py-2 text-right">
                   {r.over_budget && (
                     <StatusBadge tone="warning">
-                      <AlertTriangle className="size-3" /> over budget
+                      <AlertTriangle className="size-3" /> {t("playground.results.overBudget")}
                     </StatusBadge>
                   )}
                 </td>
@@ -417,6 +427,7 @@ function Results({ result, before, params, projectId, presets, baseSlug }: {
 }
 
 export default function PlaygroundPage() {
+  const t = useT();
   const { project, preset: presetParam } = route.useSearch();
   const navigate = route.useNavigate();
   const setProject = useCallback((id: string) => void navigate({ search: { project: id }, replace: true }), [navigate]);
@@ -464,7 +475,7 @@ export default function PlaygroundPage() {
     setFileError(null);
     if (!f) return;
     if (f.size > MAX_SAMPLE) {
-      setFileError("The sample is limited to 25 MB.");
+      setFileError(t("playground.sample.tooLarge"));
       return;
     }
     if (urlRef.current) URL.revokeObjectURL(urlRef.current);
@@ -485,29 +496,29 @@ export default function PlaygroundPage() {
   return (
     <>
       <PageHeader
-        title="Playground"
-        description="Try preset parameters on a sample image. Nothing is stored."
+        title={t("playground.title")}
+        description={t("playground.description")}
         actions={<ProjectSelect projects={list} value={active?.id} onChange={setProject} loading={projects.isPending} />}
       />
 
       {projects.isError ? (
         <ErrorState error={projects.error} onRetry={() => void projects.refetch()} />
       ) : projects.isSuccess && list.length === 0 ? (
-        <EmptyState icon={<FolderKanban />} title="No projects yet" description="Create a project to experiment with its presets." />
+        <EmptyState icon={<FolderKanban />} title={t("playground.noProjects.title")} description={t("playground.noProjects.description")} />
       ) : (
         <div className="grid gap-6 lg:grid-cols-[22rem_1fr]">
           <Card className="h-fit gap-4 py-5">
             <CardHeader className="px-5">
-              <CardTitle className="text-sm font-medium">Parameters</CardTitle>
+              <CardTitle className="text-sm font-medium">{t("playground.parameters")}</CardTitle>
             </CardHeader>
             <CardContent className="grid gap-4 px-5">
-              <Field label="Sample image" htmlFor="pg-file" error={fileError ?? undefined}>
+              <Field label={t("playground.sample.label")} htmlFor="pg-file" error={fileError ?? undefined}>
                 <label
                   htmlFor="pg-file"
                   className="flex cursor-pointer items-center gap-2 rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground hover:bg-muted/50"
                 >
                   <Upload className="size-4 shrink-0" />
-                  <span className="truncate">{file ? `${file.name} · ${formatBytes(file.size)}` : "Choose an image (max 25 MB)"}</span>
+                  <span className="truncate">{file ? `${file.name} · ${formatBytes(file.size)}` : t("playground.sample.choose")}</span>
                 </label>
                 <input
                   id="pg-file"
@@ -520,10 +531,10 @@ export default function PlaygroundPage() {
                   }}
                 />
               </Field>
-              <Field label="Base preset" htmlFor="pg-preset">
+              <Field label={t("playground.basePreset")} htmlFor="pg-preset">
                 <Select value={baseSlug ?? ""} onValueChange={pickPreset} disabled={imagePresets.length === 0}>
                   <SelectTrigger id="pg-preset" className="w-full">
-                    <SelectValue placeholder={presets.isPending ? "Loading…" : "No image presets"} />
+                    <SelectValue placeholder={presets.isPending ? t("playground.loading") : t("playground.noImagePresets")} />
                   </SelectTrigger>
                   <SelectContent>
                     {imagePresets.map((p) => (
@@ -537,7 +548,7 @@ export default function PlaygroundPage() {
               <ParamsForm params={params} onChange={setParams} />
               <Button disabled={!file || run.isPending} onClick={() => file && run.mutate({ file, params })}>
                 {run.isPending ? <Loader2 className="animate-spin" /> : <Play />}
-                {run.isPending ? "Processing…" : "Run"}
+                {run.isPending ? t("playground.processingShort") : t("playground.run")}
               </Button>
             </CardContent>
           </Card>
@@ -545,7 +556,7 @@ export default function PlaygroundPage() {
           <div className="min-w-0">
             {run.isError ? (
               <ErrorState
-                title="Processing failed"
+                title={t("playground.failed")}
                 error={run.error}
                 onRetry={file ? () => run.mutate({ file, params }) : undefined}
                 className="mb-4"
@@ -564,11 +575,11 @@ export default function PlaygroundPage() {
             ) : !run.isError ? (
               <EmptyState
                 icon={run.isPending ? <Loader2 className="animate-spin" /> : <FlaskConical />}
-                title={run.isPending ? "Processing sample…" : "Run a sample"}
+                title={run.isPending ? t("playground.empty.processingTitle") : t("playground.empty.title")}
                 description={
                   run.isPending
-                    ? "Encoding every output; budget and SSIM modes search for the best quality."
-                    : "Upload an image, tweak the parameters and press Run to compare the original with each rendition."
+                    ? t("playground.empty.processingDescription")
+                    : t("playground.empty.description")
                 }
               />
             ) : null}

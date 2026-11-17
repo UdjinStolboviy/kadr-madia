@@ -14,6 +14,7 @@ import {
 import type { ReactNode } from "react";
 
 import { PageHeader, RelativeTime, StatusBadge, TestStatusBadge } from "@/components/common";
+import { useT } from "@/i18n/react";
 import { ErrorState } from "@/components/states";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -47,6 +48,7 @@ function StatCard({
   value: ReactNode;
   footer: ReactNode;
 }) {
+  const t = useT();
   return (
     <Card className="group relative gap-3 py-5 transition-colors hover:border-foreground/15">
       <CardHeader className="flex flex-row items-center justify-between px-5">
@@ -67,7 +69,7 @@ function StatCard({
         )}
       </CardContent>
       <Link to={to} className="absolute inset-0 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
-        <span className="sr-only">Open {title}</span>
+        <span className="sr-only">{t("overview.open", { title })}</span>
       </Link>
     </Card>
   );
@@ -113,54 +115,55 @@ function SetupStep({
 }
 
 function GettingStarted({ hasStorage, hasProject, firstProjectId }: { hasStorage: boolean; hasProject: boolean; firstProjectId?: string }) {
+  const t = useT();
   const current = !hasStorage ? 1 : !hasProject ? 2 : 3;
   return (
     <Card className="mb-6 gap-4 py-5">
       <CardHeader className="px-5">
-        <CardTitle className="text-base">Get started with Kadr</CardTitle>
-        <p className="text-sm text-muted-foreground">Three steps to your first upload-ready project.</p>
+        <CardTitle className="text-base">{t("overview.start.title")}</CardTitle>
+        <p className="text-sm text-muted-foreground">{t("overview.start.subtitle")}</p>
       </CardHeader>
       <CardContent className="px-5">
         <ol className="flex flex-col gap-3 md:flex-row">
           <SetupStep
             n={1}
-            title="Add R2 storage"
-            description="Connect a Cloudflare R2 account with a public and a private bucket."
+            title={t("overview.start.s1.title")}
+            description={t("overview.start.s1.desc")}
             done={hasStorage}
             active={current === 1}
             action={
               <Button asChild size="sm">
                 <Link to="/storage" search={{ new: true }}>
-                  <HardDrive /> Add storage
+                  <HardDrive /> {t("overview.start.s1.action")}
                 </Link>
               </Button>
             }
           />
           <SetupStep
             n={2}
-            title="Create a project"
-            description="Each app gets its own project with presets, quotas and keys."
+            title={t("overview.start.s2.title")}
+            description={t("overview.start.s2.desc")}
             done={hasProject}
             active={current === 2}
             action={
               <Button asChild size="sm">
                 <Link to="/projects" search={{ new: true }}>
-                  <FolderKanban /> New project
+                  <FolderKanban /> {t("overview.start.s2.action")}
                 </Link>
               </Button>
             }
           />
           <SetupStep
             n={3}
-            title="Create an API key"
-            description="Use the key from your backend to issue upload tickets."
+            title={t("overview.start.s3.title")}
+            description={t("overview.start.s3.desc")}
             done={false}
             active={current === 3}
             action={
               firstProjectId ? (
                 <Button asChild size="sm">
                   <Link to="/projects/$projectId" params={{ projectId: firstProjectId }} search={{ tab: "keys" }}>
-                    <KeyRound /> Create API key
+                    <KeyRound /> {t("overview.start.s3.action")}
                   </Link>
                 </Button>
               ) : undefined
@@ -173,6 +176,7 @@ function GettingStarted({ hasStorage, hasProject, firstProjectId }: { hasStorage
 }
 
 export default function OverviewPage() {
+  const t = useT();
   const me = useQuery(meQuery);
   const projects = useQuery(projectsQuery);
   const storage = useQuery(storageQuery);
@@ -196,8 +200,8 @@ export default function OverviewPage() {
   return (
     <>
       <PageHeader
-        title={firstName ? `Welcome back, ${firstName}` : "Overview"}
-        description="A snapshot of your Kadr instance."
+        title={firstName ? t("overview.welcome", { name: firstName }) : t("overview.title")}
+        description={t("overview.description")}
       />
 
       {(projects.isError || storage.isError) && (
@@ -221,43 +225,41 @@ export default function OverviewPage() {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <StatCard
-          title="Projects"
+          title={t("overview.projects")}
           icon={FolderKanban}
           to="/projects"
           loading={projects.isPending}
           value={projectList.length}
           footer={
             projectList.length ? (
-              <>
-                {active} active · {formatBytes(used)} stored
-              </>
+              t("overview.projects.footer", { active, size: formatBytes(used) })
             ) : (
-              "No projects yet"
+              t("overview.projects.none")
             )
           }
         />
         <StatCard
-          title="Storage profiles"
+          title={t("overview.storage")}
           icon={HardDrive}
           to="/storage"
           loading={storage.isPending}
           value={storageList.length}
           footer={
             storageList.length === 0 ? (
-              "Connect R2 to start"
+              t("overview.storage.empty")
             ) : (
               <span className="flex flex-wrap items-center gap-1.5">
-                {passed > 0 && <StatusBadge tone="success">{passed} passing</StatusBadge>}
-                {failed > 0 && <StatusBadge tone="danger">{failed} failing</StatusBadge>}
+                {passed > 0 && <StatusBadge tone="success">{t("overview.storage.passing", { n: passed })}</StatusBadge>}
+                {failed > 0 && <StatusBadge tone="danger">{t("overview.storage.failing", { n: failed })}</StatusBadge>}
                 {storageList.length - passed - failed > 0 && (
-                  <StatusBadge tone="neutral">{storageList.length - passed - failed} untested</StatusBadge>
+                  <StatusBadge tone="neutral">{t("overview.storage.untested", { n: storageList.length - passed - failed })}</StatusBadge>
                 )}
               </span>
             )
           }
         />
         <StatCard
-          title="System"
+          title={t("overview.system")}
           icon={Cpu}
           to="/system"
           loading={system.isPending}
@@ -273,9 +275,9 @@ export default function OverviewPage() {
           }
           footer={
             system.isError
-              ? "System info unavailable"
+              ? t("overview.system.unavailable")
               : system.data
-                ? `capabilities ready · up ${formatDuration(system.data.uptime_sec)}`
+                ? t("overview.system.footer", { up: formatDuration(system.data.uptime_sec) })
                 : null
           }
         />
@@ -284,10 +286,10 @@ export default function OverviewPage() {
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
         <Card className="gap-0 py-0">
           <CardHeader className="flex flex-row items-center justify-between border-b px-5 py-4">
-            <CardTitle className="text-sm">Storage health</CardTitle>
+            <CardTitle className="text-sm">{t("overview.health.title")}</CardTitle>
             <Button asChild variant="ghost" size="xs">
               <Link to="/storage">
-                Manage <ArrowRight />
+                {t("overview.manage")} <ArrowRight />
               </Link>
             </Button>
           </CardHeader>
@@ -298,7 +300,7 @@ export default function OverviewPage() {
                 <Skeleton className="h-5 w-3/4" />
               </div>
             ) : storageList.length === 0 ? (
-              <p className="p-5 text-sm text-muted-foreground">No storage profiles configured.</p>
+              <p className="p-5 text-sm text-muted-foreground">{t("overview.health.empty")}</p>
             ) : (
               <ul className="divide-y">
                 {storageList.map((s) => (
@@ -306,7 +308,7 @@ export default function OverviewPage() {
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium">{s.name}</div>
                       <div className="text-xs text-muted-foreground">
-                        <span className="uppercase">{s.provider}</span> · tested <RelativeTime value={s.last_test_at} />
+                        <span className="uppercase">{s.provider}</span> · {t("overview.health.tested")} <RelativeTime value={s.last_test_at} />
                       </div>
                     </div>
                     <TestStatusBadge ok={s.last_test_ok} at={s.last_test_at} />
@@ -319,10 +321,10 @@ export default function OverviewPage() {
 
         <Card className="gap-0 py-0">
           <CardHeader className="flex flex-row items-center justify-between border-b px-5 py-4">
-            <CardTitle className="text-sm">Capabilities</CardTitle>
+            <CardTitle className="text-sm">{t("overview.caps.title")}</CardTitle>
             <Button asChild variant="ghost" size="xs">
               <Link to="/system">
-                Details <ArrowRight />
+                {t("overview.details")} <ArrowRight />
               </Link>
             </Button>
           </CardHeader>
@@ -334,7 +336,7 @@ export default function OverviewPage() {
                 ))}
               </div>
             ) : system.isError ? (
-              <p className="text-sm text-muted-foreground">Couldn't load system information.</p>
+              <p className="text-sm text-muted-foreground">{t("overview.caps.error")}</p>
             ) : (
               <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                 {caps.map(([k, c]) => (
@@ -355,7 +357,7 @@ export default function OverviewPage() {
 
       {hasKeysHint && (
         <p className="mt-6 text-center text-xs text-muted-foreground">
-          Tip: API keys are created per project — open a project and switch to the <em>API keys</em> tab.
+          {t("overview.tip")}
         </p>
       )}
     </>

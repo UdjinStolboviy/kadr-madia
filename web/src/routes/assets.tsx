@@ -21,6 +21,8 @@ import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useT } from "@/i18n/react";
+import type { MessageKey } from "@/i18n/dictionaries";
 import { useActiveProject } from "@/lib/use-active-project";
 import { api } from "@/lib/api";
 import { formatBytes, formatDateTime } from "@/lib/format";
@@ -33,6 +35,25 @@ const PAGE = 30;
 
 type Tone = "success" | "danger" | "warning" | "neutral" | "info";
 const STATUS_TONE: Record<string, Tone> = { ready: "success", failed: "danger", processing: "info" };
+
+const ENUM_KEY: Record<string, MessageKey> = {
+  ready: "assets.status.ready",
+  failed: "assets.status.failed",
+  processing: "assets.status.processing",
+  image: "assets.kind.image",
+  video: "assets.kind.video",
+  public: "assets.visibility.public",
+  private: "assets.visibility.private",
+};
+
+/** Translated label for an API enum value; unknown values are shown as-is. */
+function useEnumLabel() {
+  const t = useT();
+  return (v: string) => {
+    const k = ENUM_KEY[v];
+    return k ? t(k) : v;
+  };
+}
 
 function previewRendition(a: Asset): Rendition | undefined {
   return a.renditions.find((r) => r.url && r.format !== "mp4" && r.format !== "webm" && r.format !== "m3u8");
@@ -52,6 +73,7 @@ function Thumb({ asset, className }: { asset: Asset; className?: string }) {
 }
 
 function Preview({ asset }: { asset: Asset }) {
+  const t = useT();
   const video = asset.renditions.find((r) => r.url && (r.format === "mp4" || r.format === "webm"));
   const img = previewRendition(asset);
   if (asset.status === "failed") return null;
@@ -76,7 +98,7 @@ function Preview({ asset }: { asset: Asset }) {
   if (asset.visibility !== "public") {
     return (
       <p className="rounded-lg border border-dashed p-4 text-center text-xs text-muted-foreground">
-        Private asset — previews need a signed URL.
+        {t("assets.privatePreview")}
       </p>
     );
   }
@@ -87,6 +109,8 @@ function AssetDetail({ projectId, assetId, onClose }: { projectId: string; asset
   const asset = useQuery({ ...assetQuery(projectId, assetId ?? ""), enabled: !!assetId });
   const del = useDeleteAsset(projectId);
   const [confirm, setConfirm] = useState(false);
+  const t = useT();
+  const enumLabel = useEnumLabel();
   const a = asset.data;
 
   return (
@@ -114,33 +138,33 @@ function AssetDetail({ projectId, assetId, onClose }: { projectId: string; asset
                 </div>
               )}
               <dl className="divide-y">
-                <KeyValue label="Status">
-                  <StatusBadge tone={STATUS_TONE[a.status] ?? "neutral"}>{a.status}</StatusBadge>
+                <KeyValue label={t("assets.status")}>
+                  <StatusBadge tone={STATUS_TONE[a.status] ?? "neutral"}>{enumLabel(a.status)}</StatusBadge>
                 </KeyValue>
-                <KeyValue label="Kind">{a.kind}</KeyValue>
-                <KeyValue label="Namespace" mono>
+                <KeyValue label={t("assets.kind")}>{enumLabel(a.kind)}</KeyValue>
+                <KeyValue label={t("assets.namespace")} mono>
                   {a.namespace}
                 </KeyValue>
-                <KeyValue label="Visibility">{a.visibility}</KeyValue>
-                <KeyValue label="Preset">
+                <KeyValue label={t("assets.visibility")}>{enumLabel(a.visibility)}</KeyValue>
+                <KeyValue label={t("assets.preset")}>
                   {a.preset ? `${a.preset} v${a.preset_version}` : "—"}
                 </KeyValue>
-                <KeyValue label="Original">
+                <KeyValue label={t("assets.original")}>
                   {formatBytes(a.original.bytes)}
                   {a.original.width && a.original.height ? ` · ${a.original.width}×${a.original.height}` : ""}
                 </KeyValue>
-                <KeyValue label="Savings">
+                <KeyValue label={t("assets.savings")}>
                   {a.savings_ratio === null ? "—" : `${(a.savings_ratio * 100).toFixed(1)}%`}
                 </KeyValue>
-                {a.duration_sec !== null && <KeyValue label="Duration">{a.duration_sec.toFixed(1)} s</KeyValue>}
-                <KeyValue label="Created">{formatDateTime(a.created_at)}</KeyValue>
-                <KeyValue label="Ready">{formatDateTime(a.ready_at)}</KeyValue>
+                {a.duration_sec !== null && <KeyValue label={t("assets.duration")}>{t("assets.seconds", { s: a.duration_sec.toFixed(1) })}</KeyValue>}
+                <KeyValue label={t("assets.created")}>{formatDateTime(a.created_at)}</KeyValue>
+                <KeyValue label={t("assets.ready")}>{formatDateTime(a.ready_at)}</KeyValue>
               </dl>
 
               <section>
-                <h4 className="mb-2 text-sm font-semibold">Renditions</h4>
+                <h4 className="mb-2 text-sm font-semibold">{t("assets.renditions")}</h4>
                 {a.renditions.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No renditions.</p>
+                  <p className="text-sm text-muted-foreground">{t("assets.noRenditions")}</p>
                 ) : (
                   <ul className="divide-y rounded-lg border">
                     {a.renditions.map((r) => (
@@ -158,11 +182,11 @@ function AssetDetail({ projectId, assetId, onClose }: { projectId: string; asset
                           <div className="font-medium">{formatBytes(r.bytes)}</div>
                           {a.original.bytes > 0 && (
                             <div className="text-muted-foreground">
-                              {(((a.original.bytes - r.bytes) / a.original.bytes) * 100).toFixed(0)}% smaller
+                              {t("assets.smaller", { pct: (((a.original.bytes - r.bytes) / a.original.bytes) * 100).toFixed(0) })}
                             </div>
                           )}
                         </div>
-                        {(r.url ?? r.key) && <CopyButton value={(r.url ?? r.key)!} label={`Copy ${r.name} location`} size="icon-xs" />}
+                        {(r.url ?? r.key) && <CopyButton value={(r.url ?? r.key)!} label={t("assets.copyLocation", { name: r.name })} size="icon-xs" />}
                       </li>
                     ))}
                   </ul>
@@ -170,14 +194,14 @@ function AssetDetail({ projectId, assetId, onClose }: { projectId: string; asset
               </section>
 
               <section>
-                <h4 className="mb-2 text-sm font-semibold">Metadata</h4>
+                <h4 className="mb-2 text-sm font-semibold">{t("assets.metadata")}</h4>
                 <pre className="max-h-48 overflow-auto rounded-lg bg-muted/60 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap">
                   {JSON.stringify(a.metadata ?? {}, null, 2)}
                 </pre>
               </section>
 
               <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => setConfirm(true)}>
-                <Trash2 /> Delete asset
+                <Trash2 /> {t("assets.delete")}
               </Button>
             </>
           ) : null}
@@ -186,13 +210,13 @@ function AssetDetail({ projectId, assetId, onClose }: { projectId: string; asset
         <AlertDialog open={confirm} onOpenChange={setConfirm}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Delete this asset?</AlertDialogTitle>
+              <AlertDialogTitle>{t("assets.delete.title")}</AlertDialogTitle>
               <AlertDialogDescription>
-                The asset and any renditions no longer shared with other assets are removed from storage. This can't be undone.
+                {t("assets.delete.desc")}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogCancel>{t("assets.cancel")}</AlertDialogCancel>
               <AlertDialogAction
                 className="bg-destructive text-white hover:bg-destructive/90"
                 onClick={() => {
@@ -200,7 +224,7 @@ function AssetDetail({ projectId, assetId, onClose }: { projectId: string; asset
                   setConfirm(false);
                 }}
               >
-                Delete asset
+                {t("assets.delete")}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
@@ -211,6 +235,8 @@ function AssetDetail({ projectId, assetId, onClose }: { projectId: string; asset
 }
 
 export default function AssetsPage() {
+  const t = useT();
+  const enumLabel = useEnumLabel();
   const { project } = route.useSearch();
   const navigate = route.useNavigate();
   const setProject = useCallback((id: string) => void navigate({ search: { project: id }, replace: true }), [navigate]);
@@ -235,27 +261,27 @@ export default function AssetsPage() {
   return (
     <>
       <PageHeader
-        title="Assets"
-        description="Browse processed media in a project."
+        title={t("assets.title")}
+        description={t("assets.description")}
         actions={<ProjectSelect projects={list} value={active?.id} onChange={setProject} loading={projects.isPending} />}
       />
 
       {projects.isError ? (
         <ErrorState error={projects.error} onRetry={() => void projects.refetch()} />
       ) : projects.isSuccess && list.length === 0 ? (
-        <EmptyState icon={<FolderKanban />} title="No projects yet" description="Create a project to start uploading media." />
+        <EmptyState icon={<FolderKanban />} title={t("assets.noProjects.title")} description={t("assets.noProjects.desc")} />
       ) : (
         <>
           <div className="mb-4 flex flex-wrap items-center gap-2">
             <Input
               value={namespace}
               onChange={(e) => setNamespace(e.target.value)}
-              placeholder="Namespace"
-              aria-label="Namespace"
+              placeholder={t("assets.namespace")}
+              aria-label={t("assets.namespace")}
               className="h-8 w-44"
             />
-            <FilterSelect value={kind} onChange={setKind} options={ASSET_KINDS} allLabel="All kinds" label="Kind" />
-            <FilterSelect value={status} onChange={setStatus} options={ASSET_STATUSES} allLabel="All statuses" label="Status" />
+            <FilterSelect value={kind} onChange={setKind} options={ASSET_KINDS} allLabel={t("assets.allKinds")} label={t("assets.kind")} optionLabel={enumLabel} />
+            <FilterSelect value={status} onChange={setStatus} options={ASSET_STATUSES} allLabel={t("assets.allStatuses")} label={t("assets.status")} optionLabel={enumLabel} />
           </div>
 
           {assets.isPending ? (
@@ -269,8 +295,8 @@ export default function AssetsPage() {
           ) : items.length === 0 ? (
             <EmptyState
               icon={<Images />}
-              title="No assets"
-              description={ns || kind || status ? "No assets match these filters." : "Uploaded media will appear here."}
+              title={t("assets.empty.title")}
+              description={ns || kind || status ? t("assets.empty.filtered") : t("assets.empty.desc")}
             />
           ) : (
             <>
@@ -278,12 +304,12 @@ export default function AssetsPage() {
                 <Table>
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
-                      <TableHead className="pl-4">Asset</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="hidden md:table-cell">Namespace</TableHead>
-                      <TableHead className="hidden sm:table-cell">Size</TableHead>
-                      <TableHead className="hidden lg:table-cell">Preset</TableHead>
-                      <TableHead className="hidden lg:table-cell pr-4">Created</TableHead>
+                      <TableHead className="pl-4">{t("assets.col.asset")}</TableHead>
+                      <TableHead>{t("assets.status")}</TableHead>
+                      <TableHead className="hidden md:table-cell">{t("assets.namespace")}</TableHead>
+                      <TableHead className="hidden sm:table-cell">{t("assets.col.size")}</TableHead>
+                      <TableHead className="hidden lg:table-cell">{t("assets.preset")}</TableHead>
+                      <TableHead className="hidden lg:table-cell pr-4">{t("assets.created")}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -300,12 +326,12 @@ export default function AssetsPage() {
                             <Thumb asset={a} />
                             <div className="min-w-0">
                               <div className="max-w-[16rem] truncate text-sm font-medium">{a.original.filename ?? a.id}</div>
-                              <div className="font-mono text-xs text-muted-foreground">{a.kind}</div>
+                              <div className="font-mono text-xs text-muted-foreground">{enumLabel(a.kind)}</div>
                             </div>
                           </div>
                         </TableCell>
                         <TableCell>
-                          <StatusBadge tone={STATUS_TONE[a.status] ?? "neutral"}>{a.status}</StatusBadge>
+                          <StatusBadge tone={STATUS_TONE[a.status] ?? "neutral"}>{enumLabel(a.status)}</StatusBadge>
                         </TableCell>
                         <TableCell className="hidden font-mono text-xs md:table-cell">{a.namespace}</TableCell>
                         <TableCell className="hidden text-sm tabular-nums sm:table-cell">
@@ -327,15 +353,15 @@ export default function AssetsPage() {
               </div>
               <div className="mt-4 flex items-center justify-between text-sm text-muted-foreground">
                 <span>
-                  {items.length} asset{items.length === 1 ? "" : "s"}
+                  {t("assets.count", { count: items.length })}
                 </span>
                 {assets.hasNextPage ? (
                   <Button variant="outline" size="sm" onClick={() => void assets.fetchNextPage()} disabled={assets.isFetchingNextPage}>
                     {assets.isFetchingNextPage && <Loader2 className="animate-spin" />}
-                    Load more
+                    {t("assets.loadMore")}
                   </Button>
                 ) : (
-                  <span>End of list</span>
+                  <span>{t("assets.endOfList")}</span>
                 )}
               </div>
             </>

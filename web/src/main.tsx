@@ -3,6 +3,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
+import { LocaleBoundary } from "@/i18n/react";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { setUnauthorizedHandler } from "@/lib/api";
@@ -33,8 +34,10 @@ async function bootstrap() {
       <ThemeProvider>
         <QueryClientProvider client={queryClient}>
           <TooltipProvider delayDuration={300}>
-            <RouterProvider router={router} />
-            <Toaster position="bottom-right" richColors closeButton />
+            <LocaleBoundary>
+              <RouterProvider router={router} />
+              <Toaster position="bottom-right" richColors closeButton />
+            </LocaleBoundary>
           </TooltipProvider>
         </QueryClientProvider>
       </ThemeProvider>

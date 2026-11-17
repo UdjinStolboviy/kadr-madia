@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
+import { useT } from "@/i18n/react";
 import { errorMessage, isApiError } from "@/lib/api";
 import { useSavePresetVersion } from "@/lib/queries";
 import type { ImageParams, Preset, VideoParams } from "@/lib/types";
@@ -101,7 +102,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 function SelectField({ id, value, onChange, options }: { id: string; value: string; onChange: (v: string) => void; options: { value: string; label: string }[] }) {
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger id={id} className="w-full">
+      <SelectTrigger id={id} className="w-full min-w-0 max-w-full">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -118,6 +119,7 @@ function SelectField({ id, value, onChange, options }: { id: string; value: stri
 const X264 = ["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower"];
 
 function ImageForm({ draft, set, err }: { draft: Obj; set: (path: string[], v: unknown) => void; err: (...keys: string[]) => string | undefined }) {
+  const t = useT();
   const q = (getIn(draft, ["quality"]) ?? {}) as Obj;
   const mode = typeof q.mode === "string" ? q.mode : "budget";
   const outputs = Array.isArray(draft.outputs) ? (draft.outputs as Obj[]) : [];
@@ -134,42 +136,42 @@ function ImageForm({ draft, set, err }: { draft: Obj; set: (path: string[], v: u
 
   return (
     <>
-      <Section title="Size">
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Max side" htmlFor="pe-side" hint="16–8192 px" error={err("resize")}>
+      <Section title={t("presets.ed.size")}>
+        <div className="grid grid-cols-2 gap-3 [&>*]:min-w-0">
+          <Field label={t("presets.ed.maxSide")} htmlFor="pe-side" hint={t("presets.ed.maxSideHint")} error={err("resize")}>
             <NumberInput id="pe-side" value={side} onChange={setSide} min={16} max={8192} step={16} suffix="px" />
           </Field>
-          <Field label="Fit" htmlFor="pe-fit">
+          <Field label={t("presets.ed.fit")} htmlFor="pe-fit">
             <SelectField
               id="pe-fit"
               value={String(getIn(draft, ["resize", "fit"]) ?? "inside")}
               onChange={(v) => set(["resize", "fit"], v)}
               options={[
-                { value: "inside", label: "Inside (keep ratio)" },
-                { value: "cover", label: "Cover (crop)" },
+                { value: "inside", label: t("presets.ed.fitInside") },
+                { value: "cover", label: t("presets.ed.fitCover") },
               ]}
             />
           </Field>
         </div>
-        <SwitchRow id="pe-gray" label="Grayscale" checked={getIn(draft, ["color", "grayscale"]) === true} onChange={(v) => set(["color", "grayscale"], v)} />
-        <SwitchRow id="pe-norm" label="Normalise" hint="Stretch contrast to the full range" checked={getIn(draft, ["color", "normalise"]) === true} onChange={(v) => set(["color", "normalise"], v)} />
+        <SwitchRow id="pe-gray" label={t("presets.ed.grayscale")} checked={getIn(draft, ["color", "grayscale"]) === true} onChange={(v) => set(["color", "grayscale"], v)} />
+        <SwitchRow id="pe-norm" label={t("presets.ed.normalise")} hint={t("presets.ed.normaliseHint")} checked={getIn(draft, ["color", "normalise"]) === true} onChange={(v) => set(["color", "normalise"], v)} />
       </Section>
 
-      <Section title="Quality">
-        <Field label="Strategy" htmlFor="pe-qmode" error={err("quality.mode")}>
+      <Section title={t("presets.ed.quality")}>
+        <Field label={t("presets.ed.strategy")} htmlFor="pe-qmode" error={err("quality.mode")}>
           <SelectField
             id="pe-qmode"
             value={mode}
             onChange={(v) => set(["quality", "mode"], v)}
             options={[
-              { value: "budget", label: "Byte budget (fit under a size)" },
-              { value: "ssim", label: "Target SSIM (smallest at a quality)" },
-              { value: "fixed", label: "Fixed quality" },
+              { value: "budget", label: t("presets.ed.stratBudget") },
+              { value: "ssim", label: t("presets.ed.stratSsim") },
+              { value: "fixed", label: t("presets.ed.stratFixed") },
             ]}
           />
         </Field>
         {mode === "budget" && (
-          <Field label="Max size" htmlFor="pe-maxbytes" hint="1 KB – 10 MB" error={err("quality.maxBytes")}>
+          <Field label={t("presets.ed.maxSize")} htmlFor="pe-maxbytes" hint={t("presets.ed.maxSizeHint")} error={err("quality.maxBytes")}>
             <NumberInput
               id="pe-maxbytes"
               value={typeof q.maxBytes === "number" ? Math.round((q.maxBytes / 1024) * 10) / 10 : undefined}
@@ -181,39 +183,40 @@ function ImageForm({ draft, set, err }: { draft: Obj; set: (path: string[], v: u
           </Field>
         )}
         {mode === "ssim" && (
-          <Field label="Target SSIM" htmlFor="pe-target" hint="0.90 (smaller) – 0.999 (near-lossless)" error={err("quality.target")}>
+          <Field label="Target SSIM" htmlFor="pe-target" hint={t("presets.ed.ssimHint")} error={err("quality.target")}>
             <NumberInput id="pe-target" value={q.target} onChange={(v) => set(["quality", "target"], v)} min={0.9} max={0.999} step={0.001} />
           </Field>
         )}
         {mode === "fixed" ? (
-          <Field label="Quality (q)" htmlFor="pe-q" hint="1–100" error={err("quality.q")}>
+          <Field label={t("presets.ed.qualityQ")} htmlFor="pe-q" hint="1–100" error={err("quality.q")}>
             <NumberInput id="pe-q" value={q.q} onChange={(v) => set(["quality", "q"], v)} min={1} max={100} />
           </Field>
         ) : (
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="q min" htmlFor="pe-qmin" hint="Lower bound searched">
+          <div className="grid grid-cols-2 gap-3 [&>*]:min-w-0">
+            <Field label="q min" htmlFor="pe-qmin" hint={t("presets.ed.qMinHint")}>
               <NumberInput id="pe-qmin" value={q.qMin} onChange={(v) => set(["quality", "qMin"], v)} min={1} max={100} />
             </Field>
-            <Field label="q max" htmlFor="pe-qmax" hint="Upper bound searched">
+            <Field label="q max" htmlFor="pe-qmax" hint={t("presets.ed.qMaxHint")}>
               <NumberInput id="pe-qmax" value={q.qMax} onChange={(v) => set(["quality", "qMax"], v)} min={1} max={100} />
             </Field>
           </div>
         )}
       </Section>
 
-      <Section title="Outputs">
-        <SwitchRow id="pe-avif" label="AVIF" hint="Smallest, modern browsers" checked={has("avif")} onChange={(v) => toggleFormat("avif", v)} />
-        <SwitchRow id="pe-webp" label="WebP" hint="Wide compatibility fallback" checked={has("webp")} onChange={(v) => toggleFormat("webp", v)} />
+      <Section title={t("presets.ed.outputs")}>
+        <SwitchRow id="pe-avif" label="AVIF" hint={t("presets.ed.avifHint")} checked={has("avif")} onChange={(v) => toggleFormat("avif", v)} />
+        <SwitchRow id="pe-webp" label="WebP" hint={t("presets.ed.webpHint")} checked={has("webp")} onChange={(v) => toggleFormat("webp", v)} />
         {err("outputs") && <p className="text-xs text-destructive">{err("outputs")}</p>}
-        <SwitchRow id="pe-th" label="ThumbHash" hint="Tiny blurred placeholder" checked={getIn(draft, ["placeholder", "thumbhash"]) === true} onChange={(v) => set(["placeholder", "thumbhash"], v)} />
-        <SwitchRow id="pe-dc" label="Dominant colour" checked={getIn(draft, ["placeholder", "dominantColor"]) === true} onChange={(v) => set(["placeholder", "dominantColor"], v)} />
-        <SwitchRow id="pe-retain" label="Retain original" hint="Keep the uploaded file as well" checked={draft.retainOriginal === true} onChange={(v) => set(["retainOriginal"], v)} />
+        <SwitchRow id="pe-th" label="ThumbHash" hint={t("presets.ed.thumbhashHint")} checked={getIn(draft, ["placeholder", "thumbhash"]) === true} onChange={(v) => set(["placeholder", "thumbhash"], v)} />
+        <SwitchRow id="pe-dc" label={t("presets.ed.dominant")} checked={getIn(draft, ["placeholder", "dominantColor"]) === true} onChange={(v) => set(["placeholder", "dominantColor"], v)} />
+        <SwitchRow id="pe-retain" label={t("presets.ed.retain")} hint={t("presets.ed.retainHint")} checked={draft.retainOriginal === true} onChange={(v) => set(["retainOriginal"], v)} />
       </Section>
     </>
   );
 }
 
 function VideoForm({ draft, set, err }: { draft: Obj; set: (path: string[], v: unknown) => void; err: (...keys: string[]) => string | undefined }) {
+  const t = useT();
   const str = (path: string[], fallback: string) => {
     const v = getIn(draft, path);
     return typeof v === "string" && v ? v : fallback;
@@ -223,58 +226,58 @@ function VideoForm({ draft, set, err }: { draft: Obj; set: (path: string[], v: u
   );
   return (
     <>
-      <Section title="Video">
-        <div className="grid grid-cols-2 items-start gap-3">
-          <Field label="Max width" htmlFor="pe-vw" hint="160–4096 px" error={err("video.maxWidth")}>
+      <Section title={t("presets.ed.video")}>
+        <div className="grid grid-cols-2 items-start gap-3 [&>*]:min-w-0">
+          <Field label={t("presets.ed.maxWidth")} htmlFor="pe-vw" hint={t("presets.ed.maxWidthHint")} error={err("video.maxWidth")}>
             <NumberInput id="pe-vw" value={getIn(draft, ["video", "maxWidth"])} onChange={(v) => set(["video", "maxWidth"], v)} min={160} max={4096} step={2} suffix="px" />
           </Field>
-          <Field label="Frame rate" htmlFor="pe-fps" hint="1–60" error={err("video.fps")}>
+          <Field label={t("presets.ed.frameRate")} htmlFor="pe-fps" hint="1–60" error={err("video.fps")}>
             <NumberInput id="pe-fps" value={getIn(draft, ["video", "fps"])} onChange={(v) => set(["video", "fps"], v)} min={1} max={60} suffix="fps" />
           </Field>
-          <Field label="CRF" htmlFor="pe-crf" hint="14 (best) – 40 (smallest)" error={err("video.crf")}>
+          <Field label="CRF" htmlFor="pe-crf" hint={t("presets.ed.crfHint")} error={err("video.crf")}>
             <NumberInput id="pe-crf" value={getIn(draft, ["video", "crf"])} onChange={(v) => set(["video", "crf"], v)} min={14} max={40} />
           </Field>
-          <Field label="x264 preset" htmlFor="pe-x264" hint="Slower = smaller">
+          <Field label={t("presets.ed.x264")} htmlFor="pe-x264" hint={t("presets.ed.x264Hint")}>
             <SelectField id="pe-x264" value={str(["video", "preset"], "slow")} onChange={(v) => set(["video", "preset"], v)} options={X264.map((v) => ({ value: v, label: v }))} />
           </Field>
-          <Field label="Max bitrate" htmlFor="pe-maxrate" hint="e.g. 900k or 4M" error={err("video.maxrate")}>
+          <Field label={t("presets.ed.maxBitrate")} htmlFor="pe-maxrate" hint={t("presets.ed.maxBitrateHint")} error={err("video.maxrate")}>
             {text("pe-maxrate", ["video", "maxrate"], "1200k")}
           </Field>
-          <Field label="Buffer size" htmlFor="pe-bufsize" hint="Usually 2× max bitrate" error={err("video.bufsize")}>
+          <Field label={t("presets.ed.bufSize")} htmlFor="pe-bufsize" hint={t("presets.ed.bufSizeHint")} error={err("video.bufsize")}>
             {text("pe-bufsize", ["video", "bufsize"], "2400k")}
           </Field>
         </div>
-        <Field label="Hardware encoding" htmlFor="pe-hw" error={err("video.hw")}>
+        <Field label={t("presets.ed.hw")} htmlFor="pe-hw" error={err("video.hw")}>
           <SelectField
             id="pe-hw"
             value={str(["video", "hw"], "auto")}
             onChange={(v) => set(["video", "hw"], v)}
             options={[
-              { value: "auto", label: "Auto (VAAPI when available)" },
+              { value: "auto", label: t("presets.ed.hwAuto") },
               { value: "vaapi", label: "VAAPI" },
-              { value: "off", label: "Off (software x264)" },
+              { value: "off", label: t("presets.ed.hwOff") },
             ]}
           />
         </Field>
       </Section>
 
-      <Section title="Audio">
+      <Section title={t("presets.ed.audio")}>
         <div className="grid grid-cols-3 gap-3">
-          <Field label="Bitrate" htmlFor="pe-abr" error={err("audio.bitrate")}>
+          <Field label={t("presets.ed.bitrate")} htmlFor="pe-abr" error={err("audio.bitrate")}>
             {text("pe-abr", ["audio", "bitrate"], "96k")}
           </Field>
-          <Field label="Channels" htmlFor="pe-ach" error={err("audio.channels")}>
+          <Field label={t("presets.ed.channels")} htmlFor="pe-ach" error={err("audio.channels")}>
             <SelectField
               id="pe-ach"
               value={String(getIn(draft, ["audio", "channels"]) ?? 2)}
               onChange={(v) => set(["audio", "channels"], Number(v))}
               options={[
-                { value: "1", label: "Mono" },
-                { value: "2", label: "Stereo" },
+                { value: "1", label: t("presets.ed.mono") },
+                { value: "2", label: t("presets.ed.stereo") },
               ]}
             />
           </Field>
-          <Field label="Sample rate" htmlFor="pe-asr">
+          <Field label={t("presets.ed.sampleRate")} htmlFor="pe-asr">
             <SelectField
               id="pe-asr"
               value={String(getIn(draft, ["audio", "sampleRate"]) ?? 44100)}
@@ -288,8 +291,8 @@ function VideoForm({ draft, set, err }: { draft: Obj; set: (path: string[], v: u
         </div>
       </Section>
 
-      <Section title="Output">
-        <Field label="Poster max size" htmlFor="pe-poster" hint="Poster frame size budget">
+      <Section title={t("presets.ed.output")}>
+        <Field label={t("presets.ed.posterMax")} htmlFor="pe-poster" hint={t("presets.ed.posterHint")}>
           <NumberInput
             id="pe-poster"
             value={typeof getIn(draft, ["poster", "maxBytes"]) === "number" ? Math.round(((getIn(draft, ["poster", "maxBytes"]) as number) / 1024) * 10) / 10 : undefined}
@@ -299,8 +302,8 @@ function VideoForm({ draft, set, err }: { draft: Obj; set: (path: string[], v: u
             suffix="KB"
           />
         </Field>
-        <SwitchRow id="pe-hls" label="HLS ladder" hint="Also produce an adaptive HLS package" checked={draft.hls === true} onChange={(v) => set(["hls"], v)} />
-        <SwitchRow id="pe-vretain" label="Retain original" hint="Keep the uploaded file as well" checked={draft.retainOriginal === true} onChange={(v) => set(["retainOriginal"], v)} />
+        <SwitchRow id="pe-hls" label="HLS" hint={t("presets.ed.hlsHint")} checked={draft.hls === true} onChange={(v) => set(["hls"], v)} />
+        <SwitchRow id="pe-vretain" label={t("presets.ed.retain")} hint={t("presets.ed.retainHint")} checked={draft.retainOriginal === true} onChange={(v) => set(["retainOriginal"], v)} />
       </Section>
     </>
   );
@@ -317,6 +320,7 @@ export function PresetEditor({
   open: boolean;
   onOpenChange: (o: boolean) => void;
 }) {
+  const t = useT();
   const save = useSavePresetVersion(projectId);
   const [draft, setDraft] = useState<Obj>({});
   const [loaded, setLoaded] = useState<string | null>(null);
@@ -340,11 +344,11 @@ export function PresetEditor({
       { slug: preset.slug, params: draft as unknown as Params },
       {
         onSuccess: (p) => {
-          toast.success(`Saved ${p.slug} v${p.current_version}`);
+          toast.success(t("presets.ed.saved", { slug: p.slug, version: p.current_version }));
           onOpenChange(false);
         },
         onError: (e) =>
-          toast.error("Couldn't save preset", {
+          toast.error(t("presets.ed.saveFailed"), {
             description: isApiError(e) ? (e.fieldErrors.params ?? e.fieldErrors.slug ?? errorMessage(e)) : errorMessage(e),
           }),
       },
@@ -356,10 +360,10 @@ export function PresetEditor({
       <SheetContent className="w-full gap-0 sm:max-w-lg">
         <SheetHeader className="border-b">
           <SheetTitle>
-            Edit <span className="font-mono">{preset?.slug}</span>
+            {t("presets.ed.edit")} <span className="font-mono">{preset?.slug}</span>
           </SheetTitle>
           <SheetDescription>
-            Saving adds a new version. Assets already processed keep the version they were created with.
+            {t("presets.ed.desc")}
           </SheetDescription>
         </SheetHeader>
         <div className="grid flex-1 content-start gap-6 overflow-y-auto p-4">
@@ -375,11 +379,11 @@ export function PresetEditor({
             </p>
           )}
         </div>
-        <SheetFooter className="flex-row items-center justify-between border-t">
+        <SheetFooter className="flex-row flex-wrap items-center justify-between gap-y-2 border-t">
           {!isVideo && preset ? (
             <Button variant="ghost" size="sm" asChild>
               <Link to="/playground" search={{ project: projectId, preset: preset.slug }}>
-                <FlaskConical /> Try it in Playground
+                <FlaskConical /> {t("presets.ed.tryPlayground")}
               </Link>
             </Button>
           ) : (
@@ -387,11 +391,11 @@ export function PresetEditor({
           )}
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
+              {t("presets.ed.cancel")}
             </Button>
             <Button onClick={onSave} disabled={save.isPending}>
               {save.isPending && <Loader2 className="animate-spin" />}
-              Save version
+              {t("presets.ed.saveVersion")}
             </Button>
           </div>
         </SheetFooter>

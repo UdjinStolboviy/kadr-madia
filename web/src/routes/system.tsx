@@ -12,14 +12,15 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { formatBytes, formatDateTime, formatDuration } from "@/lib/format";
 import { systemQuery } from "@/lib/queries";
 import { CAPABILITY_KEYS, type CapabilityKey } from "@/lib/types";
+import { useT } from "@/i18n/react";
 
-const CAP_INFO: Record<CapabilityKey, { name: string; purpose: string }> = {
-  vips: { name: "libvips", purpose: "Image decoding, resizing and encoding" },
-  vips_avif: { name: "libvips AVIF", purpose: "AVIF output (via libheif + aom/SVT)" },
-  ffmpeg: { name: "ffmpeg", purpose: "Video transcoding and posters" },
-  ffprobe: { name: "ffprobe", purpose: "Media inspection and validation" },
-  rclone: { name: "rclone", purpose: "Imports from Google Drive, OneDrive, Dropbox" },
-  vaapi: { name: "VAAPI", purpose: "Hardware H.264 encoding on Intel iGPU" },
+const CAP_NAME: Record<CapabilityKey, string> = {
+  vips: "libvips",
+  vips_avif: "libvips AVIF",
+  ffmpeg: "ffmpeg",
+  ffprobe: "ffprobe",
+  rclone: "rclone",
+  vaapi: "VAAPI",
 };
 
 function Stat({ icon, label, value, sub }: { icon: ReactNode; label: string; value: ReactNode; sub?: ReactNode }) {
@@ -38,6 +39,7 @@ function Stat({ icon, label, value, sub }: { icon: ReactNode; label: string; val
 }
 
 export default function SystemPage() {
+  const t = useT();
   const system = useQuery(systemQuery);
   const s = system.data;
 
@@ -51,11 +53,11 @@ export default function SystemPage() {
   return (
     <>
       <PageHeader
-        title="System"
-        description="Runtime, storage and processing capabilities of this Kadr instance."
+        title={t("system.title")}
+        description={t("system.description")}
         actions={
           <Button variant="outline" size="sm" onClick={() => void system.refetch()} disabled={system.isFetching}>
-            <RefreshCw className={system.isFetching ? "animate-spin" : undefined} /> Refresh
+            <RefreshCw className={system.isFetching ? "animate-spin" : undefined} /> {t("system.refresh")}
           </Button>
         }
       />
@@ -71,7 +73,7 @@ export default function SystemPage() {
               <>
                 <Stat
                   icon={<Server />}
-                  label="Version"
+                  label={t("system.version")}
                   value={<span className="font-mono text-lg">{s.version}</span>}
                   sub={
                     <span className="font-mono">
@@ -79,14 +81,14 @@ export default function SystemPage() {
                     </span>
                   }
                 />
-                <Stat icon={<Clock />} label="Uptime" value={formatDuration(s.uptime_sec)} sub={`since ${formatDateTime(s.started_at)}`} />
+                <Stat icon={<Clock />} label={t("system.uptime")} value={formatDuration(s.uptime_sec)} sub={t("system.uptimeSince", { date: formatDateTime(s.started_at) })} />
                 <Stat
                   icon={<Database />}
-                  label="Database"
+                  label={t("system.database")}
                   value={formatBytes(s.db.size_bytes)}
-                  sub={`WAL ${formatBytes(s.db.wal_bytes)}`}
+                  sub={t("system.wal", { size: formatBytes(s.db.wal_bytes) })}
                 />
-                <Stat icon={<FolderOpen />} label="Temp free" value={formatBytes(s.tmp.free_bytes)} sub={s.tmp.path} />
+                <Stat icon={<FolderOpen />} label={t("system.tempFree")} value={formatBytes(s.tmp.free_bytes)} sub={s.tmp.path} />
               </>
             )}
           </div>
@@ -94,16 +96,16 @@ export default function SystemPage() {
           <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_22rem]">
             <Card className="gap-0 py-0">
               <CardHeader className="border-b px-5 py-4">
-                <CardTitle className="text-base">Capabilities</CardTitle>
-                <CardDescription>Detected at startup. Missing tools disable the related pipelines.</CardDescription>
+                <CardTitle className="text-base">{t("system.capabilities")}</CardTitle>
+                <CardDescription>{t("system.capabilitiesDesc")}</CardDescription>
               </CardHeader>
               <CardContent className="px-0">
                 <Table>
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
-                      <TableHead className="pl-5">Component</TableHead>
-                      <TableHead className="hidden sm:table-cell">Version / detail</TableHead>
-                      <TableHead className="pr-5 text-right">Status</TableHead>
+                      <TableHead className="pl-5">{t("system.col.component")}</TableHead>
+                      <TableHead className="hidden sm:table-cell">{t("system.col.detail")}</TableHead>
+                      <TableHead className="pr-5 text-right">{t("system.col.status")}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -118,9 +120,9 @@ export default function SystemPage() {
                               ) : (
                                 <XCircle className="size-4 text-muted-foreground" />
                               )}
-                              {CAP_INFO[k].name}
+                              {CAP_NAME[k]}
                             </div>
-                            <div className="text-xs whitespace-normal text-muted-foreground">{CAP_INFO[k].purpose}</div>
+                            <div className="text-xs whitespace-normal text-muted-foreground">{t(`system.cap.${k}`)}</div>
                             {c?.detail && <div className="mt-0.5 text-xs whitespace-normal text-muted-foreground sm:hidden">{c.detail}</div>}
                           </TableCell>
                           <TableCell className="hidden max-w-[16rem] sm:table-cell">
@@ -140,9 +142,9 @@ export default function SystemPage() {
                             {!s ? (
                               <Skeleton className="ml-auto h-5 w-14" />
                             ) : c?.ok ? (
-                              <StatusBadge tone="success">ok</StatusBadge>
+                              <StatusBadge tone="success">{t("system.ok")}</StatusBadge>
                             ) : (
-                              <StatusBadge tone={k === "vaapi" || k === "rclone" ? "neutral" : "danger"}>missing</StatusBadge>
+                              <StatusBadge tone={k === "vaapi" || k === "rclone" ? "neutral" : "danger"}>{t("system.missing")}</StatusBadge>
                             )}
                           </TableCell>
                         </TableRow>
@@ -156,7 +158,7 @@ export default function SystemPage() {
             <div className="grid h-fit gap-6">
               <Card className="gap-2">
                 <CardHeader>
-                  <CardTitle className="text-sm">Runtime</CardTitle>
+                  <CardTitle className="text-sm">{t("system.runtime")}</CardTitle>
                 </CardHeader>
                 <CardContent>
                   {!s ? (
@@ -167,19 +169,19 @@ export default function SystemPage() {
                     </div>
                   ) : (
                     <dl className="divide-y">
-                      <KeyValue label="Mode">
-                        {s.dev ? <StatusBadge tone="warning">development</StatusBadge> : <StatusBadge tone="success">production</StatusBadge>}
+                      <KeyValue label={t("system.mode")}>
+                        {s.dev ? <StatusBadge tone="warning">{t("system.modeDev")}</StatusBadge> : <StatusBadge tone="success">{t("system.modeProd")}</StatusBadge>}
                       </KeyValue>
-                      <KeyValue label="Commit" mono>
+                      <KeyValue label={t("system.commit")} mono>
                         <span className="inline-flex items-center gap-1">
                           {s.commit.slice(0, 12)}
-                          <CopyButton value={s.commit} label="Copy commit" size="icon-xs" />
+                          <CopyButton value={s.commit} label={t("system.copyCommit")} size="icon-xs" />
                         </span>
                       </KeyValue>
-                      <KeyValue label="Database" mono>
+                      <KeyValue label={t("system.database")} mono>
                         <span title={s.db.path}>{s.db.path}</span>
                       </KeyValue>
-                      <KeyValue label="Temp dir" mono>
+                      <KeyValue label={t("system.tempDir")} mono>
                         <span title={s.tmp.path}>{s.tmp.path}</span>
                       </KeyValue>
                     </dl>

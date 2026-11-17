@@ -2,6 +2,7 @@ import { X } from "lucide-react";
 import { useId, useState, type KeyboardEvent } from "react";
 
 import { cn } from "@/lib/utils";
+import { useT } from "@/i18n/react";
 
 /** Free-form tag input: Enter, comma or space commits a value; Backspace removes the last one. */
 export function TagInput({
@@ -20,6 +21,7 @@ export function TagInput({
   id?: string;
   invalid?: boolean;
 }) {
+  const t = useT();
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const autoId = useId();
@@ -28,17 +30,17 @@ export function TagInput({
   function commit(raw: string): boolean {
     const tags = raw
       .split(/[\s,]+/)
-      .map((t) => t.trim())
+      .map((s) => s.trim())
       .filter(Boolean);
     if (!tags.length) return true;
     const next = [...value];
-    for (const t of tags) {
-      const err = validate?.(t) ?? null;
+    for (const tg of tags) {
+      const err = validate?.(tg) ?? null;
       if (err) {
         setError(err);
         return false;
       }
-      if (!next.includes(t)) next.push(t);
+      if (!next.includes(tg)) next.push(tg);
     }
     setError(null);
     onChange(next);
@@ -77,10 +79,10 @@ export function TagInput({
             <button
               type="button"
               className="rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-              aria-label={`Remove ${tag}`}
+              aria-label={t("common.removeTag", { tag })}
               onClick={(e) => {
                 e.stopPropagation();
-                onChange(value.filter((t) => t !== tag));
+                onChange(value.filter((v) => v !== tag));
               }}
             >
               <X className="size-3" />

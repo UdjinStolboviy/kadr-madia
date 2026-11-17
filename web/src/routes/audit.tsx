@@ -12,6 +12,7 @@ import { api } from "@/lib/api";
 import { projectsQuery, qk } from "@/lib/queries";
 import type { AuditEntry } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useT } from "@/i18n/react";
 
 const PAGE = 50;
 
@@ -29,6 +30,7 @@ function hasDetails(d: unknown) {
 }
 
 function Row({ e, projectName }: { e: AuditEntry; projectName?: string }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const expandable = hasDetails(e.details);
   return (
@@ -76,7 +78,7 @@ function Row({ e, projectName }: { e: AuditEntry; projectName?: string }) {
             <button
               type="button"
               className="rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
-              aria-label={open ? "Hide details" : "Show details"}
+              aria-label={open ? t("audit.hideDetails") : t("audit.showDetails")}
               onClick={(ev) => {
                 ev.stopPropagation();
                 setOpen((o) => !o);
@@ -101,6 +103,7 @@ function Row({ e, projectName }: { e: AuditEntry; projectName?: string }) {
 }
 
 export default function AuditPage() {
+  const t = useT();
   const projects = useQuery(projectsQuery);
   const names = new Map((projects.data ?? []).map((p) => [p.id, p.name]));
   const audit = useInfiniteQuery({
@@ -114,7 +117,7 @@ export default function AuditPage() {
 
   return (
     <>
-      <PageHeader title="Audit log" description="Every administrative action, newest first." />
+      <PageHeader title={t("audit.title")} description={t("audit.description")} />
       {audit.isPending ? (
         <div className="space-y-2 rounded-xl border bg-card p-4">
           {Array.from({ length: 8 }, (_, i) => (
@@ -124,19 +127,19 @@ export default function AuditPage() {
       ) : audit.isError ? (
         <ErrorState error={audit.error} onRetry={() => void audit.refetch()} />
       ) : items.length === 0 ? (
-        <EmptyState icon={<ScrollText />} title="No audit events yet" description="Actions such as sign-ins and configuration changes will appear here." />
+        <EmptyState icon={<ScrollText />} title={t("audit.emptyTitle")} description={t("audit.emptyDesc")} />
       ) : (
         <>
           <div className="overflow-hidden rounded-xl border bg-card">
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead className="w-32 pl-4">When</TableHead>
-                  <TableHead>Action</TableHead>
-                  <TableHead className="hidden md:table-cell">Target</TableHead>
-                  <TableHead className="hidden lg:table-cell">Project</TableHead>
-                  <TableHead className="hidden sm:table-cell">Actor</TableHead>
-                  <TableHead className="hidden xl:table-cell">IP</TableHead>
+                  <TableHead className="w-32 pl-4">{t("audit.col.when")}</TableHead>
+                  <TableHead>{t("audit.col.action")}</TableHead>
+                  <TableHead className="hidden md:table-cell">{t("audit.col.target")}</TableHead>
+                  <TableHead className="hidden lg:table-cell">{t("audit.col.project")}</TableHead>
+                  <TableHead className="hidden sm:table-cell">{t("audit.col.actor")}</TableHead>
+                  <TableHead className="hidden xl:table-cell">{t("audit.col.ip")}</TableHead>
                   <TableHead className="w-8" />
                 </TableRow>
               </TableHeader>
@@ -149,15 +152,15 @@ export default function AuditPage() {
           </div>
           <div className="mt-4 flex items-center justify-between text-sm text-muted-foreground">
             <span>
-              {items.length} event{items.length === 1 ? "" : "s"}
+              {t("audit.count", { count: items.length })}
             </span>
             {audit.hasNextPage ? (
               <Button variant="outline" size="sm" onClick={() => void audit.fetchNextPage()} disabled={audit.isFetchingNextPage}>
                 {audit.isFetchingNextPage && <Loader2 className="animate-spin" />}
-                Load more
+                {t("audit.loadMore")}
               </Button>
             ) : (
-              <span>End of log</span>
+              <span>{t("audit.end")}</span>
             )}
           </div>
         </>

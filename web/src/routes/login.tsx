@@ -3,31 +3,38 @@ import { useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { REGEXP_ONLY_DIGITS } from "input-otp";
 import { AlertCircle, ArrowLeft, KeyRound, Loader2, ShieldCheck } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
 import { Logo } from "@/components/app-shell";
 import { Field } from "@/components/common";
+import { LanguageSwitcher } from "@/components/language-switcher";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InputOTP, InputOTPGroup, InputOTPSeparator, InputOTPSlot } from "@/components/ui/input-otp";
+import { useT } from "@/i18n/react";
 import { api, errorMessage, isApiError } from "@/lib/api";
 import { qk } from "@/lib/queries";
 import { getCredential, isWebAuthnCancelled, webauthnSupported } from "@/lib/webauthn";
 
 const route = getRouteApi("/login");
 
-const schema = z.object({
-  email: z.email("Enter a valid email address"),
-  password: z.string().min(1, "Enter your password"),
-});
-type Values = z.infer<typeof schema>;
+type Values = { email: string; password: string };
 
 const RATE_LIMIT_SEC = 60;
 
 export default function LoginPage() {
+  const t = useT();
+  const schema = useMemo(
+    () =>
+      z.object({
+        email: z.email(t("login.emailInvalid")),
+        password: z.string().min(1, t("login.passwordRequired")),
+      }),
+    [t],
+  );
   const search = route.useSearch();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -48,8 +55,8 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (lockedFor <= 0) return;
-    const t = window.setTimeout(() => setLockedFor((s) => s - 1), 1000);
-    return () => window.clearTimeout(t);
+    const id = window.setTimeout(() => setLockedFor((s) => s - 1), 1000);
+    return () => window.clearTimeout(id);
   }, [lockedFor]);
 
   async function attempt(values: Values, totp?: string) {
@@ -68,7 +75,7 @@ export default function LoginPage() {
         setLockedFor(RATE_LIMIT_SEC);
         setError(errorMessage(e));
       } else if (isApiError(e, "invalid_credentials") || isApiError(e, "invalid_code")) {
-        setError(step === "totp" ? "That code didn't work. Check your authenticator and try again." : "Incorrect email or password.");
+        setError(step === "totp" ? t("login.codeRejected") : t("login.badCredentials"));
         if (step === "totp") setCode("");
       } else {
         setError(errorMessage(e));
@@ -94,9 +101,9 @@ export default function LoginPage() {
         setLockedFor(RATE_LIMIT_SEC);
         setError(errorMessage(e));
       } else if (isApiError(e, "invalid_credentials")) {
-        setError("Passkey sign-in failed. Use your password instead.");
+        setError(t("login.passkeyFailed"));
       } else if (isApiError(e, "webauthn_disabled")) {
-        setError("Passkeys are not configured on this server.");
+        setError(t("login.passkeysDisabled"));
       } else {
         setError(errorMessage(e));
       }
@@ -113,6 +120,9 @@ export default function LoginPage() {
         aria-hidden
         className="pointer-events-none absolute inset-0 bg-[radial-gradient(60rem_30rem_at_50%_-10%,color-mix(in_oklch,var(--brand)_14%,transparent),transparent)]"
       />
+      <div className="absolute top-3 right-3 z-10 sm:top-4 sm:right-4">
+        <LanguageSwitcher />
+      </div>
       <div className="relative w-full max-w-sm">
         <div className="mb-8 flex justify-center">
           <Logo />
@@ -121,19 +131,19 @@ export default function LoginPage() {
           {step === "credentials" ? (
             <form onSubmit={form.handleSubmit((v) => attempt(v))} noValidate className="grid gap-5">
               <div>
-                <h1 className="text-lg font-semibold tracking-tight">Sign in to Kadr</h1>
-                <p className="mt-1 text-sm text-muted-foreground">Admin console for your media platform.</p>
+                <h1 className="text-lg font-semibold tracking-tight">{t("login.title")}</h1>
+                <p className="mt-1 text-sm text-muted-foreground">{t("login.subtitle")}</p>
               </div>
               {error && (
                 <Alert variant="destructive">
                   <AlertCircle />
                   <AlertDescription>
                     {error}
-                    {locked && <span className="tabular-nums"> ({lockedFor}s)</span>}
+                    {locked && <span className="tabular-nums"> ({t("login.secondsShort", { seconds: lockedFor })})</span>}
                   </AlertDescription>
                 </Alert>
               )}
-              <Field label="Email" htmlFor="email" error={form.formState.errors.email?.message}>
+              <Field label={t("login.email")} htmlFor="email" error={form.formState.errors.email?.message}>
                 <Input
                   id="email"
                   type="email"
@@ -143,7 +153,7 @@ export default function LoginPage() {
                   {...form.register("email")}
                 />
               </Field>
-              <Field label="Password" htmlFor="password" error={form.formState.errors.password?.message}>
+              <Field label={t("login.password")} htmlFor="password" error={form.formState.errors.password?.message}>
                 <Input
                   id="password"
                   type="password"
@@ -154,11 +164,11 @@ export default function LoginPage() {
               </Field>
               <Button type="submit" disabled={pending || locked} className="w-full">
                 {pending && <Loader2 className="animate-spin" />}
-                {locked ? `Try again in ${lockedFor}s` : "Sign in"}
+                {locked ? t("login.retryIn", { seconds: lockedFor }) : t("login.signIn")}
               </Button>
               {webauthnSupported() && (
                 <Button type="button" variant="outline" disabled={pending || locked} onClick={() => void passkeyLogin()} className="w-full">
-                  <KeyRound /> Sign in with a passkey
+                  <KeyRound /> {t("login.passkeySignIn")}
                 </Button>
               )}
             </form>
@@ -174,9 +184,9 @@ export default function LoginPage() {
                 <div className="mb-3 flex size-10 items-center justify-center rounded-full bg-brand/10 text-brand">
                   <ShieldCheck className="size-5" />
                 </div>
-                <h1 className="text-lg font-semibold tracking-tight">Two-factor authentication</h1>
+                <h1 className="text-lg font-semibold tracking-tight">{t("login.totpTitle")}</h1>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Enter the 6-digit code from your authenticator app.
+                  {t("login.totpHint")}
                 </p>
               </div>
               {error && (
@@ -184,7 +194,7 @@ export default function LoginPage() {
                   <AlertCircle />
                   <AlertDescription>
                     {error}
-                    {locked && <span className="tabular-nums"> ({lockedFor}s)</span>}
+                    {locked && <span className="tabular-nums"> ({t("login.secondsShort", { seconds: lockedFor })})</span>}
                   </AlertDescription>
                 </Alert>
               )}
@@ -197,7 +207,7 @@ export default function LoginPage() {
                   onChange={setCode}
                   onComplete={(v: string) => creds && !locked && !pending && void attempt(creds, v)}
                   autoFocus
-                  aria-label="Authentication code"
+                  aria-label={t("login.codeLabel")}
                 >
                   <InputOTPGroup>
                     <InputOTPSlot index={0} />
@@ -214,7 +224,7 @@ export default function LoginPage() {
               </div>
               <Button type="submit" disabled={pending || locked || code.length !== 6} className="w-full">
                 {pending && <Loader2 className="animate-spin" />}
-                {locked ? `Try again in ${lockedFor}s` : "Verify"}
+                {locked ? t("login.retryIn", { seconds: lockedFor }) : t("login.verify")}
               </Button>
               <Button
                 type="button"
@@ -226,17 +236,17 @@ export default function LoginPage() {
                   setCode("");
                 }}
               >
-                <ArrowLeft /> Use a different account
+                <ArrowLeft /> {t("login.differentAccount")}
               </Button>
             </form>
           )}
         </div>
         <p className="mt-6 text-center text-xs text-muted-foreground">
-          Forgot your password? Reset it on the server with the <code className="font-mono">kadr admin</code> command.
+          {t("login.forgot", { cmd: "kadr admin" })}
         </p>
         {import.meta.env.VITE_MOCK === "1" && (
           <p className="mt-3 rounded-md border border-dashed px-3 py-2 text-center text-xs text-muted-foreground">
-            Mock mode: <span className="font-mono">admin@example.com</span> /{" "}
+            {t("login.mockMode")} <span className="font-mono">admin@example.com</span> /{" "}
             <span className="font-mono">kadr-admin</span>, TOTP <span className="font-mono">123456</span>
           </p>
         )}

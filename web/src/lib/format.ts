@@ -1,3 +1,5 @@
+import { intlLocale, t } from "@/i18n/store";
+
 const UNITS = ["B", "KB", "MB", "GB", "TB", "PB"] as const;
 
 /** Binary (1024-based) byte formatting: 20480 → "20 KB". */
@@ -26,18 +28,46 @@ export function gbToBytes(gb: number): number {
   return Math.round(gb * GB);
 }
 
-const dateFmt = new Intl.DateTimeFormat(undefined, {
-  year: "numeric",
-  month: "short",
-  day: "numeric",
-});
-const dateTimeFmt = new Intl.DateTimeFormat(undefined, {
-  year: "numeric",
-  month: "short",
-  day: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-});
+// Intl formatters are cached per active language.
+const fmtCache = new Map<string, Intl.DateTimeFormat | Intl.RelativeTimeFormat>();
+function dateFmt(): Intl.DateTimeFormat {
+  const key = `d:${intlLocale()}`;
+  let f = fmtCache.get(key) as Intl.DateTimeFormat | undefined;
+  if (!f) {
+    f = new Intl.DateTimeFormat(intlLocale(), { year: "numeric", month: "short", day: "numeric" });
+    fmtCache.set(key, f);
+  }
+  return f;
+}
+function dateTimeFmt(): Intl.DateTimeFormat {
+  const key = `dt:${intlLocale()}`;
+  let f = fmtCache.get(key) as Intl.DateTimeFormat | undefined;
+  if (!f) {
+    f = new Intl.DateTimeFormat(intlLocale(), {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    fmtCache.set(key, f);
+  }
+  return f;
+}
+function relFmt(): Intl.RelativeTimeFormat {
+  const key = `r:${intlLocale()}`;
+  let f = fmtCache.get(key) as Intl.RelativeTimeFormat | undefined;
+  if (!f) {
+    f = new Intl.RelativeTimeFormat(intlLocale(), { numeric: "auto" });
+    fmtCache.set(key, f);
+  }
+  return f;
+}
+
+/** Locale-aware number formatting for the active language. */
+export function formatNumber(n: number, opts?: Intl.NumberFormatOptions): string {
+  return new Intl.NumberFormat(intlLocale(), opts).format(n);
+}
 
 function toDate(v: string | null | undefined): Date | null {
   if (!v) return null;
@@ -47,15 +77,14 @@ function toDate(v: string | null | undefined): Date | null {
 
 export function formatDate(v: string | null | undefined): string {
   const d = toDate(v);
-  return d ? dateFmt.format(d) : "—";
+  return d ? dateFmt().format(d) : "—";
 }
 
 export function formatDateTime(v: string | null | undefined): string {
   const d = toDate(v);
-  return d ? dateTimeFmt.format(d) : "—";
+  return d ? dateTimeFmt().format(d) : "—";
 }
 
-const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
 const STEPS: [Intl.RelativeTimeFormatUnit, number][] = [
   ["second", 60],
   ["minute", 60],
@@ -68,14 +97,14 @@ const STEPS: [Intl.RelativeTimeFormatUnit, number][] = [
 
 export function formatRelative(v: string | null | undefined, now = Date.now()): string {
   const d = toDate(v);
-  if (!d) return "never";
+  if (!d) return t("shell.fmt.never");
   let delta = (d.getTime() - now) / 1000;
-  if (Math.abs(delta) < 30) return "just now";
+  if (Math.abs(delta) < 30) return t("shell.fmt.justNow");
   for (const [unit, size] of STEPS) {
-    if (Math.abs(delta) < size) return rtf.format(Math.round(delta), unit);
+    if (Math.abs(delta) < size) return relFmt().format(Math.round(delta), unit);
     delta /= size;
   }
-  return dateFmt.format(d);
+  return dateFmt().format(d);
 }
 
 export function formatDuration(totalSec: number): string {
@@ -83,13 +112,13 @@ export function formatDuration(totalSec: number): string {
   const d = Math.floor(s / 86400);
   const h = Math.floor((s % 86400) / 3600);
   const m = Math.floor((s % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h`;
-  if (h > 0) return `${h}h ${m}m`;
-  if (m > 0) return `${m}m ${s % 60}s`;
-  return `${s}s`;
+  if (d > 0) return `${d}${t("shell.fmt.d")} ${h}${t("shell.fmt.h")}`;
+  if (h > 0) return `${h}${t("shell.fmt.h")} ${m}${t("shell.fmt.m")}`;
+  if (m > 0) return `${m}${t("shell.fmt.m")} ${s % 60}${t("shell.fmt.s")}`;
+  return `${s}${t("shell.fmt.s")}`;
 }
 
 export function formatMs(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)} ms`;
-  return `${(ms / 1000).toFixed(2)} s`;
+  if (ms < 1000) return `${Math.round(ms)} ${t("shell.fmt.ms")}`;
+  return `${formatNumber(ms / 1000, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${t("shell.fmt.s")}`;
 }

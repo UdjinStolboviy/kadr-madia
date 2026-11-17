@@ -23,8 +23,10 @@ import { formatDateTime } from "@/lib/format";
 import { meQuery, qk } from "@/lib/queries";
 import type { SessionResponse, TotpSetupResponse } from "@/lib/types";
 import { createCredential, isWebAuthnCancelled, webauthnSupported } from "@/lib/webauthn";
+import { useT } from "@/i18n/react";
 
 function QrCode({ value, size = 184 }: { value: string; size?: number }) {
+  const t = useT();
   const path = useMemo(() => {
     const qr = encode(value, { ecc: "M", border: 2 });
     let d = "";
@@ -38,7 +40,7 @@ function QrCode({ value, size = 184 }: { value: string; size?: number }) {
   return (
     <svg
       role="img"
-      aria-label="QR code for your authenticator app"
+      aria-label={t("security.qrAlt")}
       viewBox={`0 0 ${path.n} ${path.n}`}
       width={size}
       height={size}
@@ -59,6 +61,7 @@ function setTotp(qc: ReturnType<typeof useQueryClient>, enabled: boolean) {
 }
 
 function EnableDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+  const t = useT();
   const qc = useQueryClient();
   const [setup, setSetup] = useState<TotpSetupResponse | null>(null);
   const [code, setCode] = useState("");
@@ -73,12 +76,12 @@ function EnableDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
     onSuccess: () => {
       setTotp(qc, true);
       void qc.invalidateQueries({ queryKey: qk.me });
-      toast.success("Two-factor authentication enabled");
+      toast.success(t("security.enableDialog.enabledToast"));
       onOpenChange(false);
     },
     onError: (e) => {
       setCode("");
-      setError(isApiError(e, "invalid_code") ? "That code is not valid. Wait for a new one and try again." : errorMessage(e));
+      setError(isApiError(e, "invalid_code") ? t("security.enableDialog.invalidCode") : errorMessage(e));
     },
   });
 
@@ -108,11 +111,8 @@ function EnableDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
     >
       <DialogContent className="max-h-[92svh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Set up two-factor authentication</DialogTitle>
-          <DialogDescription>
-            Scan the QR code with an authenticator app (1Password, Google Authenticator, Authy…), then enter the
-            6-digit code it shows.
-          </DialogDescription>
+          <DialogTitle>{t("security.enableDialog.title")}</DialogTitle>
+          <DialogDescription>{t("security.enableDialog.desc")}</DialogDescription>
         </DialogHeader>
         {start.isPending || (!setup && !start.isError) ? (
           <div className="flex h-56 items-center justify-center">
@@ -133,10 +133,10 @@ function EnableDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
                 <QrCode value={setup.otpauth_url} />
               </div>
               <div className="w-full text-center">
-                <p className="mb-1 text-xs text-muted-foreground">Can't scan? Enter this key manually:</p>
+                <p className="mb-1 text-xs text-muted-foreground">{t("security.enableDialog.cantScan")}</p>
                 <div className="flex items-center justify-center gap-1">
                   <code className="font-mono text-sm tracking-wider break-all">{groupSecret(setup.secret)}</code>
-                  <CopyButton value={setup.secret} label="Copy secret" size="icon-xs" />
+                  <CopyButton value={setup.secret} label={t("security.enableDialog.copySecret")} size="icon-xs" />
                 </div>
               </div>
             </div>
@@ -147,7 +147,7 @@ function EnableDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
                 value={code}
                 onChange={setCode}
                 onComplete={submit}
-                aria-label="Verification code"
+                aria-label={t("security.enableDialog.codeLabel")}
                 autoFocus
               >
                 <InputOTPGroup>
@@ -170,11 +170,11 @@ function EnableDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-                Cancel
+                {t("security.cancel")}
               </Button>
               <Button type="submit" disabled={code.length !== 6 || enable.isPending}>
                 {enable.isPending && <Loader2 className="animate-spin" />}
-                Enable 2FA
+                {t("security.enable2fa")}
               </Button>
             </DialogFooter>
           </form>
@@ -185,6 +185,7 @@ function EnableDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
 }
 
 function DisableDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+  const t = useT();
   const qc = useQueryClient();
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -193,12 +194,12 @@ function DisableDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o
     onSuccess: () => {
       setTotp(qc, false);
       void qc.invalidateQueries({ queryKey: qk.me });
-      toast.success("Two-factor authentication disabled");
+      toast.success(t("security.disableDialog.disabledToast"));
       onOpenChange(false);
       setPassword("");
     },
     onError: (e) =>
-      setError(isApiError(e, "invalid_credentials") ? "Incorrect password." : errorMessage(e)),
+      setError(isApiError(e, "invalid_credentials") ? t("security.disableDialog.wrongPassword") : errorMessage(e)),
   });
 
   return (
@@ -214,10 +215,8 @@ function DisableDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o
     >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Disable two-factor authentication?</DialogTitle>
-          <DialogDescription>
-            Your account will be protected by password only. Confirm with your current password.
-          </DialogDescription>
+          <DialogTitle>{t("security.disableDialog.title")}</DialogTitle>
+          <DialogDescription>{t("security.disableDialog.desc")}</DialogDescription>
         </DialogHeader>
         <form
           id="disable-totp"
@@ -227,7 +226,7 @@ function DisableDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o
             if (password) disable.mutate(password);
           }}
         >
-          <Field label="Password" htmlFor="totp-pw" error={error ?? undefined}>
+          <Field label={t("security.disableDialog.password")} htmlFor="totp-pw" error={error ?? undefined}>
             <Input
               id="totp-pw"
               type="password"
@@ -241,11 +240,11 @@ function DisableDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o
         </form>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("security.cancel")}
           </Button>
           <Button type="submit" form="disable-totp" variant="destructive" disabled={!password || disable.isPending}>
             {disable.isPending && <Loader2 className="animate-spin" />}
-            Disable 2FA
+            {t("security.disableDialog.submit")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -254,6 +253,7 @@ function DisableDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o
 }
 
 function PasskeysSection() {
+  const t = useT();
   const qc = useQueryClient();
   const list = useQuery({ queryKey: qk.passkeys, queryFn: () => api.auth.passkeys() });
   const [name, setName] = useState("");
@@ -268,18 +268,18 @@ function PasskeysSection() {
     onSuccess: () => {
       setName("");
       void qc.invalidateQueries({ queryKey: qk.passkeys });
-      toast.success("Passkey added");
+      toast.success(t("security.passkeys.addedToast"));
     },
     onError: (e) => {
       if (isWebAuthnCancelled(e)) return;
-      toast.error(isApiError(e, "webauthn_disabled") ? "Passkeys are not configured on this server." : errorMessage(e));
+      toast.error(isApiError(e, "webauthn_disabled") ? t("security.passkeys.notConfigured") : errorMessage(e));
     },
   });
   const remove = useMutation({
     mutationFn: (id: string) => api.auth.passkeyDelete(id),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: qk.passkeys });
-      toast.success("Passkey removed");
+      toast.success(t("security.passkeys.removedToast"));
     },
     onError: (e) => toast.error(errorMessage(e)),
   });
@@ -292,8 +292,8 @@ function PasskeysSection() {
           <KeyRound className="size-5 text-muted-foreground" />
         </div>
         <div className="flex-1 text-sm">
-          <div className="font-medium">Passkeys &amp; security keys</div>
-          <p className="text-muted-foreground">Sign in with Touch ID, Windows Hello or a hardware key — no password or code.</p>
+          <div className="font-medium">{t("security.passkeys.title")}</div>
+          <p className="text-muted-foreground">{t("security.passkeys.desc")}</p>
         </div>
       </div>
       {items.length > 0 && (
@@ -303,16 +303,17 @@ function PasskeysSection() {
               <div className="min-w-0 flex-1">
                 <div className="truncate font-medium">{k.name}</div>
                 <div className="text-xs text-muted-foreground">
-                  Added {formatDateTime(k.created_at)} · {k.last_used_at ? `last used ${formatDateTime(k.last_used_at)}` : "never used"}
+                  {t("security.passkeys.added", { date: formatDateTime(k.created_at) })} ·{" "}
+                  {k.last_used_at ? t("security.passkeys.lastUsed", { date: formatDateTime(k.last_used_at) }) : t("security.passkeys.neverUsed")}
                 </div>
               </div>
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label={`Delete passkey ${k.name}`}
+                aria-label={t("security.passkeys.delete", { name: k.name })}
                 disabled={remove.isPending}
                 onClick={() => {
-                  if (window.confirm(`Delete passkey "${k.name}"?`)) remove.mutate(k.id);
+                  if (window.confirm(t("security.passkeys.confirmDelete", { name: k.name }))) remove.mutate(k.id);
                 }}
               >
                 <Trash2 />
@@ -330,24 +331,25 @@ function PasskeysSection() {
           }}
         >
           <Input
-            aria-label="Passkey name"
-            placeholder="Name, e.g. MacBook Touch ID"
+            aria-label={t("security.passkeys.nameLabel")}
+            placeholder={t("security.passkeys.namePlaceholder")}
             value={name}
             maxLength={80}
             onChange={(e) => setName(e.target.value)}
           />
           <Button type="submit" disabled={!name.trim() || register.isPending}>
-            {register.isPending ? <Loader2 className="animate-spin" /> : <KeyRound />} Add passkey
+            {register.isPending ? <Loader2 className="animate-spin" /> : <KeyRound />} {t("security.passkeys.add")}
           </Button>
         </form>
       ) : (
-        <p className="text-xs text-muted-foreground">This browser does not support passkeys.</p>
+        <p className="text-xs text-muted-foreground">{t("security.passkeys.unsupported")}</p>
       )}
     </div>
   );
 }
 
 export function SecurityCard() {
+  const t = useT();
   const me = useQuery(meQuery);
   const [enableOpen, setEnableOpen] = useState(false);
   const [disableOpen, setDisableOpen] = useState(false);
@@ -357,15 +359,13 @@ export function SecurityCard() {
   return (
     <Card id="security" className="scroll-mt-20">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          Security
-        </CardTitle>
+        <CardTitle className="flex items-center gap-2 text-base">{t("security.title")}</CardTitle>
         <CardDescription>{admin?.email}</CardDescription>
         <CardAction>
           {enabled ? (
-            <StatusBadge tone="success">2FA on</StatusBadge>
+            <StatusBadge tone="success">{t("security.twoFaOn")}</StatusBadge>
           ) : (
-            <StatusBadge tone="warning">2FA off</StatusBadge>
+            <StatusBadge tone="warning">{t("security.twoFaOff")}</StatusBadge>
           )}
         </CardAction>
       </CardHeader>
@@ -375,27 +375,27 @@ export function SecurityCard() {
             {enabled ? <ShieldCheck className="size-5 text-success" /> : <Smartphone className="size-5 text-muted-foreground" />}
           </div>
           <div className="flex-1 text-sm">
-            <div className="font-medium">Authenticator app (TOTP)</div>
+            <div className="font-medium">{t("security.totp.title")}</div>
             <p className="text-muted-foreground">
               {enabled
-                ? "A 6-digit code is required at every sign-in."
-                : "Require a one-time code from your phone in addition to your password."}
+                ? t("security.totp.requiredAtLogin")
+                : t("security.totp.promo")}
             </p>
           </div>
           {enabled ? (
             <Button variant="outline" onClick={() => setDisableOpen(true)}>
-              <ShieldOff /> Disable
+              <ShieldOff /> {t("security.disable")}
             </Button>
           ) : (
             <Button onClick={() => setEnableOpen(true)}>
-              <ShieldCheck /> Enable 2FA
+              <ShieldCheck /> {t("security.enable2fa")}
             </Button>
           )}
         </div>
         <PasskeysSection />
         {admin && (
           <p className="text-xs text-muted-foreground">
-            Signed in as <span className="capitalize">{admin.role}</span> · last sign-in {formatDateTime(admin.last_login_at)}
+            {t("security.signedInAs", { role: admin.role.charAt(0).toUpperCase() + admin.role.slice(1), when: formatDateTime(admin.last_login_at) })}
           </p>
         )}
       </CardContent>

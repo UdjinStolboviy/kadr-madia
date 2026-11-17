@@ -34,6 +34,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { LanguageSwitcher } from "@/components/language-switcher";
+import { useT } from "@/i18n/react";
+import type { MessageKey } from "@/i18n/dictionaries";
 import { api } from "@/lib/api";
 import { meQuery, systemQuery } from "@/lib/queries";
 import { useTheme, type ThemePref } from "@/lib/theme";
@@ -41,21 +44,21 @@ import { cn } from "@/lib/utils";
 
 interface NavItem {
   to: "/" | "/projects" | "/assets" | "/jobs" | "/analytics" | "/playground" | "/storage" | "/system" | "/audit";
-  label: string;
+  label: MessageKey;
   icon: LucideIcon;
   exact?: boolean;
 }
 
 const NAV: NavItem[] = [
-  { to: "/", label: "Overview", icon: LayoutDashboard, exact: true },
-  { to: "/projects", label: "Projects", icon: FolderKanban },
-  { to: "/assets", label: "Assets", icon: Images },
-  { to: "/jobs", label: "Jobs", icon: ListChecks },
-  { to: "/analytics", label: "Analytics", icon: BarChart3 },
-  { to: "/playground", label: "Playground", icon: FlaskConical },
-  { to: "/storage", label: "Storage", icon: HardDrive },
-  { to: "/system", label: "System", icon: Activity },
-  { to: "/audit", label: "Audit log", icon: ScrollText },
+  { to: "/", label: "shell.nav.overview", icon: LayoutDashboard, exact: true },
+  { to: "/projects", label: "shell.nav.projects", icon: FolderKanban },
+  { to: "/assets", label: "shell.nav.assets", icon: Images },
+  { to: "/jobs", label: "shell.nav.jobs", icon: ListChecks },
+  { to: "/analytics", label: "shell.nav.analytics", icon: BarChart3 },
+  { to: "/playground", label: "shell.nav.playground", icon: FlaskConical },
+  { to: "/storage", label: "shell.nav.storage", icon: HardDrive },
+  { to: "/system", label: "shell.nav.system", icon: Activity },
+  { to: "/audit", label: "shell.nav.audit", icon: ScrollText },
 ];
 
 export function Logo({ className }: { className?: string }) {
@@ -70,8 +73,9 @@ export function Logo({ className }: { className?: string }) {
 }
 
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
+  const t = useT();
   return (
-    <nav className="flex flex-1 flex-col gap-6 overflow-y-auto px-3 py-4" aria-label="Main">
+    <nav className="flex flex-1 flex-col gap-6 overflow-y-auto px-3 py-4" aria-label={t("shell.mainNav")}>
       <ul className="grid gap-0.5">
         {NAV.map((item) => (
           <li key={item.to}>
@@ -82,7 +86,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
               className="group flex h-8 items-center gap-2.5 rounded-md px-2.5 text-sm text-sidebar-foreground/80 transition-colors outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 data-[status=active]:bg-accent data-[status=active]:font-medium data-[status=active]:text-foreground"
             >
               <item.icon className="size-4 text-muted-foreground group-data-[status=active]:text-foreground" />
-              {item.label}
+              {t(item.label)}
             </Link>
           </li>
         ))}
@@ -92,13 +96,14 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
 }
 
 function SidebarFooter() {
+  const t = useT();
   const { data } = useQuery(systemQuery);
   return (
     <div className="border-t px-5 py-3 text-xs text-muted-foreground">
       {data ? (
         <span className="font-mono">
           {data.version}
-          {data.dev && <span className="ml-2 rounded bg-warning/15 px-1 text-warning">dev</span>}
+          {data.dev && <span className="ml-2 rounded bg-warning/15 px-1 text-warning">{t("shell.dev")}</span>}
         </span>
       ) : (
         <span>&nbsp;</span>
@@ -114,6 +119,7 @@ function ThemeIcon({ theme }: { theme: ThemePref }) {
 }
 
 function UserMenu() {
+  const t = useT();
   const { data } = useQuery(meQuery);
   const { theme, setTheme } = useTheme();
   const qc = useQueryClient();
@@ -128,35 +134,36 @@ function UserMenu() {
       // Even if the server call fails, drop the local session.
     }
     qc.clear();
-    toast.success("Signed out");
+    toast.success(t("shell.signedOut"));
     void navigate({ to: "/login", replace: true });
   }
 
   return (
     <div className="flex items-center gap-1">
+      <LanguageSwitcher />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon-sm" aria-label="Theme">
+          <Button variant="ghost" size="icon-sm" aria-label={t("shell.theme")}>
             <ThemeIcon theme={theme} />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-36">
           <DropdownMenuRadioGroup value={theme} onValueChange={(v) => setTheme(v as ThemePref)}>
             <DropdownMenuRadioItem value="light">
-              <Sun /> Light
+              <Sun /> {t("shell.themeLight")}
             </DropdownMenuRadioItem>
             <DropdownMenuRadioItem value="dark">
-              <Moon /> Dark
+              <Moon /> {t("shell.themeDark")}
             </DropdownMenuRadioItem>
             <DropdownMenuRadioItem value="system">
-              <Monitor /> System
+              <Monitor /> {t("shell.themeSystem")}
             </DropdownMenuRadioItem>
           </DropdownMenuRadioGroup>
         </DropdownMenuContent>
       </DropdownMenu>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" className="h-8 gap-2 px-1.5 sm:px-2" aria-label="Account menu">
+          <Button variant="ghost" className="h-8 gap-2 px-1.5 sm:px-2" aria-label={t("shell.accountMenu")}>
             <span className="flex size-6 items-center justify-center rounded-full bg-brand/15 text-xs font-semibold text-brand">
               {initial}
             </span>
@@ -171,15 +178,15 @@ function UserMenu() {
           <DropdownMenuSeparator />
           <DropdownMenuItem asChild>
             <Link to="/system" hash="security">
-              <ShieldCheck /> Security
+              <ShieldCheck /> {t("shell.security")}
               {data && !data.admin.totp_enabled && (
-                <span className="ml-auto text-[11px] text-warning">2FA off</span>
+                <span className="ml-auto text-[11px] text-warning">{t("shell.twoFaOff")}</span>
               )}
             </Link>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => void logout()}>
-            <LogOut /> Sign out
+            <LogOut /> {t("shell.signOut")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -201,6 +208,7 @@ function TopProgress() {
 }
 
 export function AppShell() {
+  const t = useT();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
@@ -209,7 +217,7 @@ export function AppShell() {
         href="#main"
         className="sr-only z-50 rounded-md bg-background px-3 py-2 text-sm focus:not-sr-only focus:fixed focus:top-2 focus:left-2"
       >
-        Skip to content
+        {t("shell.skipToContent")}
       </a>
       <aside className="sticky top-0 hidden h-svh w-60 shrink-0 flex-col border-r bg-sidebar lg:flex">
         <div className="flex h-14 items-center px-5">
@@ -223,8 +231,8 @@ export function AppShell() {
 
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
         <SheetContent side="left" className="w-64 gap-0 bg-sidebar p-0">
-          <SheetTitle className="sr-only">Navigation</SheetTitle>
-          <SheetDescription className="sr-only">Main navigation</SheetDescription>
+          <SheetTitle className="sr-only">{t("shell.navigation")}</SheetTitle>
+          <SheetDescription className="sr-only">{t("shell.mainNavDesc")}</SheetDescription>
           <div className="flex h-14 items-center px-5">
             <Logo />
           </div>
@@ -240,7 +248,7 @@ export function AppShell() {
             variant="ghost"
             size="icon-sm"
             className="lg:hidden"
-            aria-label="Open navigation"
+            aria-label={t("shell.openNav")}
             onClick={() => setMobileOpen(true)}
           >
             <Menu />

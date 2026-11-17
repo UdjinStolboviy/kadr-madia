@@ -1,6 +1,8 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Loader2, Plus, RotateCcw, Send, Trash2, Webhook } from "lucide-react";
 import { useState } from "react";
+
+import type { MessageKey } from "@/i18n/dictionaries";
 import { toast } from "sonner";
 
 import { Field, RelativeTime, StatusBadge } from "@/components/common";
@@ -23,6 +25,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useT } from "@/i18n/react";
 import { api, errorMessage, isApiError } from "@/lib/api";
 import {
   qk,
@@ -49,6 +52,7 @@ function CreateWebhookDialog({
   onOpenChange: (o: boolean) => void;
   onCreated: (r: CreateWebhookResponse) => void;
 }) {
+  const t = useT();
   const create = useCreateWebhook(project.id);
   const [url, setUrl] = useState("");
   const [events, setEvents] = useState<string[]>([]);
@@ -88,10 +92,10 @@ function CreateWebhookDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle>Add webhook endpoint</DialogTitle>
-            <DialogDescription>Kadr POSTs signed JSON events to this URL.</DialogDescription>
+            <DialogTitle>{t("webhooks.addTitle")}</DialogTitle>
+            <DialogDescription>{t("webhooks.addDesc")}</DialogDescription>
           </DialogHeader>
-          <Field label="Endpoint URL" htmlFor="wh-url" error={urlErr}>
+          <Field label={t("webhooks.endpointUrl")} htmlFor="wh-url" error={urlErr}>
             <Input
               id="wh-url"
               type="url"
@@ -103,8 +107,8 @@ function CreateWebhookDialog({
             />
           </Field>
           <fieldset className="grid gap-2">
-            <legend className="mb-1 text-sm font-medium">Events</legend>
-            <p className="text-xs text-muted-foreground">Leave all unchecked to receive every event.</p>
+            <legend className="mb-1 text-sm font-medium">{t("webhooks.events")}</legend>
+            <p className="text-xs text-muted-foreground">{t("webhooks.eventsHint")}</p>
             <div className="grid max-h-48 grid-cols-2 gap-x-4 gap-y-2 overflow-y-auto rounded-lg border p-3">
               {WEBHOOK_EVENTS.map((ev) => (
                 <label key={ev} className="flex items-center gap-2 font-mono text-xs">
@@ -129,11 +133,11 @@ function CreateWebhookDialog({
           )}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
+              {t("webhooks.cancel")}
             </Button>
             <Button type="submit" disabled={!url.trim() || create.isPending}>
               {create.isPending && <Loader2 className="animate-spin" />}
-              Add endpoint
+              {t("webhooks.addEndpoint")}
             </Button>
           </DialogFooter>
         </form>
@@ -143,6 +147,7 @@ function CreateWebhookDialog({
 }
 
 function Endpoints({ project }: { project: Project }) {
+  const t = useT();
   const endpoints = useQuery(webhooksQuery(project.id));
   const del = useDeleteWebhook(project.id);
   const test = useTestWebhook(project.id);
@@ -156,13 +161,13 @@ function Endpoints({ project }: { project: Project }) {
     setTesting(e.id);
     test.mutate(e.id, {
       onSuccess: (d) => {
-        if (d.status === "delivered") toast.success("Test event delivered", { description: `HTTP ${d.last_status_code ?? "—"} in ${d.last_duration_ms ?? "?"} ms` });
+        if (d.status === "delivered") toast.success(t("webhooks.testOk"), { description: t("webhooks.testOkDesc", { code: d.last_status_code ?? "—", ms: d.last_duration_ms ?? "?" }) });
         else
-          toast.error("Test delivery failed", {
-            description: d.last_error ?? (d.last_status_code ? `HTTP ${d.last_status_code}` : `Status: ${d.status}`),
+          toast.error(t("webhooks.testFailed"), {
+            description: d.last_error ?? (d.last_status_code ? `HTTP ${d.last_status_code}` : t("webhooks.statusLine", { status: d.status })),
           });
       },
-      onError: (err) => toast.error("Couldn't send test event", { description: errorMessage(err) }),
+      onError: (err) => toast.error(t("webhooks.testError"), { description: errorMessage(err) }),
       onSettled: () => setTesting(null),
     });
   };
@@ -170,9 +175,9 @@ function Endpoints({ project }: { project: Project }) {
   return (
     <section className="grid gap-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-muted-foreground">Endpoints receive signed event notifications (asset.ready, asset.failed, …).</p>
+        <p className="text-sm text-muted-foreground">{t("webhooks.intro")}</p>
         <Button onClick={() => setCreateOpen(true)} disabled={project.disabled} className="shrink-0">
-          <Plus /> Add endpoint
+          <Plus /> {t("webhooks.addEndpoint")}
         </Button>
       </div>
 
@@ -186,11 +191,11 @@ function Endpoints({ project }: { project: Project }) {
       ) : list.length === 0 ? (
         <EmptyState
           icon={<Webhook />}
-          title="No webhook endpoints"
-          description="Add an endpoint to be notified when assets finish processing."
+          title={t("webhooks.emptyTitle")}
+          description={t("webhooks.emptyDesc")}
           action={
             <Button onClick={() => setCreateOpen(true)} disabled={project.disabled}>
-              <Plus /> Add endpoint
+              <Plus /> {t("webhooks.addEndpoint")}
             </Button>
           }
         />
@@ -200,8 +205,8 @@ function Endpoints({ project }: { project: Project }) {
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 <TableHead className="pl-4">URL</TableHead>
-                <TableHead className="hidden md:table-cell">Events</TableHead>
-                <TableHead className="hidden sm:table-cell">Created</TableHead>
+                <TableHead className="hidden md:table-cell">{t("webhooks.colEvents")}</TableHead>
+                <TableHead className="hidden sm:table-cell">{t("webhooks.colCreated")}</TableHead>
                 <TableHead className="w-28 pr-4" />
               </TableRow>
             </TableHeader>
@@ -214,14 +219,14 @@ function Endpoints({ project }: { project: Project }) {
                     </div>
                     <div className="flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
                       {e.id}
-                      {e.disabled && <StatusBadge tone="neutral">disabled</StatusBadge>}
+                      {e.disabled && <StatusBadge tone="neutral">{t("webhooks.disabled")}</StatusBadge>}
                     </div>
                   </TableCell>
                   <TableCell className="hidden max-w-[16rem] md:table-cell">
                     <div className="flex flex-wrap gap-1">
                       {e.events.map((ev) => (
                         <span key={ev} className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] whitespace-nowrap">
-                          {ev === "*" ? "all events" : ev}
+                          {ev === "*" ? t("webhooks.allEvents") : ev}
                         </span>
                       ))}
                     </div>
@@ -231,12 +236,12 @@ function Endpoints({ project }: { project: Project }) {
                   </TableCell>
                   <TableCell className="pr-3 text-right whitespace-nowrap">
                     <Button variant="ghost" size="sm" disabled={testing === e.id} onClick={() => runTest(e)}>
-                      {testing === e.id ? <Loader2 className="animate-spin" /> : <Send />} Test
+                      {testing === e.id ? <Loader2 className="animate-spin" /> : <Send />} {t("webhooks.test")}
                     </Button>
                     <Button
                       variant="ghost"
                       size="icon-sm"
-                      aria-label={`Delete ${e.url}`}
+                      aria-label={t("webhooks.deleteAria", { url: e.url })}
                       className="text-muted-foreground hover:text-destructive"
                       onClick={() => setToDelete(e)}
                     >
@@ -254,11 +259,11 @@ function Endpoints({ project }: { project: Project }) {
       <SecretDialog
         open={!!created}
         onDone={() => setCreated(null)}
-        title="Save the signing secret"
+        title={t("webhooks.saveTitle")}
         description={
           <>
-            Endpoint <span className="font-mono text-xs text-foreground">{created?.webhook.url}</span> was created. Use this secret to
-            verify the <code className="font-mono text-xs">webhook-signature</code> header.
+            {t("webhooks.endpointPre")} <span className="font-mono text-xs text-foreground">{created?.webhook.url}</span> {t("webhooks.createdUse")}{" "}
+            <code className="font-mono text-xs">webhook-signature</code>{t("webhooks.header")}
           </>
         }
         secret={created?.secret ?? ""}
@@ -267,14 +272,13 @@ function Endpoints({ project }: { project: Project }) {
       <AlertDialog open={!!toDelete} onOpenChange={(o) => !o && setToDelete(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete this endpoint?</AlertDialogTitle>
+            <AlertDialogTitle>{t("webhooks.deleteTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              <span className="font-mono text-xs break-all">{toDelete?.url}</span> will stop receiving events and its delivery history is
-              removed. This can't be undone.
+              <span className="font-mono text-xs break-all">{toDelete?.url}</span> {t("webhooks.deleteDesc")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("webhooks.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-white hover:bg-destructive/90"
               onClick={() => {
@@ -282,7 +286,7 @@ function Endpoints({ project }: { project: Project }) {
                 setToDelete(null);
               }}
             >
-              Delete endpoint
+              {t("webhooks.deleteEndpoint")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -292,6 +296,7 @@ function Endpoints({ project }: { project: Project }) {
 }
 
 function DeliveryRow({ d, onRetry, retrying }: { d: Delivery; onRetry: () => void; retrying: boolean }) {
+  const t = useT();
   return (
     <TableRow>
       <TableCell className="pl-4">
@@ -301,7 +306,7 @@ function DeliveryRow({ d, onRetry, retrying }: { d: Delivery; onRetry: () => voi
         </div>
       </TableCell>
       <TableCell>
-        <StatusBadge tone={DELIVERY_TONE[d.status] ?? "neutral"}>{d.status}</StatusBadge>
+        <StatusBadge tone={DELIVERY_TONE[d.status] ?? "neutral"}>{t(`webhooks.delivery.${d.status}` as MessageKey)}</StatusBadge>
       </TableCell>
       <TableCell className="hidden text-sm tabular-nums sm:table-cell">{d.attempts}</TableCell>
       <TableCell className="hidden max-w-[14rem] md:table-cell">
@@ -324,7 +329,7 @@ function DeliveryRow({ d, onRetry, retrying }: { d: Delivery; onRetry: () => voi
       <TableCell className="pr-3 text-right">
         {d.status !== "delivering" && (
           <Button variant="ghost" size="sm" disabled={retrying} onClick={onRetry}>
-            <RotateCcw /> Retry
+            <RotateCcw /> {t("webhooks.retry")}
           </Button>
         )}
       </TableCell>
@@ -333,6 +338,7 @@ function DeliveryRow({ d, onRetry, retrying }: { d: Delivery; onRetry: () => voi
 }
 
 function Deliveries({ project }: { project: Project }) {
+  const t = useT();
   const [status, setStatus] = useState<string | undefined>();
   const retry = useRetryDelivery(project.id);
   const q = useInfiniteQuery({
@@ -346,11 +352,11 @@ function Deliveries({ project }: { project: Project }) {
   return (
     <section className="grid gap-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold">Deliveries</h3>
+        <h3 className="text-sm font-semibold">{t("webhooks.deliveries")}</h3>
         <div className="flex items-center gap-2">
-          <FilterSelect value={status} onChange={setStatus} options={DELIVERY_STATUSES} allLabel="All statuses" label="Delivery status" />
+          <FilterSelect value={status} onChange={setStatus} options={DELIVERY_STATUSES} allLabel={t("webhooks.allStatuses")} label={t("webhooks.deliveryStatus")} optionLabel={(s) => t(`webhooks.delivery.${s}` as MessageKey)} />
           <Button variant="outline" size="sm" onClick={() => void q.refetch()} disabled={q.isFetching}>
-            {q.isFetching && !q.isFetchingNextPage ? <Loader2 className="animate-spin" /> : <RotateCcw />} Refresh
+            {q.isFetching && !q.isFetchingNextPage ? <Loader2 className="animate-spin" /> : <RotateCcw />} {t("webhooks.refresh")}
           </Button>
         </div>
       </div>
@@ -359,18 +365,18 @@ function Deliveries({ project }: { project: Project }) {
       ) : q.isError ? (
         <ErrorState error={q.error} onRetry={() => void q.refetch()} />
       ) : items.length === 0 ? (
-        <EmptyState title="No deliveries" description={status ? "No deliveries with this status." : "Events sent to your endpoints will be logged here."} />
+        <EmptyState title={t("webhooks.noDeliveries")} description={status ? t("webhooks.noDeliveriesStatus") : t("webhooks.noDeliveriesDesc")} />
       ) : (
         <>
           <div className="overflow-hidden rounded-xl border bg-card">
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead className="pl-4">Event</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="hidden sm:table-cell">Attempts</TableHead>
-                  <TableHead className="hidden md:table-cell">Last result</TableHead>
-                  <TableHead className="hidden lg:table-cell">Created</TableHead>
+                  <TableHead className="pl-4">{t("webhooks.colEvent")}</TableHead>
+                  <TableHead>{t("webhooks.colStatus")}</TableHead>
+                  <TableHead className="hidden sm:table-cell">{t("webhooks.colAttempts")}</TableHead>
+                  <TableHead className="hidden md:table-cell">{t("webhooks.colLastResult")}</TableHead>
+                  <TableHead className="hidden lg:table-cell">{t("webhooks.colCreated")}</TableHead>
                   <TableHead className="w-24 pr-4" />
                 </TableRow>
               </TableHeader>
@@ -390,7 +396,7 @@ function Deliveries({ project }: { project: Project }) {
             <div className="flex justify-end">
               <Button variant="outline" size="sm" onClick={() => void q.fetchNextPage()} disabled={q.isFetchingNextPage}>
                 {q.isFetchingNextPage && <Loader2 className="animate-spin" />}
-                Load more
+                {t("webhooks.loadMore")}
               </Button>
             </div>
           )}

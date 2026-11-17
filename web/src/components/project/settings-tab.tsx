@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -14,18 +14,20 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { useT } from "@/i18n/react";
+import type { MessageKey } from "@/i18n/dictionaries";
 import { errorMessage, isApiError } from "@/lib/api";
 import { bytesToGb, formatDateTime, gbToBytes } from "@/lib/format";
 import { storageQuery, useUpdateProject } from "@/lib/queries";
 import type { Project, UpdateProjectRequest } from "@/lib/types";
 
-const schema = z.object({
-  name: z.string().trim().min(1, "Name is required").max(100),
+const makeSchema = (t: (k: MessageKey) => string) => z.object({
+  name: z.string().trim().min(1, t("settings.errName")).max(100),
   storage_profile_id: z.string(),
   quota_gb: quotaSchema,
   allowed_origins: z.array(z.string()),
 });
-type Values = z.infer<typeof schema>;
+type Values = z.infer<ReturnType<typeof makeSchema>>;
 
 function toValues(p: Project): Values {
   const gb = bytesToGb(p.quota_bytes);
@@ -38,6 +40,8 @@ function toValues(p: Project): Values {
 }
 
 export function SettingsTab({ project }: { project: Project }) {
+  const t = useT();
+  const schema = useMemo(() => makeSchema(t), [t]);
   const storage = useQuery(storageQuery);
   const update = useUpdateProject(project.id);
   const toggle = useUpdateProject(project.id);
@@ -59,14 +63,14 @@ export function SettingsTab({ project }: { project: Project }) {
     try {
       const p = await update.mutateAsync(body);
       form.reset(toValues(p));
-      toast.success("Project settings saved");
+      toast.success(t("settings.saved"));
     } catch (e) {
       if (isApiError(e, "validation_failed") && Object.keys(e.fieldErrors).length) {
         for (const [k, msg] of Object.entries(e.fieldErrors)) {
           form.setError((k === "quota_bytes" ? "quota_gb" : k) as keyof Values, { message: msg });
         }
       } else {
-        toast.error("Couldn't save settings", { description: errorMessage(e) });
+        toast.error(t("settings.saveFailed"), { description: errorMessage(e) });
       }
     }
   }
@@ -76,22 +80,22 @@ export function SettingsTab({ project }: { project: Project }) {
       <div className="grid gap-6">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">General</CardTitle>
-            <CardDescription>Name, storage and limits for this project.</CardDescription>
+            <CardTitle className="text-base">{t("settings.general")}</CardTitle>
+            <CardDescription>{t("settings.generalDesc")}</CardDescription>
           </CardHeader>
           <CardContent>
             <form id="project-settings" onSubmit={form.handleSubmit(onSubmit)} noValidate className="grid gap-4">
-              <Field label="Name" htmlFor="ps-name" error={errors.name?.message}>
+              <Field label={t("settings.name")} htmlFor="ps-name" error={errors.name?.message}>
                 <Input id="ps-name" aria-invalid={!!errors.name} {...form.register("name")} />
               </Field>
-              <Field label="Slug" htmlFor="ps-slug" hint="The slug is permanent.">
+              <Field label={t("settings.slug")} htmlFor="ps-slug" hint={t("settings.slugHint")}>
                 <Input id="ps-slug" value={project.slug} readOnly disabled className="font-mono" />
               </Field>
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field
-                  label="Storage profile"
+                  label={t("settings.storageProfile")}
                   htmlFor="ps-storage"
-                  hint={project.storage_profile_id ? "Changing storage affects new uploads only." : undefined}
+                  hint={project.storage_profile_id ? t("settings.storageHint") : undefined}
                 >
                   <Controller
                     control={form.control}
@@ -107,17 +111,17 @@ export function SettingsTab({ project }: { project: Project }) {
                     )}
                   />
                 </Field>
-                <Field label="Quota (GB)" htmlFor="ps-quota" error={errors.quota_gb?.message} hint="Empty = unlimited">
+                <Field label={t("settings.quota")} htmlFor="ps-quota" error={errors.quota_gb?.message} hint={t("settings.quotaHint")}>
                   <Input
                     id="ps-quota"
                     inputMode="decimal"
-                    placeholder="Unlimited"
+                    placeholder={t("settings.unlimited")}
                     aria-invalid={!!errors.quota_gb}
                     {...form.register("quota_gb")}
                   />
                 </Field>
               </div>
-              <Field label="Allowed origins" htmlFor="ps-origins" hint="Browser origins allowed to upload directly.">
+              <Field label={t("settings.origins")} htmlFor="ps-origins" hint={t("settings.originsHint")}>
                 <Controller
                   control={form.control}
                   name="allowed_origins"
@@ -136,37 +140,37 @@ export function SettingsTab({ project }: { project: Project }) {
           </CardContent>
           <CardFooter className="justify-end gap-2 border-t pt-6">
             <Button variant="ghost" disabled={!isDirty || update.isPending} onClick={() => form.reset(toValues(project))}>
-              Discard
+              {t("settings.discard")}
             </Button>
             <Button type="submit" form="project-settings" disabled={!isDirty || update.isPending}>
               {update.isPending && <Loader2 className="animate-spin" />}
-              Save changes
+              {t("settings.save")}
             </Button>
           </CardFooter>
         </Card>
 
         <Card className={project.disabled ? "border-warning/40" : "border-destructive/25"}>
           <CardHeader>
-            <CardTitle className="text-base">{project.disabled ? "Project disabled" : "Disable project"}</CardTitle>
+            <CardTitle className="text-base">{project.disabled ? t("settings.disabledTitle") : t("settings.disableTitle")}</CardTitle>
             <CardDescription>
               {project.disabled
-                ? "API keys of this project are rejected and no new uploads are accepted. Existing public files keep being served by the CDN."
-                : "Temporarily reject all API requests for this project. Already published media stays available via the CDN."}
+                ? t("settings.disabledDesc")
+                : t("settings.disableDesc")}
             </CardDescription>
           </CardHeader>
           <CardContent>
             <label className="flex items-center justify-between gap-4 rounded-lg border p-4">
-              <span className="text-sm font-medium">{project.disabled ? "Disabled" : "Enabled"}</span>
+              <span className="text-sm font-medium">{project.disabled ? t("settings.stateDisabled") : t("settings.stateEnabled")}</span>
               <Switch
                 checked={!project.disabled}
                 disabled={toggle.isPending}
-                aria-label="Project enabled"
+                aria-label={t("settings.enabledAria")}
                 onCheckedChange={async (enabled) => {
                   try {
                     await toggle.mutateAsync({ disabled: !enabled });
-                    toast.success(enabled ? "Project enabled" : "Project disabled");
+                    toast.success(enabled ? t("settings.toastEnabled") : t("settings.toastDisabled"));
                   } catch (e) {
-                    toast.error("Couldn't update project", { description: errorMessage(e) });
+                    toast.error(t("settings.updateFailed"), { description: errorMessage(e) });
                   }
                 }}
               />
@@ -177,17 +181,17 @@ export function SettingsTab({ project }: { project: Project }) {
 
       <Card className="h-fit gap-2">
         <CardHeader>
-          <CardTitle className="text-sm">Details</CardTitle>
+          <CardTitle className="text-sm">{t("settings.details")}</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="mb-3">
-            <div className="mb-1 text-xs text-muted-foreground">Storage used</div>
+            <div className="mb-1 text-xs text-muted-foreground">{t("settings.storageUsed")}</div>
             <UsageBar used={project.used_bytes} quota={project.quota_bytes} />
           </div>
           <dl className="divide-y">
-            <KeyValue label="Environment">{project.environment}</KeyValue>
-            <KeyValue label="Created">{formatDateTime(project.created_at)}</KeyValue>
-            <KeyValue label="Updated">
+            <KeyValue label={t("settings.environment")}>{project.environment}</KeyValue>
+            <KeyValue label={t("settings.created")}>{formatDateTime(project.created_at)}</KeyValue>
+            <KeyValue label={t("settings.updated")}>
               <RelativeTime value={project.updated_at} />
             </KeyValue>
           </dl>

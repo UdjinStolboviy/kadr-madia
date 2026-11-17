@@ -1,7 +1,8 @@
 import { zodResolver } from "@hookform/resolvers/zod";
+import type { MessageKey } from "@/i18n/dictionaries";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, KeyRound, Loader2, Plus, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -32,31 +33,32 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useT } from "@/i18n/react";
 import { errorMessage, isApiError } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import { apiKeysQuery, useCreateApiKey, useRevokeApiKey } from "@/lib/queries";
 import { API_KEY_SCOPES, type ApiKey, type ApiKeyScope, type CreateApiKeyResponse, type Project } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-const SCOPE_INFO: Record<ApiKeyScope, string> = {
-  "uploads:write": "Create upload tickets and complete uploads",
-  "assets:read": "Read asset metadata and renditions",
-  "assets:write": "Update asset metadata and visibility",
-  "assets:delete": "Delete assets",
-  "urls:sign": "Sign private delivery URLs",
-  "namespaces:admin": "Manage namespaces and their quotas",
-  "imports:write": "Import media from URLs and cloud drives",
+const SCOPE_INFO: Record<ApiKeyScope, MessageKey> = {
+  "uploads:write": "apikeys.scope.uploadsWrite",
+  "assets:read": "apikeys.scope.assetsRead",
+  "assets:write": "apikeys.scope.assetsWrite",
+  "assets:delete": "apikeys.scope.assetsDelete",
+  "urls:sign": "apikeys.scope.urlsSign",
+  "namespaces:admin": "apikeys.scope.namespacesAdmin",
+  "imports:write": "apikeys.scope.importsWrite",
 };
 
 const DEFAULT_SCOPES: ApiKeyScope[] = ["uploads:write", "assets:read", "urls:sign"];
 
 const EXPIRY = [
-  { value: "never", label: "Never" },
-  { value: "30", label: "30 days" },
-  { value: "90", label: "90 days" },
-  { value: "365", label: "1 year" },
-  { value: "custom", label: "Custom date…" },
-] as const;
+  { value: "never", label: "apikeys.expiry.never" },
+  { value: "30", label: "apikeys.expiry.30" },
+  { value: "90", label: "apikeys.expiry.90" },
+  { value: "365", label: "apikeys.expiry.365" },
+  { value: "custom", label: "apikeys.expiry.custom" },
+] as const satisfies readonly { value: string; label: MessageKey }[];
 
 function todayPlus(days: number) {
   const d = new Date();
@@ -64,20 +66,20 @@ function todayPlus(days: number) {
   return d.toISOString().slice(0, 10);
 }
 
-const schema = z
+const makeSchema = (t: (k: MessageKey) => string) => z
   .object({
-    name: z.string().trim().min(1, "Give the key a name").max(100),
-    scopes: z.array(z.enum(API_KEY_SCOPES)).min(1, "Select at least one scope"),
+    name: z.string().trim().min(1, t("apikeys.errName")).max(100),
+    scopes: z.array(z.enum(API_KEY_SCOPES)).min(1, t("apikeys.errScopes")),
     expiry: z.enum(["never", "30", "90", "365", "custom"]),
     expires_on: z.string(),
   })
   .superRefine((v, ctx) => {
     if (v.expiry !== "custom") return;
-    if (!v.expires_on) ctx.addIssue({ code: "custom", path: ["expires_on"], message: "Pick a date" });
+    if (!v.expires_on) ctx.addIssue({ code: "custom", path: ["expires_on"], message: t("apikeys.errDate") });
     else if (v.expires_on <= new Date().toISOString().slice(0, 10))
-      ctx.addIssue({ code: "custom", path: ["expires_on"], message: "Date must be in the future" });
+      ctx.addIssue({ code: "custom", path: ["expires_on"], message: t("apikeys.errDateFuture") });
   });
-type Values = z.infer<typeof schema>;
+type Values = z.infer<ReturnType<typeof makeSchema>>;
 
 function expiresAt(v: Values): string | undefined {
   if (v.expiry === "never") return undefined;
@@ -87,36 +89,36 @@ function expiresAt(v: Values): string | undefined {
   return d.toISOString();
 }
 
-function keyStatus(k: ApiKey): { tone: "success" | "danger" | "neutral" | "warning"; label: string } {
-  if (k.revoked_at) return { tone: "neutral", label: "revoked" };
-  if (k.expires_at && new Date(k.expires_at).getTime() < Date.now()) return { tone: "danger", label: "expired" };
+function keyStatus(k: ApiKey): { tone: "success" | "danger" | "neutral" | "warning"; label: MessageKey } {
+  if (k.revoked_at) return { tone: "neutral", label: "apikeys.status.revoked" };
+  if (k.expires_at && new Date(k.expires_at).getTime() < Date.now()) return { tone: "danger", label: "apikeys.status.expired" };
   if (k.expires_at && new Date(k.expires_at).getTime() - Date.now() < 7 * 86400_000)
-    return { tone: "warning", label: "expiring" };
-  return { tone: "success", label: "active" };
+    return { tone: "warning", label: "apikeys.status.expiring" };
+  return { tone: "success", label: "apikeys.status.active" };
 }
 
 function SecretPanel({ result, onDone }: { result: CreateApiKeyResponse; onDone: () => void }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Save your API key</DialogTitle>
+        <DialogTitle>{t("apikeys.saveTitle")}</DialogTitle>
         <DialogDescription>
-          Key <span className="font-medium text-foreground">{result.api_key.name}</span> was created.
+          {t("apikeys.savedKeyPre")} <span className="font-medium text-foreground">{result.api_key.name}</span> {t("apikeys.savedKeyPost")}
         </DialogDescription>
       </DialogHeader>
       <div className="flex gap-3 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm">
         <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
         <p>
-          This is the <strong>only time</strong> the secret is shown. Copy it now and store it in your app's secret
-          manager — Kadr keeps only a hash and cannot show it again.
+          {t("apikeys.secretWarning")}
         </p>
       </div>
       <div className="flex items-center gap-2 rounded-lg border bg-muted/50 p-2 pl-3">
         <code className="min-w-0 flex-1 font-mono text-xs break-all select-all" data-testid="api-key-secret">
           {result.secret}
         </code>
-        <CopyButton value={result.secret} variant="default" size="sm" label="Copy" onCopied={() => setCopied(true)} />
+        <CopyButton value={result.secret} variant="default" size="sm" label={t("apikeys.copy")} onCopied={() => setCopied(true)} />
       </div>
       <div className="flex flex-wrap gap-1">
         {result.api_key.scopes.map((s) => (
@@ -127,7 +129,7 @@ function SecretPanel({ result, onDone }: { result: CreateApiKeyResponse; onDone:
       </div>
       <DialogFooter>
         <Button onClick={onDone} variant={copied ? "default" : "outline"}>
-          {copied ? "Done" : "I've saved the key"}
+          {copied ? t("apikeys.done") : t("apikeys.savedKey")}
         </Button>
       </DialogFooter>
     </>
@@ -135,7 +137,9 @@ function SecretPanel({ result, onDone }: { result: CreateApiKeyResponse; onDone:
 }
 
 function CreateKeyDialog({ project, open, onOpenChange }: { project: Project; open: boolean; onOpenChange: (o: boolean) => void }) {
+  const t = useT();
   const create = useCreateApiKey(project.id);
+  const schema = useMemo(() => makeSchema(t), [t]);
   const [result, setResult] = useState<CreateApiKeyResponse | null>(null);
   const form = useForm<Values>({
     resolver: zodResolver(schema),
@@ -163,7 +167,7 @@ function CreateKeyDialog({ project, open, onOpenChange }: { project: Project; op
           form.setError((k === "expires_at" ? "expires_on" : k) as keyof Values, { message: msg });
         }
       } else {
-        toast.error("Couldn't create API key", { description: errorMessage(e) });
+        toast.error(t("apikeys.createFailed"), { description: errorMessage(e) });
       }
     }
   }
@@ -189,14 +193,13 @@ function CreateKeyDialog({ project, open, onOpenChange }: { project: Project; op
         ) : (
           <>
             <DialogHeader>
-              <DialogTitle>Create API key</DialogTitle>
+              <DialogTitle>{t("apikeys.createTitle")}</DialogTitle>
               <DialogDescription>
-                For server-to-server calls from <span className="font-medium text-foreground">{project.name}</span>'s
-                backend. Never ship it to browsers or mobile apps.
+                {t("apikeys.createDescPre")} <span className="font-medium text-foreground">{project.name}</span>{t("apikeys.createDescPost")}
               </DialogDescription>
             </DialogHeader>
             <form id="create-key" onSubmit={form.handleSubmit(onSubmit)} noValidate className="grid gap-4">
-              <Field label="Name" htmlFor="key-name" error={errors.name?.message}>
+              <Field label={t("apikeys.name")} htmlFor="key-name" error={errors.name?.message}>
                 <Input
                   id="key-name"
                   placeholder="backend-production"
@@ -206,7 +209,7 @@ function CreateKeyDialog({ project, open, onOpenChange }: { project: Project; op
                 />
               </Field>
               <fieldset className="grid gap-2">
-                <legend className="mb-1.5 text-sm font-medium">Scopes</legend>
+                <legend className="mb-1.5 text-sm font-medium">{t("apikeys.scopes")}</legend>
                 <Controller
                   control={form.control}
                   name="scopes"
@@ -236,7 +239,7 @@ function CreateKeyDialog({ project, open, onOpenChange }: { project: Project; op
                             />
                             <span className="grid gap-0.5">
                               <span className="font-mono text-xs font-medium">{scope}</span>
-                              <span className="text-xs text-muted-foreground">{SCOPE_INFO[scope]}</span>
+                              <span className="text-xs text-muted-foreground">{t(SCOPE_INFO[scope])}</span>
                             </span>
                           </label>
                         );
@@ -251,7 +254,7 @@ function CreateKeyDialog({ project, open, onOpenChange }: { project: Project; op
                 )}
               </fieldset>
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Expires" htmlFor="key-expiry">
+                <Field label={t("apikeys.expires")} htmlFor="key-expiry">
                   <Controller
                     control={form.control}
                     name="expiry"
@@ -263,7 +266,7 @@ function CreateKeyDialog({ project, open, onOpenChange }: { project: Project; op
                         <SelectContent>
                           {EXPIRY.map((o) => (
                             <SelectItem key={o.value} value={o.value}>
-                              {o.label}
+                              {t(o.label)}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -272,7 +275,7 @@ function CreateKeyDialog({ project, open, onOpenChange }: { project: Project; op
                   />
                 </Field>
                 {expiry === "custom" && (
-                  <Field label="Expiry date" htmlFor="key-date" error={errors.expires_on?.message}>
+                  <Field label={t("apikeys.expiryDate")} htmlFor="key-date" error={errors.expires_on?.message}>
                     <Input
                       id="key-date"
                       type="date"
@@ -286,11 +289,11 @@ function CreateKeyDialog({ project, open, onOpenChange }: { project: Project; op
             </form>
             <DialogFooter>
               <Button variant="outline" onClick={close}>
-                Cancel
+                {t("apikeys.cancel")}
               </Button>
               <Button type="submit" form="create-key" disabled={create.isPending}>
                 {create.isPending && <Loader2 className="animate-spin" />}
-                Create key
+                {t("apikeys.createKey")}
               </Button>
             </DialogFooter>
           </>
@@ -301,6 +304,7 @@ function CreateKeyDialog({ project, open, onOpenChange }: { project: Project; op
 }
 
 export function ApiKeysTab({ project }: { project: Project }) {
+  const t = useT();
   const keys = useQuery(apiKeysQuery(project.id));
   const revoke = useRevokeApiKey(project.id);
   const [createOpen, setCreateOpen] = useState(false);
@@ -313,11 +317,11 @@ export function ApiKeysTab({ project }: { project: Project }) {
     <div className="grid gap-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-muted-foreground">
-          Secret keys authenticate your backend against the Kadr API. Keys start with{" "}
+          {t("apikeys.intro")}{" "}
           <code className="font-mono text-xs">kd_{project.environment}_</code>.
         </p>
         <Button onClick={() => setCreateOpen(true)} disabled={project.disabled} className="shrink-0">
-          <Plus /> Create key
+          <Plus /> {t("apikeys.createKey")}
         </Button>
       </div>
 
@@ -331,11 +335,11 @@ export function ApiKeysTab({ project }: { project: Project }) {
       ) : list.length === 0 ? (
         <EmptyState
           icon={<KeyRound />}
-          title="No API keys"
-          description="Create a key to let your backend issue upload tickets and sign URLs."
+          title={t("apikeys.emptyTitle")}
+          description={t("apikeys.emptyDesc")}
           action={
             <Button onClick={() => setCreateOpen(true)} disabled={project.disabled}>
-              <Plus /> Create key
+              <Plus /> {t("apikeys.createKey")}
             </Button>
           }
         />
@@ -344,11 +348,11 @@ export function ApiKeysTab({ project }: { project: Project }) {
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead className="pl-4">Name</TableHead>
-                <TableHead className="hidden md:table-cell">Scopes</TableHead>
-                <TableHead className="hidden sm:table-cell">Last used</TableHead>
-                <TableHead className="hidden lg:table-cell">Expires</TableHead>
-                <TableHead>Status</TableHead>
+                <TableHead className="pl-4">{t("apikeys.colName")}</TableHead>
+                <TableHead className="hidden md:table-cell">{t("apikeys.scopes")}</TableHead>
+                <TableHead className="hidden sm:table-cell">{t("apikeys.colLastUsed")}</TableHead>
+                <TableHead className="hidden lg:table-cell">{t("apikeys.expires")}</TableHead>
+                <TableHead>{t("apikeys.colStatus")}</TableHead>
                 <TableHead className="w-10" />
               </TableRow>
             </TableHeader>
@@ -374,17 +378,17 @@ export function ApiKeysTab({ project }: { project: Project }) {
                       <RelativeTime value={k.last_used_at} />
                     </TableCell>
                     <TableCell className="hidden text-sm text-muted-foreground lg:table-cell">
-                      {k.expires_at ? formatDate(k.expires_at) : "Never"}
+                      {k.expires_at ? formatDate(k.expires_at) : t("apikeys.expiry.never")}
                     </TableCell>
                     <TableCell>
-                      <StatusBadge tone={st.tone}>{st.label}</StatusBadge>
+                      <StatusBadge tone={st.tone}>{t(st.label)}</StatusBadge>
                     </TableCell>
                     <TableCell className="pr-3">
                       {!k.revoked_at && (
                         <Button
                           variant="ghost"
                           size="icon-sm"
-                          aria-label={`Revoke ${k.name}`}
+                          aria-label={t("apikeys.revokeAria", { name: k.name })}
                           className="text-muted-foreground hover:text-destructive"
                           onClick={() => setToRevoke(k)}
                         >
@@ -405,14 +409,13 @@ export function ApiKeysTab({ project }: { project: Project }) {
       <AlertDialog open={!!toRevoke} onOpenChange={(o) => !o && setToRevoke(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Revoke “{toRevoke?.name}”?</AlertDialogTitle>
+            <AlertDialogTitle>{t("apikeys.revokeTitle", { name: toRevoke?.name ?? "" })}</AlertDialogTitle>
             <AlertDialogDescription>
-              Requests using <code className="font-mono text-xs">{toRevoke?.prefix}…</code> will be rejected
-              immediately. This can't be undone.
+              {t("apikeys.revokeDescPre")} <code className="font-mono text-xs">{toRevoke?.prefix}…</code> {t("apikeys.revokeDescPost")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("apikeys.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-white hover:bg-destructive/90"
               onClick={() => {
@@ -420,7 +423,7 @@ export function ApiKeysTab({ project }: { project: Project }) {
                 setToRevoke(null);
               }}
             >
-              Revoke key
+              {t("apikeys.revokeKey")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

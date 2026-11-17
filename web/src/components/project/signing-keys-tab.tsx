@@ -18,6 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useT } from "@/i18n/react";
 import { errorMessage, isApiError } from "@/lib/api";
 import { signingKeysQuery, usePublishSigningKeys, useRetireSigningKey, useRotateSigningKey } from "@/lib/queries";
 import type { CreateSigningKeyResponse, Project, SigningKey } from "@/lib/types";
@@ -27,6 +28,7 @@ import { toast } from "sonner";
 const TONE = { active: "success", verify_only: "warning", retired: "neutral" } as const;
 
 export function SigningKeysTab({ project }: { project: Project }) {
+  const t = useT();
   const keys = useQuery(signingKeysQuery(project.id));
   const rotate = useRotateSigningKey(project.id);
   const retire = useRetireSigningKey(project.id);
@@ -42,18 +44,18 @@ export function SigningKeysTab({ project }: { project: Project }) {
     setConfirmRotate(false);
     rotate.mutate(undefined, {
       onSuccess: setCreated,
-      onError: (e) => toast.error("Couldn't rotate signing key", { description: errorMessage(e) }),
+      onError: (e) => toast.error(t("signing.rotateFailed"), { description: errorMessage(e) }),
     });
   };
 
   const doPublish = () => {
     setPublishError(null);
     publish.mutate(undefined, {
-      onSuccess: (r) => toast.success(`Published ${r.published} key${r.published === 1 ? "" : "s"} to the edge`),
+      onSuccess: (r) => toast.success(t("signing.published", { count: r.published })),
       onError: (e) => {
         const notConfigured = isApiError(e) && e.status === 503 && e.code === "edge_not_configured";
         setPublishError({ notConfigured, message: errorMessage(e) });
-        if (!notConfigured) toast.error("Couldn't publish keys", { description: errorMessage(e) });
+        if (!notConfigured) toast.error(t("signing.publishFailed"), { description: errorMessage(e) });
       },
     });
   };
@@ -62,13 +64,12 @@ export function SigningKeysTab({ project }: { project: Project }) {
     <div className="grid gap-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-muted-foreground">
-          Signing keys sign private delivery URLs. Rotating creates a new active key; the previous one keeps verifying existing URLs
-          until you retire it.
+          {t("signing.intro")}
         </p>
         <div className="flex shrink-0 gap-2">
         <Button variant="outline" onClick={doPublish} disabled={publish.isPending || list.length === 0}>
           {publish.isPending ? <Loader2 className="animate-spin" /> : <CloudUpload />}
-          Publish to edge
+          {t("signing.publish")}
         </Button>
         <Button
           onClick={() => (hasActive ? setConfirmRotate(true) : doRotate())}
@@ -76,7 +77,7 @@ export function SigningKeysTab({ project }: { project: Project }) {
           className="shrink-0"
         >
           {rotate.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-          {hasActive ? "Rotate key" : "Create key"}
+          {hasActive ? t("signing.rotate") : t("signing.create")}
         </Button>
         </div>
       </div>
@@ -85,11 +86,11 @@ export function SigningKeysTab({ project }: { project: Project }) {
         <p className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm" role="alert">
           {publishError.notConfigured ? (
             <>
-              Edge publishing isn't configured. Set <code className="font-mono text-xs">KADR_CF_ACCOUNT_ID</code> and{" "}
-              <code className="font-mono text-xs">KADR_CF_API_TOKEN</code> on the server, then try again.
+              {t("signing.edgeNotConfiguredPre")} <code className="font-mono text-xs">KADR_CF_ACCOUNT_ID</code> {t("signing.and")}{" "}
+              <code className="font-mono text-xs">KADR_CF_API_TOKEN</code> {t("signing.edgeNotConfiguredPost")}
             </>
           ) : (
-            <>Publishing to the edge failed: {publishError.message}</>
+            <>{t("signing.publishErrorPrefix")} {publishError.message}</>
           )}
         </p>
       )}
@@ -99,16 +100,16 @@ export function SigningKeysTab({ project }: { project: Project }) {
       ) : keys.isError ? (
         <ErrorState error={keys.error} onRetry={() => void keys.refetch()} />
       ) : list.length === 0 ? (
-        <EmptyState icon={<KeyRound />} title="No signing keys" description="Create a key to sign private asset URLs." />
+        <EmptyState icon={<KeyRound />} title={t("signing.emptyTitle")} description={t("signing.emptyDesc")} />
       ) : (
         <div className="overflow-hidden rounded-xl border bg-card">
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead className="pl-4">Key ID</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="hidden sm:table-cell">Created</TableHead>
-                <TableHead className="hidden md:table-cell">Published to edge</TableHead>
+                <TableHead className="pl-4">{t("signing.colKeyId")}</TableHead>
+                <TableHead>{t("signing.colStatus")}</TableHead>
+                <TableHead className="hidden sm:table-cell">{t("signing.colCreated")}</TableHead>
+                <TableHead className="hidden md:table-cell">{t("signing.colPublished")}</TableHead>
                 <TableHead className="w-12 pr-4" />
               </TableRow>
             </TableHeader>
@@ -118,21 +119,21 @@ export function SigningKeysTab({ project }: { project: Project }) {
                   <TableCell className="pl-4 font-mono text-xs font-medium">{k.id}</TableCell>
                   <TableCell>
                     <StatusBadge tone={(TONE as Record<string, "success" | "warning" | "neutral">)[k.status] ?? "neutral"}>
-                      {k.status.replace("_", " ")}
+                      {k.status === "active" || k.status === "verify_only" || k.status === "retired" ? t(`signing.status.${k.status}` as const) : k.status}
                     </StatusBadge>
                   </TableCell>
                   <TableCell className="hidden text-sm text-muted-foreground sm:table-cell">
                     <RelativeTime value={k.created_at} />
                   </TableCell>
                   <TableCell className="hidden text-sm text-muted-foreground md:table-cell">
-                    <RelativeTime value={k.published_at} fallback="not published" />
+                    <RelativeTime value={k.published_at} fallback={t("signing.notPublished")} />
                   </TableCell>
                   <TableCell className="pr-3">
                     {k.status !== "retired" && (
                       <Button
                         variant="ghost"
                         size="icon-sm"
-                        aria-label={`Retire ${k.id}`}
+                        aria-label={t("signing.retireAria", { id: k.id })}
                         className="text-muted-foreground hover:text-destructive"
                         onClick={() => setToRetire(k)}
                       >
@@ -150,10 +151,10 @@ export function SigningKeysTab({ project }: { project: Project }) {
       <SecretDialog
         open={!!created}
         onDone={() => setCreated(null)}
-        title="Save the signing key secret"
+        title={t("signing.saveTitle")}
         description={
           <>
-            Key <span className="font-mono text-xs text-foreground">{created?.key.id}</span> is now active.
+            {t("signing.keyPre")} <span className="font-mono text-xs text-foreground">{created?.key.id}</span> {t("signing.keyPost")}
           </>
         }
         secret={created?.secret ?? ""}
@@ -162,15 +163,14 @@ export function SigningKeysTab({ project }: { project: Project }) {
       <AlertDialog open={confirmRotate} onOpenChange={setConfirmRotate}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Rotate the signing key?</AlertDialogTitle>
+            <AlertDialogTitle>{t("signing.rotateTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              A new key becomes active for signing. The current key moves to verify-only so URLs already issued keep working. Update the
-              kadr-edge <code className="font-mono text-xs">SIGNING_KEYS</code> secret afterwards.
+              {t("signing.rotateDescPre")} <code className="font-mono text-xs">SIGNING_KEYS</code>{t("signing.rotateDescPost")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={doRotate}>Rotate key</AlertDialogAction>
+            <AlertDialogCancel>{t("signing.cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={doRotate}>{t("signing.rotate")}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -178,11 +178,11 @@ export function SigningKeysTab({ project }: { project: Project }) {
       <AlertDialog open={!!toRetire} onOpenChange={(o) => !o && setToRetire(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Retire “{toRetire?.id}”?</AlertDialogTitle>
-            <AlertDialogDescription>URLs signed with this key stop verifying at the edge. This can't be undone.</AlertDialogDescription>
+            <AlertDialogTitle>{t("signing.retireTitle", { id: toRetire?.id ?? "" })}</AlertDialogTitle>
+            <AlertDialogDescription>{t("signing.retireDesc")}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("signing.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-white hover:bg-destructive/90"
               onClick={() => {
@@ -190,7 +190,7 @@ export function SigningKeysTab({ project }: { project: Project }) {
                 setToRetire(null);
               }}
             >
-              Retire key
+              {t("signing.retire")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

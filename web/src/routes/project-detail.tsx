@@ -14,6 +14,7 @@ import { EnvBadge } from "@/components/project-form";
 import { ErrorState } from "@/components/states";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useT } from "@/i18n/react";
 import { isApiError } from "@/lib/api";
 import { projectQuery } from "@/lib/queries";
 import type { ProjectTab } from "@/router";
@@ -21,6 +22,7 @@ import type { ProjectTab } from "@/router";
 const route = getRouteApi("/app/projects/$projectId");
 
 export default function ProjectDetailPage() {
+  const t = useT();
   const { projectId } = route.useParams();
   const { tab = "settings" } = route.useSearch();
   const navigate = route.useNavigate();
@@ -31,7 +33,7 @@ export default function ProjectDetailPage() {
       to="/projects"
       className="mb-2 inline-flex items-center gap-1 rounded-sm text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
     >
-      <ChevronLeft className="size-4" /> Projects
+      <ChevronLeft className="size-4" /> {t("projects.detail.back")}
     </Link>
   );
 
@@ -52,7 +54,7 @@ export default function ProjectDetailPage() {
       <>
         {back}
         <ErrorState
-          title={isApiError(project.error) && project.error.status === 404 ? "Project not found" : "Couldn't load project"}
+          title={isApiError(project.error) && project.error.status === 404 ? t("projects.detail.notFound") : t("projects.detail.loadFailed")}
           error={project.error}
           onRetry={() => void project.refetch()}
         />
@@ -69,7 +71,7 @@ export default function ProjectDetailPage() {
           <span className="flex flex-wrap items-center gap-2.5">
             {p.name}
             <EnvBadge env={p.environment} />
-            {p.disabled && <StatusBadge tone="neutral">disabled</StatusBadge>}
+            {p.disabled && <StatusBadge tone="neutral">{t("projects.disabled")}</StatusBadge>}
           </span>
         }
         description={
@@ -77,7 +79,7 @@ export default function ProjectDetailPage() {
             {p.slug}
             <span className="text-muted-foreground/50">·</span>
             {p.id}
-            <CopyButton value={p.id} label="Copy project ID" size="icon-xs" />
+            <CopyButton value={p.id} label={t("projects.detail.copyId")} size="icon-xs" />
           </span>
         }
       >
@@ -86,13 +88,13 @@ export default function ProjectDetailPage() {
 
       <Tabs value={tab} onValueChange={(v) => void navigate({ search: { tab: v as ProjectTab }, replace: true })}>
         <TabsList variant="line" className="mb-4 w-full justify-start overflow-x-auto border-b pb-0">
-          <TabsTrigger className="flex-none px-3" value="settings">Settings</TabsTrigger>
-          <TabsTrigger className="flex-none px-3" value="keys">API keys</TabsTrigger>
-          <TabsTrigger className="flex-none px-3" value="presets">Presets</TabsTrigger>
-          <TabsTrigger className="flex-none px-3" value="modes">Compression modes</TabsTrigger>
-          <TabsTrigger className="flex-none px-3" value="webhooks">Webhooks</TabsTrigger>
-          <TabsTrigger className="flex-none px-3" value="signing">Signing keys</TabsTrigger>
-          <TabsTrigger className="flex-none px-3" value="cloud">Cloud</TabsTrigger>
+          <TabsTrigger className="flex-none px-3" value="settings">{t("projects.detail.tabSettings")}</TabsTrigger>
+          <TabsTrigger className="flex-none px-3" value="keys">{t("projects.detail.tabKeys")}</TabsTrigger>
+          <TabsTrigger className="flex-none px-3" value="presets">{t("projects.detail.tabPresets")}</TabsTrigger>
+          <TabsTrigger className="flex-none px-3" value="modes">{t("projects.detail.tabModes")}</TabsTrigger>
+          <TabsTrigger className="flex-none px-3" value="webhooks">{t("projects.detail.tabWebhooks")}</TabsTrigger>
+          <TabsTrigger className="flex-none px-3" value="signing">{t("projects.detail.tabSigning")}</TabsTrigger>
+          <TabsTrigger className="flex-none px-3" value="cloud">{t("projects.detail.tabCloud")}</TabsTrigger>
         </TabsList>
         <TabsContent value="settings">
           <SettingsTab project={p} />

@@ -18,6 +18,9 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useT } from "@/i18n/react";
+import type { Translator } from "@/i18n/core";
+import type { MessageKey } from "@/i18n/dictionaries";
 import { errorMessage, isApiError } from "@/lib/api";
 import { PROVIDER_LABEL } from "@/lib/forms";
 import { useSaveStorageProfile } from "@/lib/queries";
@@ -44,31 +47,30 @@ const url = (msg: string) =>
       }
     }, msg);
 
-const bucket = z
-  .string()
-  .trim()
-  .regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/, "3–63 chars: lowercase letters, digits, dots and dashes");
-
-function makeSchema(editing: boolean) {
+function makeSchema(editing: boolean, t: Translator<MessageKey>) {
+  const bucket = z
+    .string()
+    .trim()
+    .regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/, t("storage.form.bucketInvalid"));
   const credential = (label: string) =>
-    editing ? z.string().trim() : z.string().trim().min(1, `${label} is required`);
+    editing ? z.string().trim() : z.string().trim().min(1, t("storage.form.required", { label }));
   return z
     .object({
-      name: z.string().trim().min(1, "Name is required").max(100),
+      name: z.string().trim().min(1, t("storage.form.nameRequired")).max(100),
       provider: z.enum(STORAGE_PROVIDERS),
-      endpoint: url("Enter a valid endpoint URL").refine((v) => !v.includes("<"), "Replace the placeholder in the endpoint"),
-      region: z.string().trim().min(1, "Region is required"),
+      endpoint: url(t("storage.form.endpointInvalid")).refine((v) => !v.includes("<"), t("storage.form.endpointPlaceholder")),
+      region: z.string().trim().min(1, t("storage.form.regionRequired")),
       public_bucket: bucket,
       private_bucket: bucket,
-      public_base_url: url("Enter a valid URL, e.g. https://cdn.example.com"),
-      private_base_url: z.union([z.literal(""), url("Enter a valid URL")]),
-      access_key_id: credential("Access key ID"),
-      secret_access_key: credential("Secret access key"),
+      public_base_url: url(t("storage.form.publicBaseUrlInvalid")),
+      private_base_url: z.union([z.literal(""), url(t("storage.form.urlInvalid"))]),
+      access_key_id: credential(t("storage.form.accessKeyId")),
+      secret_access_key: credential(t("storage.form.secretKey")),
       is_platform: z.boolean(),
     })
     .refine((v) => v.public_bucket !== v.private_bucket, {
       path: ["private_bucket"],
-      message: "Public and private buckets must be different",
+      message: t("storage.form.bucketsDiffer"),
     });
 }
 type Values = z.infer<ReturnType<typeof makeSchema>>;
@@ -98,10 +100,11 @@ export function StorageFormDialog({
   onOpenChange: (o: boolean) => void;
   profile?: StorageProfile;
 }) {
+  const t = useT();
   const editing = !!profile;
   const save = useSaveStorageProfile();
   const [showSecret, setShowSecret] = useState(false);
-  const form = useForm<Values>({ resolver: zodResolver(makeSchema(editing)), defaultValues: defaults(profile) });
+  const form = useForm<Values>({ resolver: zodResolver(makeSchema(editing, t)), defaultValues: defaults(profile) });
   const { errors } = form.formState;
   const provider = useWatch({ control: form.control, name: "provider" });
   const hint = PROVIDER_DEFAULTS[provider];
@@ -133,18 +136,18 @@ export function StorageFormDialog({
           return;
         }
         await save.mutateAsync({ id: profile.id, patch });
-        toast.success("Storage profile updated");
+        toast.success(t("storage.form.updated"));
       } else {
         const { private_base_url, ...rest } = v;
         await save.mutateAsync({ create: { ...rest, ...(private_base_url ? { private_base_url } : {}) } });
-        toast.success(`Storage profile “${v.name}” created`, { description: "Run a connection test to verify it." });
+        toast.success(t("storage.form.created", { name: v.name }), { description: t("storage.form.createdDescription") });
       }
       onOpenChange(false);
     } catch (e) {
       if (isApiError(e, "validation_failed") && Object.keys(e.fieldErrors).length) {
         for (const [k, msg] of Object.entries(e.fieldErrors)) form.setError(k as keyof Values, { message: msg });
       } else {
-        toast.error(editing ? "Couldn't update profile" : "Couldn't create profile", { description: errorMessage(e) });
+        toast.error(editing ? t("storage.form.updateFailed") : t("storage.form.createFailed"), { description: errorMessage(e) });
       }
     }
   }
@@ -153,18 +156,17 @@ export function StorageFormDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[92svh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{editing ? `Edit “${profile.name}”` : "Add storage"}</DialogTitle>
+          <DialogTitle>{editing ? t("storage.form.titleEdit", { name: profile.name }) : t("storage.form.titleAdd")}</DialogTitle>
           <DialogDescription>
-            Kadr needs two buckets: a public one served through your CDN domain, and a private one for originals and
-            signed delivery. Credentials are encrypted at rest.
+            {t("storage.form.description")}
           </DialogDescription>
         </DialogHeader>
         <form id="storage-form" onSubmit={form.handleSubmit(onSubmit)} noValidate className="grid gap-5">
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Name" htmlFor="sp-name" error={errors.name?.message}>
+            <Field label={t("storage.form.name")} htmlFor="sp-name" error={errors.name?.message}>
               <Input id="sp-name" placeholder="R2 production" autoFocus aria-invalid={!!errors.name} {...form.register("name")} />
             </Field>
-            <Field label="Provider" htmlFor="sp-provider">
+            <Field label={t("storage.form.provider")} htmlFor="sp-provider">
               <Controller
                 control={form.control}
                 name="provider"
@@ -197,10 +199,10 @@ export function StorageFormDialog({
 
           <div className="grid gap-4 sm:grid-cols-[1fr_9rem]">
             <Field
-              label="S3 endpoint"
+              label={t("storage.form.endpoint")}
               htmlFor="sp-endpoint"
               error={errors.endpoint?.message}
-              hint={provider === "r2" ? "Find your account ID in the Cloudflare dashboard → R2." : undefined}
+              hint={provider === "r2" ? t("storage.form.endpointHintR2") : undefined}
             >
               <Input
                 id="sp-endpoint"
@@ -211,7 +213,7 @@ export function StorageFormDialog({
                 {...form.register("endpoint")}
               />
             </Field>
-            <Field label="Region" htmlFor="sp-region" error={errors.region?.message}>
+            <Field label={t("storage.form.region")} htmlFor="sp-region" error={errors.region?.message}>
               <Input
                 id="sp-region"
                 placeholder={hint.region}
@@ -223,9 +225,9 @@ export function StorageFormDialog({
           </div>
 
           <fieldset className="grid gap-4 rounded-lg border p-4">
-            <legend className="px-1 text-sm font-medium">Buckets</legend>
+            <legend className="px-1 text-sm font-medium">{t("storage.form.buckets")}</legend>
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Public bucket" htmlFor="sp-pub" error={errors.public_bucket?.message}>
+              <Field label={t("storage.form.publicBucket")} htmlFor="sp-pub" error={errors.public_bucket?.message}>
                 <Input
                   id="sp-pub"
                   placeholder="acme-public"
@@ -235,10 +237,10 @@ export function StorageFormDialog({
                 />
               </Field>
               <Field
-                label="Public base URL"
+                label={t("storage.form.publicBaseUrl")}
                 htmlFor="sp-pub-url"
                 error={errors.public_base_url?.message}
-                hint="Custom domain attached to the public bucket."
+                hint={t("storage.form.publicBaseUrlHint")}
               >
                 <Input
                   id="sp-pub-url"
@@ -248,7 +250,7 @@ export function StorageFormDialog({
                   {...form.register("public_base_url")}
                 />
               </Field>
-              <Field label="Private bucket" htmlFor="sp-priv" error={errors.private_bucket?.message}>
+              <Field label={t("storage.form.privateBucket")} htmlFor="sp-priv" error={errors.private_bucket?.message}>
                 <Input
                   id="sp-priv"
                   placeholder="acme-private"
@@ -260,12 +262,12 @@ export function StorageFormDialog({
               <Field
                 label={
                   <>
-                    Private base URL <span className="font-normal text-muted-foreground">(optional)</span>
+                    {t("storage.form.privateBaseUrl")} <span className="font-normal text-muted-foreground">{t("storage.form.optional")}</span>
                   </>
                 }
                 htmlFor="sp-priv-url"
                 error={errors.private_base_url?.message}
-                hint="Edge worker domain for signed URLs."
+                hint={t("storage.form.privateBaseUrlHint")}
               >
                 <Input
                   id="sp-priv-url"
@@ -279,29 +281,29 @@ export function StorageFormDialog({
           </fieldset>
 
           <fieldset className="grid gap-4 rounded-lg border p-4">
-            <legend className="px-1 text-sm font-medium">Credentials</legend>
+            <legend className="px-1 text-sm font-medium">{t("storage.form.credentials")}</legend>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field
-                label="Access key ID"
+                label={t("storage.form.accessKeyId")}
                 htmlFor="sp-akid"
                 error={errors.access_key_id?.message}
-                hint={editing ? `Current: ${profile.access_key_id}. Leave empty to keep.` : undefined}
+                hint={editing ? t("storage.form.accessKeyIdHintEdit", { id: profile.access_key_id }) : undefined}
               >
                 <Input
                   id="sp-akid"
                   autoComplete="off"
                   spellCheck={false}
                   className="font-mono text-xs"
-                  placeholder={editing ? "Unchanged" : ""}
+                  placeholder={editing ? t("storage.form.unchanged") : ""}
                   aria-invalid={!!errors.access_key_id}
                   {...form.register("access_key_id")}
                 />
               </Field>
               <Field
-                label="Secret access key"
+                label={t("storage.form.secretKey")}
                 htmlFor="sp-secret"
                 error={errors.secret_access_key?.message}
-                hint={editing ? "Write-only. Leave empty to keep the current secret." : "Write-only — never shown again."}
+                hint={editing ? t("storage.form.secretKeyHintEdit") : t("storage.form.secretKeyHintNew")}
               >
                 <div className="relative">
                   <Input
@@ -310,7 +312,7 @@ export function StorageFormDialog({
                     autoComplete="new-password"
                     spellCheck={false}
                     className="pr-9 font-mono text-xs"
-                    placeholder={editing ? "••••••••  unchanged" : ""}
+                    placeholder={editing ? t("storage.form.secretUnchanged") : ""}
                     aria-invalid={!!errors.secret_access_key}
                     {...form.register("secret_access_key")}
                   />
@@ -319,7 +321,7 @@ export function StorageFormDialog({
                     variant="ghost"
                     size="icon-xs"
                     className="absolute top-1/2 right-1.5 -translate-y-1/2 text-muted-foreground"
-                    aria-label={showSecret ? "Hide secret" : "Show secret"}
+                    aria-label={showSecret ? t("storage.form.hideSecret") : t("storage.form.showSecret")}
                     onClick={() => setShowSecret((s) => !s)}
                   >
                     {showSecret ? <EyeOff /> : <Eye />}
@@ -341,9 +343,9 @@ export function StorageFormDialog({
                   className="mt-0.5"
                 />
                 <span className="grid gap-0.5">
-                  <span className="text-sm font-medium">Platform storage</span>
+                  <span className="text-sm font-medium">{t("storage.form.platform")}</span>
                   <span className="text-xs text-muted-foreground">
-                    Default for projects that don't pick a storage profile of their own.
+                    {t("storage.form.platformHint")}
                   </span>
                 </span>
               </label>
@@ -352,11 +354,11 @@ export function StorageFormDialog({
         </form>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("storage.form.cancel")}
           </Button>
           <Button type="submit" form="storage-form" disabled={save.isPending}>
             {save.isPending && <Loader2 className="animate-spin" />}
-            {editing ? "Save changes" : "Add storage"}
+            {editing ? t("storage.form.saveChanges") : t("storage.form.titleAdd")}
           </Button>
         </DialogFooter>
       </DialogContent>

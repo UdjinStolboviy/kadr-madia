@@ -1,5 +1,6 @@
 import { StatusBadge } from "@/components/common";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useT } from "@/i18n/react";
 import { formatBytes } from "@/lib/format";
 import { NO_STORAGE } from "@/lib/forms";
 import type { Environment, StorageProfile } from "@/lib/types";
@@ -18,13 +19,14 @@ export function StorageSelect({
   profiles: StorageProfile[];
   loading?: boolean;
 }) {
+  const t = useT();
   return (
     <Select value={value} onValueChange={onChange} disabled={loading}>
       <SelectTrigger id={id} className="w-full">
-        <SelectValue placeholder={loading ? "Loading…" : "Select storage"} />
+        <SelectValue placeholder={loading ? t("projects.select.loading") : t("projects.select.storage")} />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value={NO_STORAGE}>Platform default</SelectItem>
+        <SelectItem value={NO_STORAGE}>{t("projects.platformDefault")}</SelectItem>
         {profiles.map((p) => (
           <SelectItem key={p.id} value={p.id}>
             {p.name}
@@ -37,10 +39,11 @@ export function StorageSelect({
 }
 
 export function EnvBadge({ env }: { env: Environment }) {
+  const t = useT();
   return env === "live" ? (
-    <StatusBadge tone="success">live</StatusBadge>
+    <StatusBadge tone="success">{t("projects.env.live")}</StatusBadge>
   ) : (
-    <StatusBadge tone="warning">test</StatusBadge>
+    <StatusBadge tone="warning">{t("projects.env.test")}</StatusBadge>
   );
 }
 

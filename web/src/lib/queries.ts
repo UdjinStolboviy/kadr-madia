@@ -1,6 +1,9 @@
 import { QueryClient, queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
+import type { MessageKey } from "@/i18n/dictionaries";
+import { t } from "@/i18n/store";
+
 import { api, errorMessage, isApiError } from "./api";
 import type {
   CreateApiKeyRequest,
@@ -108,8 +111,8 @@ export const signingKeysQuery = (projectId: string) =>
 export const cloudQuery = (projectId: string) =>
   queryOptions({ queryKey: qk.cloud(projectId), queryFn: () => api.cloud.list(projectId).then((r) => r.items) });
 
-function onErrorToast(title: string) {
-  return (e: unknown) => toast.error(title, { description: errorMessage(e) });
+function onErrorToast(titleKey: MessageKey) {
+  return (e: unknown) => toast.error(t(titleKey), { description: errorMessage(e) });
 }
 
 // ---- Mutations --------------------------------------------------------------
@@ -154,11 +157,11 @@ export function useRevokeApiKey(projectId: string) {
   return useMutation({
     mutationFn: (keyId: string) => api.apiKeys.revoke(keyId),
     onSuccess: () => {
-      toast.success("API key revoked");
+      toast.success(t("common.toast.keyRevoked"));
       void qc.invalidateQueries({ queryKey: qk.apiKeys(projectId) });
       void qc.invalidateQueries({ queryKey: qk.audit });
     },
-    onError: onErrorToast("Couldn't revoke key"),
+    onError: onErrorToast("common.toast.keyRevokeFailed"),
   });
 }
 
@@ -200,11 +203,11 @@ export function useRetryJob() {
   return useMutation({
     mutationFn: (id: string) => api.jobs.retry(id),
     onSuccess: () => {
-      toast.success("Job re-queued");
+      toast.success(t("common.toast.jobRetried"));
       void qc.invalidateQueries({ queryKey: qk.jobs });
       void qc.invalidateQueries({ queryKey: qk.audit });
     },
-    onError: onErrorToast("Couldn't retry job"),
+    onError: onErrorToast("common.toast.jobRetryFailed"),
   });
 }
 
@@ -213,11 +216,11 @@ export function useCancelJob() {
   return useMutation({
     mutationFn: (id: string) => api.jobs.cancel(id),
     onSuccess: () => {
-      toast.success("Job cancelled");
+      toast.success(t("common.toast.jobCancelled"));
       void qc.invalidateQueries({ queryKey: qk.jobs });
       void qc.invalidateQueries({ queryKey: qk.audit });
     },
-    onError: onErrorToast("Couldn't cancel job"),
+    onError: onErrorToast("common.toast.jobCancelFailed"),
   });
 }
 
@@ -226,11 +229,11 @@ export function useDeleteAsset(projectId: string) {
   return useMutation({
     mutationFn: (assetId: string) => api.assets.remove(projectId, assetId),
     onSuccess: () => {
-      toast.success("Asset deleted");
+      toast.success(t("common.toast.assetDeleted"));
       void qc.invalidateQueries({ queryKey: qk.assets(projectId) });
       void qc.invalidateQueries({ queryKey: qk.audit });
     },
-    onError: onErrorToast("Couldn't delete asset"),
+    onError: onErrorToast("common.toast.assetDeleteFailed"),
   });
 }
 
@@ -252,12 +255,12 @@ export function useResetPreset(projectId: string) {
   return useMutation({
     mutationFn: (slug: string) => api.projects.resetPreset(projectId, slug),
     onSuccess: (p) => {
-      toast.success(`Reset ${p.slug} to defaults`);
+      toast.success(t("common.toast.presetReset", { slug: p.slug }));
       void qc.invalidateQueries({ queryKey: qk.presets(projectId) });
       void qc.invalidateQueries({ queryKey: qk.modes(projectId) });
       void qc.invalidateQueries({ queryKey: qk.audit });
     },
-    onError: onErrorToast("Couldn't reset preset"),
+    onError: onErrorToast("common.toast.presetResetFailed"),
   });
 }
 
@@ -277,12 +280,12 @@ export function useDeleteWebhook(projectId: string) {
   return useMutation({
     mutationFn: (id: string) => api.webhooks.remove(id),
     onSuccess: () => {
-      toast.success("Webhook endpoint deleted");
+      toast.success(t("common.toast.endpointDeleted"));
       void qc.invalidateQueries({ queryKey: qk.webhooks(projectId) });
       void qc.invalidateQueries({ queryKey: qk.deliveries(projectId) });
       void qc.invalidateQueries({ queryKey: qk.audit });
     },
-    onError: onErrorToast("Couldn't delete endpoint"),
+    onError: onErrorToast("common.toast.endpointDeleteFailed"),
   });
 }
 
@@ -301,10 +304,10 @@ export function useRetryDelivery(projectId: string) {
   return useMutation({
     mutationFn: (id: string) => api.webhooks.retryDelivery(id),
     onSuccess: () => {
-      toast.success("Delivery re-queued");
+      toast.success(t("common.toast.deliveryRetried"));
       void qc.invalidateQueries({ queryKey: qk.deliveries(projectId) });
     },
-    onError: onErrorToast("Couldn't retry delivery"),
+    onError: onErrorToast("common.toast.deliveryRetryFailed"),
   });
 }
 
@@ -335,11 +338,11 @@ export function useRetireSigningKey(projectId: string) {
   return useMutation({
     mutationFn: (kid: string) => api.signingKeys.retire(kid),
     onSuccess: () => {
-      toast.success("Signing key retired");
+      toast.success(t("common.toast.signingKeyRetired"));
       void qc.invalidateQueries({ queryKey: qk.signingKeys(projectId) });
       void qc.invalidateQueries({ queryKey: qk.audit });
     },
-    onError: onErrorToast("Couldn't retire key"),
+    onError: onErrorToast("common.toast.signingKeyRetireFailed"),
   });
 }
 
@@ -359,10 +362,10 @@ export function useRevokeCloudConnection(projectId: string) {
   return useMutation({
     mutationFn: (id: string) => api.cloud.revoke(id),
     onSuccess: () => {
-      toast.success("Connection revoked");
+      toast.success(t("common.toast.connectionRevoked"));
       void qc.invalidateQueries({ queryKey: qk.cloud(projectId) });
       void qc.invalidateQueries({ queryKey: qk.audit });
     },
-    onError: onErrorToast("Couldn't revoke connection"),
+    onError: onErrorToast("common.toast.connectionRevokeFailed"),
   });
 }

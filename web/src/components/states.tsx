@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { errorMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { useT } from "@/i18n/react";
 
 export function EmptyState({
   icon,
@@ -41,7 +42,7 @@ export function EmptyState({
 export function ErrorState({
   error,
   onRetry,
-  title = "Couldn't load data",
+  title,
   className,
 }: {
   error: unknown;
@@ -49,6 +50,7 @@ export function ErrorState({
   title?: string;
   className?: string;
 }) {
+  const t = useT();
   return (
     <div
       role="alert"
@@ -60,11 +62,11 @@ export function ErrorState({
       <div className="mb-3 flex size-10 items-center justify-center rounded-full bg-destructive/10 text-destructive">
         <AlertTriangle className="size-5" />
       </div>
-      <h3 className="text-sm font-semibold">{title}</h3>
+      <h3 className="text-sm font-semibold">{title ?? t("common.loadFailed")}</h3>
       <p className="mt-1 max-w-md text-sm text-muted-foreground">{errorMessage(error)}</p>
       {onRetry && (
         <Button variant="outline" size="sm" className="mt-4" onClick={onRetry}>
-          <RotateCw /> Try again
+          <RotateCw /> {t("common.tryAgain")}
         </Button>
       )}
     </div>
@@ -73,10 +75,11 @@ export function ErrorState({
 
 export function RouteError({ error, reset }: ErrorComponentProps) {
   const router = useRouter();
+  const t = useT();
   return (
     <div className="p-6">
       <ErrorState
-        title="Something went wrong"
+        title={t("common.somethingWrong")}
         error={error}
         onRetry={() => {
           reset();
@@ -88,15 +91,16 @@ export function RouteError({ error, reset }: ErrorComponentProps) {
 }
 
 export function NotFound() {
+  const t = useT();
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center p-6 text-center">
       <div className="mb-4 flex size-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
         <Compass className="size-6" />
       </div>
-      <h1 className="text-lg font-semibold">Page not found</h1>
-      <p className="mt-1 text-sm text-muted-foreground">The page you're looking for doesn't exist.</p>
+      <h1 className="text-lg font-semibold">{t("common.pageNotFound")}</h1>
+      <p className="mt-1 text-sm text-muted-foreground">{t("common.pageNotFoundDesc")}</p>
       <Button asChild variant="outline" size="sm" className="mt-5">
-        <Link to="/">Back to overview</Link>
+        <Link to="/">{t("common.backToOverview")}</Link>
       </Button>
     </div>
   );

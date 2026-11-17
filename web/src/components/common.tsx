@@ -8,6 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { copyText } from "@/lib/clipboard";
 import { formatDateTime, formatRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { useT } from "@/i18n/react";
 
 export function PageHeader({
   title,
@@ -62,10 +63,11 @@ export function StatusBadge({
 }
 
 export function TestStatusBadge({ ok, at }: { ok: boolean | null; at: string | null }) {
+  const t = useT();
   if (ok === null || !at) {
     return (
       <StatusBadge tone="neutral" dot={false}>
-        <CircleDashed className="size-3" /> Not tested
+        <CircleDashed className="size-3" /> {t("common.notTested")}
       </StatusBadge>
     );
   }
@@ -75,22 +77,23 @@ export function TestStatusBadge({ ok, at }: { ok: boolean | null; at: string | n
         <span tabIndex={0} className="inline-flex rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
           {ok ? (
             <StatusBadge tone="success" dot={false}>
-              <CheckCircle2 className="size-3" /> Passed
+              <CheckCircle2 className="size-3" /> {t("common.passed")}
             </StatusBadge>
           ) : (
             <StatusBadge tone="danger" dot={false}>
-              <XCircle className="size-3" /> Failed
+              <XCircle className="size-3" /> {t("common.failed")}
             </StatusBadge>
           )}
         </span>
       </TooltipTrigger>
-      <TooltipContent>Last tested {formatRelative(at)}</TooltipContent>
+      <TooltipContent>{t("common.lastTested", { when: formatRelative(at) })}</TooltipContent>
     </Tooltip>
   );
 }
 
-export function RelativeTime({ value, fallback = "never" }: { value: string | null | undefined; fallback?: string }) {
-  if (!value) return <span className="text-muted-foreground">{fallback}</span>;
+export function RelativeTime({ value, fallback }: { value: string | null | undefined; fallback?: string }) {
+  const t = useT();
+  if (!value) return <span className="text-muted-foreground">{fallback ?? t("common.never")}</span>;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -105,7 +108,7 @@ export function RelativeTime({ value, fallback = "never" }: { value: string | nu
 
 export function CopyButton({
   value,
-  label = "Copy",
+  label,
   className,
   size = "icon-sm",
   variant = "ghost",
@@ -118,7 +121,9 @@ export function CopyButton({
   variant?: "ghost" | "outline" | "default" | "secondary";
   onCopied?: () => void;
 }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
+  const text = label ?? t("common.copy");
   const timer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(timer.current), []);
   const iconOnly = size.startsWith("icon");
@@ -129,11 +134,11 @@ export function CopyButton({
       variant={variant}
       size={size}
       className={className}
-      aria-label={label}
+      aria-label={text}
       onClick={async () => {
         const ok = await copyText(value);
         if (!ok) {
-          toast.error("Couldn't copy to clipboard");
+          toast.error(t("common.copyFailed"));
           return;
         }
         setCopied(true);
@@ -143,7 +148,7 @@ export function CopyButton({
       }}
     >
       {copied ? <Check className="text-success" /> : <Copy />}
-      {!iconOnly && (copied ? "Copied" : label)}
+      {!iconOnly && (copied ? t("common.copied") : text)}
     </Button>
   );
 }

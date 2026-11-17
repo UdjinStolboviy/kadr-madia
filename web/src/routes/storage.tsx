@@ -21,6 +21,8 @@ import { PageHeader, RelativeTime, StatusBadge, TestStatusBadge } from "@/compon
 import { EmptyState, ErrorState } from "@/components/states";
 import { StorageFormDialog } from "@/components/storage-form";
 import { PROVIDER_LABEL } from "@/lib/forms";
+import { useT } from "@/i18n/react";
+import type { MessageKey } from "@/i18n/dictionaries";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -57,14 +59,14 @@ import { cn } from "@/lib/utils";
 
 const route = getRouteApi("/app/storage");
 
-const CHECK_LABEL: Record<string, string> = {
-  private_put: "Upload to private bucket",
-  private_head: "Read metadata (HEAD)",
-  private_delete: "Delete from private bucket",
-  private_presign_put: "Presigned PUT upload",
-  public_put: "Upload to public bucket",
-  public_get_via_base_url: "Fetch via public base URL",
-  public_delete: "Delete from public bucket",
+const CHECK_KEYS: Record<string, MessageKey> = {
+  private_put: "storage.check.private_put",
+  private_head: "storage.check.private_head",
+  private_delete: "storage.check.private_delete",
+  private_presign_put: "storage.check.private_presign_put",
+  public_put: "storage.check.public_put",
+  public_get_via_base_url: "storage.check.public_get_via_base_url",
+  public_delete: "storage.check.public_delete",
 };
 
 function TestDialog({
@@ -82,12 +84,13 @@ function TestDialog({
   onRetry: () => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const total = result?.checks.reduce((s, c) => s + c.duration_ms, 0) ?? 0;
   return (
     <Dialog open={!!profile} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-h-[92svh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Connection test</DialogTitle>
+          <DialogTitle>{t("storage.test.title")}</DialogTitle>
           <DialogDescription>
             {profile?.name} · {profile ? PROVIDER_LABEL[profile.provider] : ""}
           </DialogDescription>
@@ -96,14 +99,14 @@ function TestDialog({
         {pending ? (
           <div className="grid gap-2" aria-live="polite" aria-busy="true">
             <p className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" /> Running checks against both buckets…
+              <Loader2 className="size-4 animate-spin" /> {t("storage.test.running")}
             </p>
             {Array.from({ length: 7 }, (_, i) => (
               <Skeleton key={i} className="h-11 w-full" />
             ))}
           </div>
         ) : error ? (
-          <ErrorState title="Test could not run" error={error} />
+          <ErrorState title={t("storage.test.couldNotRun")} error={error} />
         ) : result ? (
           <div className="grid gap-3" aria-live="polite">
             <div
@@ -118,9 +121,9 @@ function TestDialog({
                 <XCircle className="size-5 text-destructive" />
               )}
               <div className="text-sm">
-                <div className="font-medium">{result.ok ? "All checks passed" : "Some checks failed"}</div>
+                <div className="font-medium">{result.ok ? t("storage.test.allPassed") : t("storage.test.someFailed")}</div>
                 <div className="text-muted-foreground">
-                  {result.checks.filter((c) => c.ok).length}/{result.checks.length} passed · {formatMs(total)}
+                  {t("storage.test.summary", { passed: result.checks.filter((c) => c.ok).length, total: result.checks.length, time: formatMs(total) })}
                 </div>
               </div>
             </div>
@@ -128,12 +131,12 @@ function TestDialog({
               {result.checks.map((c) => (
                 <li key={c.name} className="flex items-start gap-3 px-3 py-2.5">
                   {c.ok ? (
-                    <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" aria-label="passed" />
+                    <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" aria-label={t("storage.test.passed")} />
                   ) : (
-                    <XCircle className="mt-0.5 size-4 shrink-0 text-destructive" aria-label="failed" />
+                    <XCircle className="mt-0.5 size-4 shrink-0 text-destructive" aria-label={t("storage.test.failed")} />
                   )}
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium">{CHECK_LABEL[c.name] ?? c.name}</div>
+                    <div className="text-sm font-medium">{CHECK_KEYS[c.name] ? t(CHECK_KEYS[c.name]!) : c.name}</div>
                     <div className="font-mono text-[11px] text-muted-foreground">{c.name}</div>
                     {c.detail && (
                       <div className={cn("mt-1 text-xs break-words", c.ok ? "text-muted-foreground" : "text-destructive")}>
@@ -152,9 +155,9 @@ function TestDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={onRetry} disabled={pending}>
-            <Zap /> Run again
+            <Zap /> {t("storage.test.runAgain")}
           </Button>
-          <Button onClick={onClose}>Close</Button>
+          <Button onClick={onClose}>{t("storage.test.close")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -174,6 +177,7 @@ function ProfileCard({
   onTest: () => void;
   testing: boolean;
 }) {
+  const t = useT();
   return (
     <Card className="gap-4 py-5">
       <CardHeader className="flex flex-row items-start justify-between gap-3 px-5">
@@ -186,7 +190,7 @@ function ProfileCard({
               <span className="truncate">{profile.name}</span>
               {profile.is_platform && (
                 <StatusBadge tone="info" dot={false}>
-                  <ShieldCheck className="size-3" /> platform
+                  <ShieldCheck className="size-3" /> {t("storage.card.platform")}
                 </StatusBadge>
               )}
             </CardTitle>
@@ -195,20 +199,20 @@ function ProfileCard({
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon-sm" aria-label={`Actions for ${profile.name}`}>
+            <Button variant="ghost" size="icon-sm" aria-label={t("storage.card.actionsFor", { name: profile.name })}>
               <MoreHorizontal />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onSelect={onEdit}>
-              <Pencil /> Edit
+              <Pencil /> {t("storage.card.edit")}
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={onTest}>
-              <Zap /> Test connection
+              <Zap /> {t("storage.card.test")}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onSelect={onDelete}>
-              <Trash2 /> Delete
+              <Trash2 /> {t("storage.card.delete")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -227,7 +231,7 @@ function ProfileCard({
           )}
         </div>
         <div className="truncate font-mono text-xs text-muted-foreground" title={profile.endpoint}>
-          {profile.endpoint} · {profile.region} · key {profile.access_key_id}
+          {profile.endpoint} · {profile.region} · {t("storage.card.keyPrefix", { id: profile.access_key_id })}
         </div>
       </CardContent>
       <CardFooter className="flex items-center justify-between gap-3 border-t px-5 pt-4">
@@ -241,7 +245,7 @@ function ProfileCard({
         </div>
         <Button variant="outline" size="sm" onClick={onTest} disabled={testing}>
           {testing ? <Loader2 className="animate-spin" /> : <Zap />}
-          Test connection
+          {t("storage.card.test")}
         </Button>
       </CardFooter>
     </Card>
@@ -249,6 +253,7 @@ function ProfileCard({
 }
 
 export default function StoragePage() {
+  const t = useT();
   const search = route.useSearch();
   const navigate = route.useNavigate();
   const storage = useQuery(storageQuery);
@@ -265,7 +270,7 @@ export default function StoragePage() {
     setTesting(p);
     test.mutate(p.id, {
       onSuccess: (r) =>
-        r.ok ? toast.success(`${p.name}: all checks passed`) : toast.error(`${p.name}: some checks failed`),
+        r.ok ? toast.success(t("storage.test.toastOk", { name: p.name })) : toast.error(t("storage.test.toastFail", { name: p.name })),
     });
   }
 
@@ -274,16 +279,16 @@ export default function StoragePage() {
     const p = toDelete;
     try {
       await del.mutateAsync(p.id);
-      toast.success(`Storage profile “${p.name}” deleted`);
+      toast.success(t("storage.delete.done", { name: p.name }));
       setToDelete(null);
     } catch (e) {
       setToDelete(null);
       if (isApiError(e, "in_use")) {
-        toast.error("Profile is in use", {
-          description: "Move projects to another storage profile before deleting this one.",
+        toast.error(t("storage.delete.inUse"), {
+          description: t("storage.delete.inUseDescription"),
         });
       } else {
-        toast.error("Couldn't delete profile", { description: errorMessage(e) });
+        toast.error(t("storage.delete.failed"), { description: errorMessage(e) });
       }
     }
   }
@@ -291,11 +296,11 @@ export default function StoragePage() {
   return (
     <>
       <PageHeader
-        title="Storage"
-        description="S3-compatible buckets where Kadr stores originals and renditions."
+        title={t("storage.title")}
+        description={t("storage.description")}
         actions={
           <Button onClick={() => setCreateOpen(true)}>
-            <Plus /> Add storage
+            <Plus /> {t("storage.add")}
           </Button>
         }
       />
@@ -310,11 +315,11 @@ export default function StoragePage() {
       ) : storage.data.length === 0 ? (
         <EmptyState
           icon={<HardDrive />}
-          title="No storage profiles"
-          description="Connect Cloudflare R2 (or any S3-compatible storage) with a public and a private bucket."
+          title={t("storage.empty.title")}
+          description={t("storage.empty.description")}
           action={
             <Button onClick={() => setCreateOpen(true)}>
-              <Plus /> Add R2 storage
+              <Plus /> {t("storage.empty.addR2")}
             </Button>
           }
         />
@@ -351,14 +356,13 @@ export default function StoragePage() {
       <AlertDialog open={!!toDelete} onOpenChange={(o) => !o && setToDelete(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete “{toDelete?.name}”?</AlertDialogTitle>
+            <AlertDialogTitle>{t("storage.delete.title", { name: toDelete?.name })}</AlertDialogTitle>
             <AlertDialogDescription>
-              Kadr forgets this profile and its encrypted credentials. Files in the buckets are not touched. Profiles
-              used by a project can't be deleted.
+              {t("storage.delete.description")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("storage.delete.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-white hover:bg-destructive/90"
               onClick={(e) => {
@@ -368,7 +372,7 @@ export default function StoragePage() {
               disabled={del.isPending}
             >
               {del.isPending && <Loader2 className="animate-spin" />}
-              Delete profile
+              {t("storage.delete.confirm")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

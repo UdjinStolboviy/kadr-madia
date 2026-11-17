@@ -1,3 +1,5 @@
+import { t } from "@/i18n/store";
+
 import type {
   Analytics,
   ApiErrorCode,
@@ -69,21 +71,36 @@ export function isApiError(e: unknown, code?: ApiErrorCode): e is ApiError {
   return e instanceof ApiError && (code === undefined || e.code === code);
 }
 
-/** Human-friendly message for any thrown value. */
+/** Human-friendly, translated message for any thrown value. Known codes map to client-side text. */
 export function errorMessage(e: unknown): string {
   if (e instanceof ApiError) {
     switch (e.code) {
       case "rate_limited":
-        return "Too many attempts. Please wait a minute and try again.";
+        return t("shell.err.rateLimited");
       case "csrf_failed":
-        return "Your session token expired. Reload the page and try again.";
+        return t("shell.err.csrfFailed");
       case "network_error":
-        return "Can't reach the Kadr server. Check that it is running.";
+        return t("shell.err.network");
+      case "unauthenticated":
+        return t("shell.err.unauthenticated");
+      case "invalid_credentials":
+        return t("shell.err.invalidCredentials");
+      case "invalid_code":
+        return t("shell.err.invalidCode");
+      case "not_found":
+        return t("shell.err.notFound");
+      case "slug_taken":
+        return t("shell.err.slugTaken");
+      case "in_use":
+        return t("shell.err.inUse");
+      case "webauthn_disabled":
+        return t("shell.err.webauthnDisabled");
     }
+    // validation_failed and unknown codes: the server's (English) detail is more specific.
     return e.detail || e.title || e.code;
   }
   if (e instanceof Error) return e.message;
-  return "Something went wrong";
+  return t("shell.err.generic");
 }
 
 // ---- CSRF token (memory only) ----------------------------------------------

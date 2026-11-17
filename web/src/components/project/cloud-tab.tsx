@@ -21,6 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { useT } from "@/i18n/react";
 import { errorMessage, isApiError } from "@/lib/api";
 import { cloudQuery, useCreateCloudConnection, useRevokeCloudConnection } from "@/lib/queries";
 import { CLOUD_PROVIDERS, type CloudConnection, type CloudProvider, type Project } from "@/lib/types";
@@ -30,6 +31,7 @@ const PROVIDER_LABEL: Record<CloudProvider, string> = { gdrive: "Google Drive", 
 const RCLONE_NAME: Record<CloudProvider, string> = { gdrive: "drive", onedrive: "onedrive", dropbox: "dropbox" };
 
 function CreateDialog({ project, open, onOpenChange }: { project: Project; open: boolean; onOpenChange: (o: boolean) => void }) {
+  const t = useT();
   const create = useCreateCloudConnection(project.id);
   const [provider, setProvider] = useState<CloudProvider>("gdrive");
   const [label, setLabel] = useState("");
@@ -64,7 +66,7 @@ function CreateDialog({ project, open, onOpenChange }: { project: Project; open:
               },
               {
                 onSuccess: () => {
-                  toast.success("Cloud connection added");
+                  toast.success(t("cloud.added"));
                   close(false);
                 },
               },
@@ -72,12 +74,12 @@ function CreateDialog({ project, open, onOpenChange }: { project: Project; open:
           }}
         >
           <DialogHeader>
-            <DialogTitle>Add cloud connection</DialogTitle>
+            <DialogTitle>{t("cloud.addTitle")}</DialogTitle>
             <DialogDescription>
-              Lets API clients import files from a cloud drive. The token is stored encrypted and never shown again.
+              {t("cloud.addDesc")}
             </DialogDescription>
           </DialogHeader>
-          <Field label="Provider" htmlFor="cc-provider" error={fe.provider}>
+          <Field label={t("cloud.provider")} htmlFor="cc-provider" error={fe.provider}>
             <Select value={provider} onValueChange={(v) => setProvider(v as CloudProvider)}>
               <SelectTrigger id="cc-provider" className="w-full">
                 <SelectValue />
@@ -92,20 +94,20 @@ function CreateDialog({ project, open, onOpenChange }: { project: Project; open:
             </Select>
           </Field>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Account label" htmlFor="cc-label" hint="Optional, e.g. an email address.">
+            <Field label={t("cloud.accountLabel")} htmlFor="cc-label" hint={t("cloud.accountLabelHint")}>
               <Input id="cc-label" value={label} onChange={(e) => setLabel(e.target.value)} />
             </Field>
-            <Field label="Namespace" htmlFor="cc-ns" hint="Optional restriction." error={fe.namespace}>
+            <Field label={t("cloud.namespace")} htmlFor="cc-ns" hint={t("cloud.namespaceHint")} error={fe.namespace}>
               <Input id="cc-ns" value={namespace} onChange={(e) => setNamespace(e.target.value)} className="font-mono" />
             </Field>
           </div>
           <Field
-            label="rclone token (JSON)"
+            label={t("cloud.tokenLabel")}
             htmlFor="cc-token"
             error={fe.token}
             hint={
               <>
-                Run <code className="font-mono">rclone authorize "{RCLONE_NAME[provider]}"</code> and paste the resulting JSON.
+                {t("cloud.tokenHintPre")} <code className="font-mono">rclone authorize "{RCLONE_NAME[provider]}"</code> {t("cloud.tokenHintPost")}
               </>
             }
           >
@@ -128,11 +130,11 @@ function CreateDialog({ project, open, onOpenChange }: { project: Project; open:
           )}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => close(false)}>
-              Cancel
+              {t("cloud.cancel")}
             </Button>
             <Button type="submit" disabled={!token.trim() || create.isPending}>
               {create.isPending && <Loader2 className="animate-spin" />}
-              Add connection
+              {t("cloud.addConnection")}
             </Button>
           </DialogFooter>
         </form>
@@ -142,6 +144,7 @@ function CreateDialog({ project, open, onOpenChange }: { project: Project; open:
 }
 
 export function CloudTab({ project }: { project: Project }) {
+  const t = useT();
   const conns = useQuery(cloudQuery(project.id));
   const revoke = useRevokeCloudConnection(project.id);
   const [createOpen, setCreateOpen] = useState(false);
@@ -151,9 +154,9 @@ export function CloudTab({ project }: { project: Project }) {
   return (
     <div className="grid gap-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-muted-foreground">Connected drives can be used as import sources through the Kadr API.</p>
+        <p className="text-sm text-muted-foreground">{t("cloud.intro")}</p>
         <Button onClick={() => setCreateOpen(true)} disabled={project.disabled} className="shrink-0">
-          <Plus /> Add connection
+          <Plus /> {t("cloud.addConnection")}
         </Button>
       </div>
 
@@ -164,11 +167,11 @@ export function CloudTab({ project }: { project: Project }) {
       ) : list.length === 0 ? (
         <EmptyState
           icon={<Cloud />}
-          title="No cloud connections"
-          description="Connect Google Drive, OneDrive or Dropbox to import media."
+          title={t("cloud.emptyTitle")}
+          description={t("cloud.emptyDesc")}
           action={
             <Button onClick={() => setCreateOpen(true)} disabled={project.disabled}>
-              <Plus /> Add connection
+              <Plus /> {t("cloud.addConnection")}
             </Button>
           }
         />
@@ -177,9 +180,9 @@ export function CloudTab({ project }: { project: Project }) {
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead className="pl-4">Provider</TableHead>
-                <TableHead className="hidden sm:table-cell">Namespace</TableHead>
-                <TableHead className="hidden sm:table-cell">Added</TableHead>
+                <TableHead className="pl-4">{t("cloud.colProvider")}</TableHead>
+                <TableHead className="hidden sm:table-cell">{t("cloud.namespace")}</TableHead>
+                <TableHead className="hidden sm:table-cell">{t("cloud.colAdded")}</TableHead>
                 <TableHead className="w-12 pr-4" />
               </TableRow>
             </TableHeader>
@@ -190,7 +193,7 @@ export function CloudTab({ project }: { project: Project }) {
                     <div className="font-medium">{PROVIDER_LABEL[c.provider as CloudProvider] ?? c.provider}</div>
                     <div className="text-xs text-muted-foreground">{c.account_label || <span className="font-mono">{c.id}</span>}</div>
                   </TableCell>
-                  <TableCell className="hidden font-mono text-xs sm:table-cell">{c.namespace ?? "all"}</TableCell>
+                  <TableCell className="hidden font-mono text-xs sm:table-cell">{c.namespace ?? t("cloud.allNamespaces")}</TableCell>
                   <TableCell className="hidden text-sm text-muted-foreground sm:table-cell">
                     <RelativeTime value={c.created_at} />
                   </TableCell>
@@ -198,7 +201,7 @@ export function CloudTab({ project }: { project: Project }) {
                     <Button
                       variant="ghost"
                       size="icon-sm"
-                      aria-label="Revoke connection"
+                      aria-label={t("cloud.revokeAria")}
                       className="text-muted-foreground hover:text-destructive"
                       onClick={() => setToRevoke(c)}
                     >
@@ -217,13 +220,13 @@ export function CloudTab({ project }: { project: Project }) {
       <AlertDialog open={!!toRevoke} onOpenChange={(o) => !o && setToRevoke(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Revoke this connection?</AlertDialogTitle>
+            <AlertDialogTitle>{t("cloud.revokeTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              The stored token is deleted and imports from this account will fail. This can't be undone.
+              {t("cloud.revokeDesc")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("cloud.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-white hover:bg-destructive/90"
               onClick={() => {
@@ -231,7 +234,7 @@ export function CloudTab({ project }: { project: Project }) {
                 setToRevoke(null);
               }}
             >
-              Revoke connection
+              {t("cloud.revokeConfirm")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
