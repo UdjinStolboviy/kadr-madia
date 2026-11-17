@@ -113,7 +113,12 @@ func avifProbe(ctx context.Context, tmpDir string) Cap {
 	if _, err := run(ctx, "vips", "black", src, "16", "16", "--bands", "3"); err != nil {
 		return Cap{Detail: fmt.Sprintf("generate test image: %v", err)}
 	}
-	if _, err := run(ctx, "vips", "heifsave", src, dst, "--compression", "av1", "--Q", "50"); err != nil {
+	// `black --bands 3` is a "multiband" image; heifsave needs a colour space.
+	rgb := filepath.Join(dir, "rgb.v")
+	if _, err := run(ctx, "vips", "copy", src, rgb, "--interpretation", "srgb"); err != nil {
+		return Cap{Detail: fmt.Sprintf("generate test image: %v", err)}
+	}
+	if _, err := run(ctx, "vips", "heifsave", rgb, dst, "--compression", "av1", "--Q", "50"); err != nil {
 		return Cap{Detail: fmt.Sprintf("heifsave compression=av1 failed: %v", err)}
 	}
 	st, err := os.Stat(dst)
