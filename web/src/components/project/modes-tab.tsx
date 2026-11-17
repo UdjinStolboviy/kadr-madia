@@ -60,7 +60,8 @@ function PresetColumn({
       </div>
     );
   }
-  const facts = summarizePreset(preset.kind, preset.params).facts.filter((f) => FACT_LABELS[kind].includes(f.label));
+  const all = summarizePreset(preset.kind, preset.params).facts;
+  const facts = FACT_LABELS[kind].flatMap((l) => all.filter((f) => f.label === l));
   return (
     <div className="flex min-w-0 flex-col gap-3 rounded-lg border bg-muted/20 p-3">
       <div className="flex flex-wrap items-center gap-2">

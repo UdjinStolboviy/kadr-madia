@@ -224,7 +224,7 @@ function VideoForm({ draft, set, err }: { draft: Obj; set: (path: string[], v: u
   return (
     <>
       <Section title="Video">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 items-start gap-3">
           <Field label="Max width" htmlFor="pe-vw" hint="160–4096 px" error={err("video.maxWidth")}>
             <NumberInput id="pe-vw" value={getIn(draft, ["video", "maxWidth"])} onChange={(v) => set(["video", "maxWidth"], v)} min={160} max={4096} step={2} suffix="px" />
           </Field>
@@ -343,7 +343,10 @@ export function PresetEditor({
           toast.success(`Saved ${p.slug} v${p.current_version}`);
           onOpenChange(false);
         },
-        onError: (e) => toast.error("Couldn't save preset", { description: errorMessage(e) }),
+        onError: (e) =>
+          toast.error("Couldn't save preset", {
+            description: isApiError(e) ? (e.fieldErrors.params ?? e.fieldErrors.slug ?? errorMessage(e)) : errorMessage(e),
+          }),
       },
     );
   };

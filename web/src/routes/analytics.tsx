@@ -227,7 +227,7 @@ export default function AnalyticsPage() {
               value={String(days)}
               onValueChange={(v) => void navigate({ search: (s) => ({ ...s, days: Number(v) as 7 | 30 | 90 }), replace: true })}
             >
-              <SelectTrigger size="sm" className="w-32" aria-label="Period">
+              <SelectTrigger size="sm" className="w-40" aria-label="Period">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

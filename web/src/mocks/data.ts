@@ -44,7 +44,6 @@ export function defaultPresets(projectId: string, createdAt: string): Preset[] {
   ];
   void projectId;
   return [
-    ...modePresets(projectId, createdAt),
     mk("photo-lite", "image", "Cards, inventory, thumbnails", {
       kind: "image",
       resize: { maxWidth: 800, maxHeight: 800, fit: "inside", crop: null, aspect: null },
@@ -110,6 +109,7 @@ export function defaultPresets(projectId: string, createdAt: string): Preset[] {
       limits: { maxInputBytes: 2147483648, maxDurationSec: 300, maxWidth: 4096, maxHeight: 4096 },
       retainOriginal: false,
     }),
+    ...modePresets(projectId, createdAt),
   ];
 }
 
