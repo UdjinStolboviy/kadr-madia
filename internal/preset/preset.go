@@ -216,3 +216,7 @@ func DefaultPresets() []DefaultPreset {
 	}
 	return out
 }
+
+// DefaultPresets0Limits returns the limits applied to image presets saved
+// without explicit limits.
+func DefaultPresets0Limits() ImageLimits { return defaultImageLimits }

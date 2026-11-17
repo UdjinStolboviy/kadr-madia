@@ -120,8 +120,10 @@ func cmdServe(ctx context.Context, args []string, stderr io.Writer) error {
 	// Media pipeline: queue, image engine, webhooks.
 	q := queue.New(store, nil)
 	dispatcher := webhook.New(webhook.Config{Store: store, Keyring: keyring, Logger: log, Metrics: set})
+	imgEngine := newImageEngine(cfg.PoolImage, *fakeEngine, log)
+	playground, _ := imgEngine.(admin.PlaygroundEngine)
 	svc := pipeline.New(pipeline.Config{
-		Store: store, Queue: q, Engine: newImageEngine(cfg.PoolImage, *fakeEngine, log), Video: newVideoEngine(log), EdgeBaseURL: cfg.EdgeBaseURL, Keyring: keyring,
+		Store: store, Queue: q, Engine: imgEngine, Video: newVideoEngine(log), EdgeBaseURL: cfg.EdgeBaseURL, Keyring: keyring,
 		Logger: log, Metrics: set, TmpDir: cfg.TmpDir, Webhooks: dispatcher,
 	})
 	if err := svc.CleanStaleWorkDirs(ctx); err != nil {
@@ -140,7 +142,7 @@ func cmdServe(ctx context.Context, args []string, stderr io.Writer) error {
 	adminSrv := admin.New(admin.Config{
 		Store: store, Keyring: keyring, Logger: log, Metrics: set, Dev: cfg.Dev, Pepper: cfg.APIKeyPepper,
 		Build: admin.BuildInfo{Version: version, Commit: commit, StartedAt: started},
-		Caps:  caps, TmpDir: cfg.TmpDir, Pipeline: svc, Wake: q.Notify, UI: ui, FallbackHTML: web.FallbackHTML(), Webhooks: dispatcher,
+		Caps:  caps, TmpDir: cfg.TmpDir, Pipeline: svc, Wake: q.Notify, Playground: playground, UI: ui, FallbackHTML: web.FallbackHTML(), Webhooks: dispatcher,
 	})
 	publicHandler := public.Handler(public.Config{
 		Store: store, Logger: log, Metrics: set, Pipeline: svc, TmpDir: cfg.TmpDir,

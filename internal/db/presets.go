@@ -134,3 +134,22 @@ func (s *Store) PresetSlugs(ctx context.Context, projectID string) (map[string]s
 	}
 	return out, mapErr(rows.Err())
 }
+
+// AddPresetVersion appends a new immutable version and makes it current.
+// Existing assets keep the version they were processed with.
+func (s *Store) AddPresetVersion(ctx context.Context, presetID string, params json.RawMessage, createdBy string, now time.Time) (int, error) {
+	var next int
+	err := s.InTx(ctx, func(tx *Store) error {
+		if err := tx.w.QueryRowContext(ctx, `SELECT current_version + 1 FROM presets WHERE id = ?`, presetID).Scan(&next); err != nil {
+			return mapErr(err)
+		}
+		if _, err := tx.w.ExecContext(ctx,
+			`INSERT INTO preset_versions (preset_id, version, params_json, created_by, created_at) VALUES (?, ?, ?, ?, ?)`,
+			presetID, next, string(params), createdBy, ms(now)); err != nil {
+			return fmt.Errorf("add preset version: %w", mapErr(err))
+		}
+		_, err := tx.w.ExecContext(ctx, `UPDATE presets SET current_version = ? WHERE id = ?`, next, presetID)
+		return mapErr(err)
+	})
+	return next, err
+}

@@ -59,6 +59,8 @@ type Config struct {
 	// Webhooks delivers test events and wakes up on manual retries
 	// (optional; the test endpoint returns 503 without it).
 	Webhooks *webhook.Dispatcher
+	// Playground runs presets on samples (optional; nil → 503).
+	Playground PlaygroundEngine
 	// Pipeline backs the asset explorer (optional).
 	Pipeline AssetService
 	// Wake nudges the job pool of a requeued job (optional).
@@ -82,6 +84,7 @@ type Server struct {
 	loginLimit *auth.RateLimiter // per IP + email
 	ipLimit    *auth.RateLimiter // per IP, catches email spraying
 	cookieName string
+	playSem    chan struct{}
 }
 
 // Session cookie names (docs/ADMIN_API.md).
@@ -126,6 +129,7 @@ func New(cfg Config) *Server {
 		loginLimit: auth.NewRateLimiter(5, time.Minute),
 		ipLimit:    auth.NewRateLimiter(30, time.Minute),
 		cookieName: name,
+		playSem:    make(chan struct{}, 2),
 	}
 }
 
@@ -195,6 +199,8 @@ func (s *Server) apiRouter() http.Handler {
 		r.Get("/projects/{id}/assets", s.handleListAssets)
 		r.Get("/projects/{id}/assets/{asset_id}", s.handleGetAsset)
 		r.Delete("/projects/{id}/assets/{asset_id}", s.handleDeleteAsset)
+		r.Post("/playground", s.handlePlayground)
+		r.Post("/projects/{id}/presets/{slug}/versions", s.handleSavePresetVersion)
 		r.Get("/projects/{id}/analytics", s.handleAnalytics)
 		r.Get("/projects/{id}/signing-keys", s.handleListSigningKeys)
 		r.Post("/projects/{id}/signing-keys", s.handleCreateSigningKey)
