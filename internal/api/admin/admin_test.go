@@ -44,7 +44,9 @@ type env struct {
 	webhooks *webhook.Dispatcher
 }
 
-func newEnv(t *testing.T, ui fstest.MapFS) *env {
+func newEnv(t *testing.T, ui fstest.MapFS) *env { return newEnvDev(t, ui, true) }
+
+func newEnvDev(t *testing.T, ui fstest.MapFS, dev bool) *env {
 	t.Helper()
 	ctx := context.Background()
 	d, err := db.Open(ctx, filepath.Join(t.TempDir(), "kadr.db"))
@@ -70,7 +72,7 @@ func newEnv(t *testing.T, ui fstest.MapFS) *env {
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	set := metrics.NewSet()
-	cfg := Config{Store: store, Keyring: kr, Logger: log, Metrics: set, Dev: true, Pepper: testPepper,
+	cfg := Config{Store: store, Keyring: kr, Logger: log, Metrics: set, Dev: dev, Pepper: testPepper,
 		Build: BuildInfo{Version: "test", Commit: "abc", StartedAt: time.Now()}, TmpDir: t.TempDir(),
 		FallbackHTML: []byte("<p>fallback</p>"),
 		WebAuthnRPID: "localhost", WebAuthnOrigins: []string{"http://localhost:8081"},

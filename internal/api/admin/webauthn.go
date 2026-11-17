@@ -391,7 +391,7 @@ func (s *Server) handleWebAuthnLoginFinish(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Drop a pre-existing session presented with this request (fixation hygiene).
-	if c, err := r.Cookie(s.cookieName); err == nil && c.Value != "" {
+	if c, err := s.sessionCookie(r); err == nil && c.Value != "" {
 		_ = s.store.DeleteSession(ctx, auth.HashToken(c.Value))
 	}
 	token, hash, err := auth.NewSessionToken()
@@ -426,6 +426,6 @@ func (s *Server) handleWebAuthnLoginFinish(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	found.LastLoginAt = &now
-	s.setCookie(w, token, auth.SessionAbsolute)
+	s.setCookie(w, r, token, auth.SessionAbsolute)
 	httpx.WriteJSON(w, http.StatusOK, sessionResponse{Admin: toAdminDTO(found), CSRFToken: csrf})
 }

@@ -18,7 +18,7 @@ import (
 // puts the admin into the request context. Missing/expired → 401.
 func (s *Server) requireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		c, err := r.Cookie(s.cookieName)
+		c, err := s.sessionCookie(r)
 		if err != nil || c.Value == "" {
 			httpx.WriteProblem(w, http.StatusUnauthorized, "unauthenticated", "login required")
 			return
@@ -27,7 +27,7 @@ func (s *Server) requireSession(next http.Handler) http.Handler {
 		now := s.now()
 		sess, err := s.store.GetSession(ctx, auth.HashToken(c.Value), now)
 		if errors.Is(err, db.ErrNotFound) {
-			s.clearCookie(w)
+			s.clearCookie(w, r)
 			httpx.WriteProblem(w, http.StatusUnauthorized, "unauthenticated", "session expired")
 			return
 		}
@@ -95,23 +95,58 @@ func (s *Server) requireWriteRole(next http.Handler) http.Handler {
 
 // ───────────── cookies ─────────────
 
-func (s *Server) setCookie(w http.ResponseWriter, token string, maxAge time.Duration) {
+// isHTTPS reports whether the browser reached us over TLS (directly or via a
+// reverse proxy / Cloudflare Tunnel that sets the usual forwarded headers).
+func isHTTPS(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	if strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		return true
+	}
+	return strings.Contains(r.Header.Get("CF-Visitor"), `"scheme":"https"`)
+}
+
+// cookieFor picks the cookie name and the Secure flag for this request. Over
+// HTTPS the hardened `__Host-` cookie is used; over plain HTTP (a LAN address
+// such as http://192.168.x.x:8081) browsers silently drop Secure cookies, so a
+// non-Secure cookie is used instead — put the console behind HTTPS (e.g.
+// cloudflared) for anything but a trusted network.
+func (s *Server) cookieFor(r *http.Request) (name string, secure bool) {
+	if !s.cfg.Dev && isHTTPS(r) {
+		return cookieProd, true
+	}
+	return cookieDev, false
+}
+
+// sessionCookie returns the session cookie sent with r, whichever name it has.
+func (s *Server) sessionCookie(r *http.Request) (*http.Cookie, error) {
+	if c, err := r.Cookie(cookieProd); err == nil && c.Value != "" {
+		return c, nil
+	}
+	return r.Cookie(cookieDev)
+}
+
+func (s *Server) setCookie(w http.ResponseWriter, r *http.Request, token string, maxAge time.Duration) {
+	name, secure := s.cookieFor(r)
 	http.SetCookie(w, &http.Cookie{
-		Name:     s.cookieName,
+		Name:     name,
 		Value:    token,
 		Path:     "/",
 		MaxAge:   int(maxAge.Seconds()),
 		HttpOnly: true,
-		Secure:   !s.cfg.Dev,
+		Secure:   secure,
 		SameSite: http.SameSiteStrictMode,
 	})
 }
 
-func (s *Server) clearCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
-		Name: s.cookieName, Value: "", Path: "/", MaxAge: -1,
-		HttpOnly: true, Secure: !s.cfg.Dev, SameSite: http.SameSiteStrictMode,
-	})
+func (s *Server) clearCookie(w http.ResponseWriter, r *http.Request) {
+	for _, n := range []string{cookieProd, cookieDev} {
+		http.SetCookie(w, &http.Cookie{
+			Name: n, Value: "", Path: "/", MaxAge: -1,
+			HttpOnly: true, Secure: n == cookieProd, SameSite: http.SameSiteStrictMode,
+		})
+	}
 }
 
 // ───────────── handlers ─────────────
@@ -193,7 +228,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Drop a pre-existing session presented with this request (fixation hygiene).
-	if c, err := r.Cookie(s.cookieName); err == nil && c.Value != "" {
+	if c, err := s.sessionCookie(r); err == nil && c.Value != "" {
 		_ = s.store.DeleteSession(ctx, auth.HashToken(c.Value))
 	}
 
@@ -225,7 +260,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.LastLoginAt = &now
-	s.setCookie(w, token, auth.SessionAbsolute)
+	s.setCookie(w, r, token, auth.SessionAbsolute)
 	httpx.WriteJSON(w, http.StatusOK, sessionResponse{Admin: toAdminDTO(a), CSRFToken: csrf})
 }
 
@@ -252,7 +287,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	s.clearCookie(w)
+	s.clearCookie(w, r)
 	w.WriteHeader(http.StatusNoContent)
 }
 
