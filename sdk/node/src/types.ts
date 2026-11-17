@@ -89,8 +89,9 @@ export type CreateUploadInput = Camelize<Schemas["CreateUploadRequest"]>;
 /**
  * Single-request upload ticket: `PUT` the file to `url` with exactly
  * `headers` (Content-Type and Content-Length are signed), then call
- * `uploads.complete(uploadId)`. Multipart uploads (> 64 MB) are not
- * implemented yet.
+ * `uploads.complete(uploadId)`. Video files over 64 MB get a `MULTIPART`
+ * ticket instead: PUT each of `parts` (`partSize` bytes per part), collect the
+ * `ETag` headers and call `uploads.complete(uploadId, { parts })`.
  */
 export type UploadTicket = Camelize<Schemas["UploadTicket"]>;
 
@@ -104,7 +105,15 @@ export type UploadTicket = Camelize<Schemas["UploadTicket"]>;
  */
 export type CreateUploadResult = ({ kind: "upload" } & UploadTicket) | { kind: "asset"; asset: Asset };
 
+/** A finished part of a multipart upload. */
+export interface CompletedPart {
+  partNumber: number;
+  etag: string;
+}
+
 export interface CompleteUploadInput {
+  /** Required to complete `MULTIPART` tickets. */
+  parts?: CompletedPart[];
   /**
    * How long the server may wait for processing before returning (max 30 s).
    * A number is interpreted as seconds; a string is sent verbatim (e.g. `"5s"`).
@@ -176,3 +185,43 @@ export type WebhookEventType = WebhookEvent["type"];
  * `errors` maps wire field names (e.g. `content_type`) to messages.
  */
 export type ProblemDetails = Partial<Camelize<Schemas["Problem"]>> & Record<string, unknown>;
+
+// ---------------------------------------------------------------------------
+// Signed URLs and imports
+// ---------------------------------------------------------------------------
+
+/** One entry of `assets.signUrls()`. */
+export interface SignUrlItem {
+  assetId: string;
+  /** Rendition name ("main") or "name.format" ("main.avif"); defaults to the first. */
+  rendition?: string;
+  /** Lifetime in seconds (default 3600, max 604800). */
+  ttl?: number;
+  /** Serve as an attachment with this file name. */
+  download?: string;
+}
+
+export interface SignedUrl {
+  url: string;
+  expiresAt: string;
+}
+
+interface ImportCommon {
+  preset: string;
+  namespace: string;
+  visibility: "public" | "private";
+  filename?: string;
+  metadata?: Record<string, unknown>;
+}
+
+/** Body of `POST /v1/imports/url`. */
+export interface ImportUrlInput extends ImportCommon {
+  url: string;
+}
+
+/** Body of `POST /v1/imports/cloud`. */
+export interface ImportCloudInput extends ImportCommon {
+  connectionId: string;
+  /** Drive file id, or a path for OneDrive and Dropbox. */
+  fileId: string;
+}

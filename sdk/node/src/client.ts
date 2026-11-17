@@ -1,4 +1,4 @@
-import { fromWire } from "./case.js";
+import { fromWire, toWire } from "./case.js";
 import { KadrError } from "./errors.js";
 import {
   HttpClient,
@@ -19,6 +19,10 @@ import type {
   PingResult,
   Preset,
   UpdateAssetInput,
+  ImportCloudInput,
+  ImportUrlInput,
+  SignedUrl,
+  SignUrlItem,
   UploadAssetInput,
   UploadTicket,
 } from "./types.js";
@@ -178,11 +182,12 @@ class Uploads {
     uploadId: string,
     input: CompleteUploadInput & IdempotentRequestOptions = {},
   ): Promise<Asset> {
-    const { wait, ...options } = input;
+    const { wait, parts, ...options } = input;
     const res = await this.http.request({
       method: "POST",
       path: route("/v1/uploads/{upload_id}/complete", { upload_id: uploadId }),
       query: { wait: formatWait(wait) },
+      ...(parts ? { json: { parts: parts.map((p) => ({ part_number: p.partNumber, etag: p.etag })) } } : {}),
       ...options,
     });
     return fromWire<Asset>(res.body);
@@ -295,6 +300,22 @@ class Assets {
   }
 }
 
+class Imports {
+  constructor(private readonly http: HttpClient) {}
+
+  /** `POST /v1/imports/url` — Kadr downloads the URL (SSRF-safe); returns the processing asset. */
+  async url(input: ImportUrlInput, options: IdempotentRequestOptions = {}): Promise<Asset> {
+    const res = await this.http.request({ method: "POST", path: route("/v1/imports/url"), json: toWire(input), ...options });
+    return fromWire<Asset>(res.body);
+  }
+
+  /** `POST /v1/imports/cloud` — imports one file through a cloud connection. */
+  async cloud(input: ImportCloudInput, options: IdempotentRequestOptions = {}): Promise<Asset> {
+    const res = await this.http.request({ method: "POST", path: route("/v1/imports/cloud"), json: toWire(input), ...options });
+    return fromWire<Asset>(res.body);
+  }
+}
+
 class Presets {
   constructor(private readonly http: HttpClient) {}
 
@@ -353,6 +374,7 @@ export class Kadr {
   readonly uploads: Uploads;
   readonly assets: Assets;
   readonly presets: Presets;
+  readonly imports: Imports;
   readonly namespaces: Namespaces;
   readonly webhooks: Webhooks;
   private readonly http: HttpClient;
@@ -378,6 +400,7 @@ export class Kadr {
     this.uploads = new Uploads(this.http);
     this.assets = new Assets(this.http);
     this.presets = new Presets(this.http);
+    this.imports = new Imports(this.http);
     this.namespaces = new Namespaces(this.http);
     this.webhooks = new Webhooks();
   }
@@ -386,6 +409,22 @@ export class Kadr {
   async ping(options: RequestOptions = {}): Promise<PingResult> {
     const res = await this.http.request({ method: "GET", path: route("/v1/ping"), ...options });
     return fromWire<PingResult>(res.body);
+  }
+
+  /**
+   * Signs private rendition URLs on the server (`POST /v1/signed-urls`) with
+   * the project's active signing key. Needs the `urls:sign` scope.
+   */
+  async signUrls(items: SignUrlItem[], options: IdempotentRequestOptions = {}): Promise<SignedUrl[]> {
+    const res = await this.http.request({
+      method: "POST",
+      path: route("/v1/signed-urls"),
+      json: { items: items.map((i) => toWire(i)) },
+      ...options,
+    });
+    const body = res.body;
+    if (!isRecord(body) || !Array.isArray(body.items)) throw unexpected("POST /v1/signed-urls", body);
+    return body.items.map((i) => fromWire<SignedUrl>(i));
   }
 
   /**

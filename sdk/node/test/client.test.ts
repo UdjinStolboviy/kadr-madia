@@ -500,3 +500,30 @@ describe("presets, namespaces and ping", () => {
     expect(JSON.parse(calls[3]!.init.body as string)).toEqual({ quota_bytes: 1000 });
   });
 });
+
+describe("multipart, signed URLs and imports", () => {
+  it("sends parts on complete in snake_case", async () => {
+    const { fetch, calls } = mockFetch(json({ id: "ast_1", status: "ready" }));
+    await client(fetch).uploads.complete("upl_1", { parts: [{ partNumber: 1, etag: '"abc"' }], wait: 5 });
+    expect(calls[0]!.url).toContain("/v1/uploads/upl_1/complete?wait=5s");
+    expect(JSON.parse(calls[0]!.init.body as string)).toEqual({ parts: [{ part_number: 1, etag: '"abc"' }] });
+  });
+
+  it("signs URLs through the API", async () => {
+    const { fetch, calls } = mockFetch(json({ items: [{ url: "https://m/x?sig=1", expires_at: "2030-01-01T00:00:00Z" }] }));
+    const out = await client(fetch).signUrls([{ assetId: "ast_1", rendition: "main.avif", ttl: 60, download: "a.avif" }]);
+    expect(out).toEqual([{ url: "https://m/x?sig=1", expiresAt: "2030-01-01T00:00:00Z" }]);
+    expect(JSON.parse(calls[0]!.init.body as string)).toEqual({
+      items: [{ asset_id: "ast_1", rendition: "main.avif", ttl: 60, download: "a.avif" }],
+    });
+  });
+
+  it("imports from a URL and from the cloud", async () => {
+    const { fetch, calls } = mockFetch(json({ id: "ast_1", status: "processing" }, 202), json({ id: "ast_2", status: "processing" }, 202));
+    const k = client(fetch);
+    await k.imports.url({ url: "https://x/y.jpg", preset: "photo-lite", namespace: "org_1", visibility: "public" });
+    await k.imports.cloud({ connectionId: "con_1", fileId: "f1", preset: "photo-lite", namespace: "org_1", visibility: "private" });
+    expect(calls[0]!.url).toContain("/v1/imports/url");
+    expect(JSON.parse(calls[1]!.init.body as string)).toMatchObject({ connection_id: "con_1", file_id: "f1" });
+  });
+});

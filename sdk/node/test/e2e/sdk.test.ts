@@ -41,9 +41,9 @@ const sha256 = (b: Buffer) => createHash("sha256").update(b).digest("hex");
 async function putToTicket(ticket: UploadTicket, body: Buffer): Promise<void> {
   // fetch derives Content-Length from the body; every other header is sent verbatim.
   const headers = Object.fromEntries(
-    Object.entries(ticket.headers).filter(([k]) => k.toLowerCase() !== "content-length"),
+    Object.entries(ticket.headers ?? {}).filter(([k]) => k.toLowerCase() !== "content-length"),
   );
-  const res = await fetch(ticket.url, { method: ticket.method, headers, body });
+  const res = await fetch(ticket.url!, { method: ticket.method, headers, body });
   if (!res.ok) throw new Error(`PUT to ticket: HTTP ${res.status} ${await res.text()}`);
 }
 
@@ -116,8 +116,8 @@ describe("@kadr/node against a live server", () => {
     if (created.kind !== "upload") throw new Error("expected an upload ticket");
     expect(created.uploadId).toMatch(/^upl_/);
     expect(created.method).toBe("PUT");
-    expect(created.headers["Content-Type"]).toBe("image/png");
-    expect(created.headers["Content-Length"]).toBe(String(file.byteLength));
+    expect(created.headers?.["Content-Type"]).toBe("image/png");
+    expect(created.headers?.["Content-Length"]).toBe(String(file.byteLength));
     expect(Date.parse(created.expiresAt)).toBeGreaterThan(Date.now());
 
     // complete before the PUT: upload_incomplete

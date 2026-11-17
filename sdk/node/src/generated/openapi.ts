@@ -41,8 +41,10 @@ export interface paths {
          *     and preset version, a new ready asset referencing it is created and
          *     returned with `200` — no upload is needed.
          *
-         *     Scope: `uploads:write`. Files over 64 MB need multipart uploads, which
-         *     arrive in M2 (`413 too_large` until then).
+         *     Scope: `uploads:write`. Video files over 64 MB get a `MULTIPART` ticket:
+         *     upload each part (`part_size` bytes, the last may be smaller) with PUT
+         *     to its URL, collect the `ETag` response headers and send them to
+         *     `complete`. Image presets are limited to 64 MB.
          */
         post: operations["createUpload"];
         delete?: never;
@@ -158,6 +160,83 @@ export interface paths {
          *     Scope `assets:write`.
          */
         patch: operations["updateAsset"];
+        trace?: never;
+    };
+    "/v1/signed-urls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign private rendition URLs
+         * @description Returns time-limited URLs for renditions of ready **private** assets,
+         *     signed with the project's active signing key and verified by kadr-edge.
+         *     Equivalent to `signUrl` in the SDK, without holding the secret.
+         *
+         *     Scope: `urls:sign`. `409 no_signing_key` until a key is created in the
+         *     admin console; `503 signing_unavailable` when `KADR_EDGE_BASE_URL` is unset.
+         */
+        post: operations["signUrls"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/imports/url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import a file from a URL
+         * @description Kadr downloads the URL (http/https only, no credentials, standard web
+         *     ports; private, loopback, link-local and metadata addresses are
+         *     refused, redirects are re-checked) and processes it like an upload.
+         *     Returns `202` with the asset in `processing`; `asset.ready` /
+         *     `asset.failed` webhooks follow. Failures: `import_blocked`,
+         *     `import_failed`, `too_large`, plus the engine codes.
+         *
+         *     Scope: `imports:write`.
+         */
+        post: operations["importUrl"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/imports/cloud": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import a file from a cloud drive
+         * @description Downloads one file through a project cloud connection (Google Drive,
+         *     OneDrive, Dropbox via rclone; connections are managed in the admin
+         *     console). `file_id` is the Drive file id, or a path for OneDrive and
+         *     Dropbox. Returns `202` like `/v1/imports/url`.
+         *
+         *     Scope: `imports:write`.
+         */
+        post: operations["importCloud"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/presets": {
@@ -438,12 +517,23 @@ export interface components {
             /** @example upl_01jd8x3k2m4n5p6q7r8s9t0v1w */
             upload_id: string;
             /** @enum {string} */
-            method: "PUT";
+            method: "PUT" | "MULTIPART";
             /**
              * Format: uri
-             * @description Presigned URL of `tmp/{project}/{upload_id}` in the private bucket.
+             * @description `PUT` tickets: presigned URL of `tmp/{project}/{upload_id}` in the private bucket.
              */
-            url: string;
+            url?: string;
+            /**
+             * Format: int64
+             * @description `MULTIPART` tickets: size of every part except the last.
+             */
+            part_size?: number;
+            /** @description `MULTIPART` tickets: presigned PUT URL of every part. */
+            parts?: {
+                part_number: number;
+                /** Format: uri */
+                url: string;
+            }[];
             /**
              * @description Headers the client must send with the PUT (at least Content-Type and Content-Length).
              * @example {
@@ -451,7 +541,7 @@ export interface components {
              *       "Content-Length": "384211"
              *     }
              */
-            headers: {
+            headers?: {
                 [key: string]: string;
             };
             /** Format: date-time */
@@ -502,7 +592,7 @@ export interface components {
         /**
          * @description Public renditions carry `url` (the storage profile's public base URL +
          *     key, immutable). Private renditions carry `key` instead, to be signed
-         *     by the SDK (`signUrl`) or `POST /v1/signed-urls` (M3).
+         *     by the SDK (`signUrl`) or `POST /v1/signed-urls`.
          */
         Rendition: {
             /** @example main */
@@ -726,7 +816,7 @@ export interface components {
                 "application/problem+json": components["schemas"]["Problem"];
             };
         };
-        /** @description `too_large` — over 64 MB (multipart arrives in M2), over the preset's `maxInputBytes`, or over 25 MB for server-side uploads. */
+        /** @description `too_large` — over 64 MB (images), over the preset's `maxInputBytes`, or over 25 MB for server-side uploads. */
         TooLarge: {
             headers: {
                 [name: string]: unknown;
@@ -877,7 +967,17 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        /** @description Required for `MULTIPART` tickets. */
+        requestBody?: {
+            content: {
+                "application/json": {
+                    parts?: {
+                        part_number: number;
+                        etag: string;
+                    }[];
+                };
+            };
+        };
         responses: {
             /** @description The asset (ready, failed or still processing). */
             200: {
@@ -1144,6 +1244,136 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+        };
+    };
+    signUrls: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    items: {
+                        asset_id: string;
+                        /** @description Name ("main") or "name.format" ("main.avif"); default first. */
+                        rendition?: string;
+                        /** @default 3600 */
+                        ttl?: number;
+                        /** @description Serve as an attachment with this file name. */
+                        download?: string;
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description One URL per item, in order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: {
+                            /** Format: uri */
+                            url: string;
+                            /** Format: date-time */
+                            expires_at: string;
+                        }[];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    importUrl: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description 1–255 printable ASCII characters, unique per logical request. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uri */
+                    url: string;
+                    preset: string;
+                    namespace: components["schemas"]["Namespace"];
+                    visibility: components["schemas"]["Visibility"];
+                    filename?: string;
+                    metadata?: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Accepted. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Asset"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["QuotaExceeded"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["PresetNotFound"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    importCloud: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description 1–255 printable ASCII characters, unique per logical request. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @example con_01jd8x3k2m4n5p6q7r8s9t0v1w */
+                    connection_id: string;
+                    file_id: string;
+                    preset: string;
+                    namespace: components["schemas"]["Namespace"];
+                    visibility: components["schemas"]["Visibility"];
+                    filename?: string;
+                    metadata?: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Accepted. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Asset"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
         };
     };
     listPresets: {

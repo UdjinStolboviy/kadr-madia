@@ -21,9 +21,8 @@ info:
     - IDs are prefixed ULIDs: `upl_…`, `ast_…`, `blb_…`, `evt_…`.
     - Lists return `{ "items": [...], "next_cursor": string | null }`.
     - Any other `/v1` path or method answers `501 not_implemented` (planned
-      endpoints such as `POST /v1/signed-urls`, `/v1/imports/*`,
-      `POST /v1/assets/{id}/reprocess`, `DELETE /v1/namespaces/{ns}` and
-      multipart uploads are not available yet).
+      endpoints such as `POST /v1/assets/{id}/reprocess` and
+      `DELETE /v1/namespaces/{ns}` are not available yet).
   license:
     name: Proprietary
 servers:
@@ -77,8 +76,10 @@ paths:
         and preset version, a new ready asset referencing it is created and
         returned with `200` — no upload is needed.
 
-        Scope: `uploads:write`. Files over 64 MB need multipart uploads, which
-        arrive in M2 (`413 too_large` until then).
+        Scope: `uploads:write`. Video files over 64 MB get a `MULTIPART` ticket:
+        upload each part (`part_size` bytes, the last may be smaller) with PUT
+        to its URL, collect the `ETag` response headers and send them to
+        `complete`. Image presets are limited to 64 MB.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -128,6 +129,22 @@ paths:
         - $ref: "#/components/parameters/UploadId"
         - $ref: "#/components/parameters/Wait"
         - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        description: Required for `MULTIPART` tickets.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                parts:
+                  type: array
+                  items:
+                    type: object
+                    required: [part_number, etag]
+                    properties:
+                      part_number: { type: integer, minimum: 1, maximum: 10000 }
+                      etag: { type: string }
       responses:
         "200":
           description: The asset (ready, failed or still processing).
@@ -340,6 +357,143 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/signed-urls:
+    post:
+      tags: [assets]
+      operationId: signUrls
+      summary: Sign private rendition URLs
+      description: |
+        Returns time-limited URLs for renditions of ready **private** assets,
+        signed with the project's active signing key and verified by kadr-edge.
+        Equivalent to `signUrl` in the SDK, without holding the secret.
+
+        Scope: `urls:sign`. `409 no_signing_key` until a key is created in the
+        admin console; `503 signing_unavailable` when `KADR_EDGE_BASE_URL` is unset.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    type: object
+                    required: [asset_id]
+                    properties:
+                      asset_id: { type: string }
+                      rendition: { type: string, description: 'Name ("main") or "name.format" ("main.avif"); default first.' }
+                      ttl: { type: integer, minimum: 1, maximum: 604800, default: 3600 }
+                      download: { type: string, description: Serve as an attachment with this file name. }
+      responses:
+        "200":
+          description: One URL per item, in order.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [url, expires_at]
+                      properties:
+                        url: { type: string, format: uri }
+                        expires_at: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /v1/imports/url:
+    post:
+      tags: [uploads]
+      operationId: importUrl
+      summary: Import a file from a URL
+      description: |
+        Kadr downloads the URL (http/https only, no credentials, standard web
+        ports; private, loopback, link-local and metadata addresses are
+        refused, redirects are re-checked) and processes it like an upload.
+        Returns `202` with the asset in `processing`; `asset.ready` /
+        `asset.failed` webhooks follow. Failures: `import_blocked`,
+        `import_failed`, `too_large`, plus the engine codes.
+
+        Scope: `imports:write`.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url, preset, namespace, visibility]
+              properties:
+                url: { type: string, format: uri }
+                preset: { type: string }
+                namespace: { $ref: "#/components/schemas/Namespace" }
+                visibility: { $ref: "#/components/schemas/Visibility" }
+                filename: { type: string }
+                metadata: { type: object, additionalProperties: true }
+      responses:
+        "202":
+          description: Accepted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Asset" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "402": { $ref: "#/components/responses/QuotaExceeded" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/PresetNotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /v1/imports/cloud:
+    post:
+      tags: [uploads]
+      operationId: importCloud
+      summary: Import a file from a cloud drive
+      description: |
+        Downloads one file through a project cloud connection (Google Drive,
+        OneDrive, Dropbox via rclone; connections are managed in the admin
+        console). `file_id` is the Drive file id, or a path for OneDrive and
+        Dropbox. Returns `202` like `/v1/imports/url`.
+
+        Scope: `imports:write`.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [connection_id, file_id, preset, namespace, visibility]
+              properties:
+                connection_id: { type: string, examples: [con_01jd8x3k2m4n5p6q7r8s9t0v1w] }
+                file_id: { type: string }
+                preset: { type: string }
+                namespace: { $ref: "#/components/schemas/Namespace" }
+                visibility: { $ref: "#/components/schemas/Visibility" }
+                filename: { type: string }
+                metadata: { type: object, additionalProperties: true }
+      responses:
+        "202":
+          description: Accepted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Asset" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
 
   /v1/presets:
     get:
@@ -623,7 +777,7 @@ components:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
     TooLarge:
-      description: "`too_large` — over 64 MB (multipart arrives in M2), over the preset's `maxInputBytes`, or over 25 MB for server-side uploads."
+      description: "`too_large` — over 64 MB (images), over the preset's `maxInputBytes`, or over 25 MB for server-side uploads."
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
@@ -701,14 +855,27 @@ components:
 
     UploadTicket:
       type: object
-      required: [upload_id, method, url, headers, expires_at]
+      required: [upload_id, method, expires_at]
       properties:
         upload_id: { type: string, examples: [upl_01jd8x3k2m4n5p6q7r8s9t0v1w] }
-        method: { type: string, enum: [PUT] }
+        method: { type: string, enum: [PUT, MULTIPART] }
         url:
           type: string
           format: uri
-          description: Presigned URL of `tmp/{project}/{upload_id}` in the private bucket.
+          description: "`PUT` tickets: presigned URL of `tmp/{project}/{upload_id}` in the private bucket."
+        part_size:
+          type: integer
+          format: int64
+          description: "`MULTIPART` tickets: size of every part except the last."
+        parts:
+          type: array
+          description: "`MULTIPART` tickets: presigned PUT URL of every part."
+          items:
+            type: object
+            required: [part_number, url]
+            properties:
+              part_number: { type: integer }
+              url: { type: string, format: uri }
         headers:
           type: object
           description: Headers the client must send with the PUT (at least Content-Type and Content-Length).
@@ -773,7 +940,7 @@ components:
       description: |
         Public renditions carry `url` (the storage profile's public base URL +
         key, immutable). Private renditions carry `key` instead, to be signed
-        by the SDK (`signUrl`) or `POST /v1/signed-urls` (M3).
+        by the SDK (`signUrl`) or `POST /v1/signed-urls`.
       required: [name, format, bytes, width, height]
       properties:
         name: { type: string, examples: [main] }
