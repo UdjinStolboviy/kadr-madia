@@ -60,11 +60,19 @@ func SignKeyPrefix(secret, key string, exp int64) string {
 
 // SignURLs signs private rendition URLs with the project's active signing key.
 func (s *Service) SignURLs(ctx context.Context, projectID string, items []SignItem) ([]SignedURL, error) {
-	if s.edgeBaseURL == "" {
-		return nil, apiErr(http.StatusServiceUnavailable, "signing_unavailable", "the private delivery URL (KADR_EDGE_BASE_URL) is not configured")
-	}
 	if len(items) == 0 || len(items) > MaxSignItems {
 		return nil, validationErr(map[string]string{"items": "1–100 items required"})
+	}
+	// The private delivery host belongs to the project's storage profile
+	// (one kadr-edge per Cloudflare account); KADR_EDGE_BASE_URL is the default.
+	edgeBase := s.edgeBaseURL
+	if project, err := s.store.GetProject(ctx, projectID); err != nil {
+		return nil, err
+	} else if tgt, err := s.storageFor(ctx, project); err == nil && tgt.profile.PrivateBaseURL != nil && *tgt.profile.PrivateBaseURL != "" {
+		edgeBase = *tgt.profile.PrivateBaseURL
+	}
+	if edgeBase == "" {
+		return nil, apiErr(http.StatusServiceUnavailable, "signing_unavailable", "no private delivery URL: set private_base_url on the project's storage profile or KADR_EDGE_BASE_URL")
 	}
 	k, err := s.store.GetActiveSigningKey(ctx, projectID)
 	if errors.Is(err, db.ErrNotFound) {
@@ -109,7 +117,7 @@ func (s *Service) SignURLs(ctx context.Context, projectID string, items []SignIt
 			return nil, apiErr(http.StatusNotFound, CodeNotFound, "asset %s has no rendition %q", it.AssetID, it.Rendition)
 		}
 		exp := s.now().Add(ttl).Unix()
-		u := strings.TrimRight(s.edgeBaseURL, "/") + "/" + escapeKey(key) + "?exp=" + strconv.FormatInt(exp, 10) +
+		u := strings.TrimRight(edgeBase, "/") + "/" + escapeKey(key) + "?exp=" + strconv.FormatInt(exp, 10) +
 			"&kid=" + url.QueryEscape(k.ID)
 		if prefixMode {
 			u += "&sig=" + SignKeyPrefix(string(secret), key, exp) + "&prefix=1"

@@ -188,7 +188,7 @@ The canonical form is specified in `sdk/node/README.md`. The `kadr-edge` Worker 
 
 ### Via the API (scope `urls:sign`)
 
-`POST /v1/signed-urls` `{ "items": [{ "asset_id": "ast_…", "rendition": "main.avif", "ttl": 3600, "download": "receipt.avif" }] }` → `{ "items": [{ "url": "…", "expires_at": "…" }] }` (1–100 items, ttl ≤ 7 days). Only ready **private** assets can be signed; `409 no_signing_key` until a key exists, `503 signing_unavailable` without `KADR_EDGE_BASE_URL`.
+`POST /v1/signed-urls` `{ "items": [{ "asset_id": "ast_…", "rendition": "main.avif", "ttl": 3600, "download": "receipt.avif" }] }` → `{ "items": [{ "url": "…", "expires_at": "…" }] }` (1–100 items, ttl ≤ 7 days). Only ready **private** assets can be signed; `409 no_signing_key` until a key exists, `503 signing_unavailable` without a private delivery host: the project's storage profile `private_base_url` wins, `KADR_EDGE_BASE_URL` is the default.
 
 ## Namespaces and quotas
 
