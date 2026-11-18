@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -393,8 +394,8 @@ func TestUploadTicketEndToEnd(t *testing.T) {
 		format := []string{"avif", "webp"}[i]
 		u := rd["url"].(string)
 		key := strings.TrimPrefix(u, cdnBase+"/")
-		if rd["name"] != "main" || rd["format"] != format || !strings.HasPrefix(key, "acme/blb_") ||
-			!strings.HasSuffix(key, "/main."+format) || rd["key"] != nil || rd["width"] != float64(800) || rd["height"] != float64(600) {
+		if rd["name"] != "main" || rd["format"] != format || !keyRe.MatchString(key) ||
+			!strings.HasSuffix(key, "/main-800x600."+format) || rd["key"] != nil || rd["width"] != float64(800) || rd["height"] != float64(600) {
 			t.Fatalf("rendition %d: %v", i, rd)
 		}
 		info, err := e.driver.Driver.Head(e.ctx, publicBucket, key)
@@ -472,7 +473,7 @@ func TestPrivateUploadStoresKeysNotURLs(t *testing.T) {
 	for _, ri := range a["renditions"].([]any) {
 		rd := ri.(map[string]any)
 		key, _ := rd["key"].(string)
-		if rd["url"] != nil || !strings.HasPrefix(key, "acme/blb_") {
+		if rd["url"] != nil || !keyRe.MatchString(key) {
 			t.Fatalf("private rendition: %v", rd)
 		}
 		if !e.objectExists(privateBucket, key) || e.objectExists(publicBucket, key) {
@@ -859,3 +860,6 @@ func (e *env) setDefaultMode(mode string) {
 	p.DefaultMode = mode
 	must(e.t, e.store.UpdateProject(e.ctx, p))
 }
+
+// keyRe matches the storage key layout of keys.go.
+var keyRe = regexp.MustCompile(`^acme/image/\d{4}/\d{2}/blb_[0-9a-z]+/[a-z]+-\d+x\d+\.(avif|webp)$`)

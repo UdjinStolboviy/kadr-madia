@@ -44,14 +44,29 @@ Later migrations: `0005_files.sql` (documents), `0006_agents.sql` (`agent_tokens
 ## R2 object keys
 
 ```
-kadr-private/tmp/{project}/{upload_id}                 # sources, 1-day lifecycle
-kadr-private/{project}/{blob_id}/{name}.{format}       # private renditions
-kadr-private/originals/{project}/{blob_id}.{ext}       # if retainOriginal
-kadr-public/{project}/{blob_id}/{name}.{format}        # public renditions
-kadr-system/litestream/kadr.db/…                       # database replica
+kadr-private/tmp/{project}/{upload_id}                                  # sources, 1-day lifecycle
+kadr-{private|public}/{project}/{kind}/{yyyy}/{mm}/{blob_id}/{file}     # renditions
+kadr-{private|public}/{project}/{kind}/{yyyy}/{mm}/{blob_id}/hls/…      # HLS package
+kadr-private/originals/{project}/{kind}/{yyyy}/{mm}/{blob_id}.{ext}     # if retainOriginal
+kadr-system/litestream/kadr.db/…                                        # database replica
 ```
 
-`blob_id` is a ULID (80 bits of randomness), so public URLs cannot be enumerated. The namespace is not part of the key: this lets Blobs be shared between assets, and namespace deletion is done through the database (`purge_namespace` → refcount → GC).
+`{kind}` is `image`, `video` or `file`; `{yyyy}/{mm}` is the blob's creation month (UTC). `{file}` says what the object is:
+
+| Rendition | File |
+|---|---|
+| image / poster / document thumbnail | `main-1080x1350.avif`, `poster-640x360.avif`, `thumb-480x679.webp` (`{name}-{w}x{h}.{format}`) |
+| video | `main-720p-av1.mp4`, `main-480p-h264.mp4` (`{name}-{height}p-{codec}.mp4`) |
+| document | `main.pdf` |
+
+Why this layout:
+
+- **Browsable and partitioned.** Kind and month prefixes let R2 lifecycle rules, cost reports and bulk operations target a slice ("videos older than a year") without the database; the file name tells what an object is (role, size, codec) when looking at a bucket or a download.
+- **No end-user names in keys.** A blob is shared by every asset with the same content and preset (deduplication), file names are personal data that would end up in public URLs and CDN logs, and renaming must not move objects. Downloads get their human name from `Content-Disposition` (`download` in signed URLs; the original filename for documents).
+- **Unguessable.** `blob_id` is a ULID (80 bits of randomness), so public URLs cannot be enumerated.
+- **Compatible.** Every rendition row stores its full key, so objects written with the earlier `{project}/{blob_id}/{name}.{format}` layout keep working; nothing is moved. Clients must use the `url`/`key` returned by the API and never build keys themselves.
+
+The namespace is not part of the key: this lets Blobs be shared between assets, and namespace deletion is done through the database (`purge_namespace` → refcount → GC).
 
 ## Working with SQLite
 

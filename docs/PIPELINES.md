@@ -65,7 +65,7 @@ flowchart LR
   J --> K --> L[asset.ready]
 ```
 
-**Why two files (`main.avif` and `main.webp`) per image:** they are not duplicates but two encodings of the same rendition. AVIF is ~20–30 % smaller; WebP is the fallback for clients without AVIF (older Safari/iOS < 16, some in-app browsers, e-mail clients). Serve them with `<picture><source type="image/avif" srcset="…main.avif"><img src="…main.webp"></picture>`. Both are byte-budgeted, so the pair typically costs ~2× a few KB. If every client of a product supports AVIF, remove the `webp` output from the preset (preset editor → outputs) and only `main.avif` is stored; likewise a WebP-only preset is valid. Video posters follow the same rule (`poster.avif` + `poster.webp`).
+**Why two files (`main.avif` and `main.webp`) per image:** they are not duplicates but two encodings of the same rendition. AVIF is ~20–30 % smaller; WebP is the fallback for clients without AVIF (older Safari/iOS < 16, some in-app browsers, e-mail clients). Serve them with `<picture><source type="image/avif" srcset="…main.avif"><img src="…main.webp"></picture>`. Both are byte-budgeted, so the pair typically costs ~2× a few KB. If every client of a product supports AVIF, remove the `webp` output from the preset (preset editor → outputs) and only `main.avif` is stored; likewise a WebP-only preset is valid. Video posters and document thumbnails follow the same rule (`poster.avif` + `poster.webp`, `thumb.avif` + `thumb.webp`); choose their encodings with `poster.formats` / `thumbnail.formats` (`["avif"]`, `["webp"]`, or unset for both). The asset's `poster` field is the poster rendition (AVIF when present).
 
 **Why an intermediate `.v`:** decoding and resizing (the expensive part) happen once; encoding at different qualities works on an already small raster and takes tens of milliseconds.
 
@@ -166,7 +166,7 @@ A video preset with `"hls": true` additionally produces an adaptive package next
 - One ffmpeg run, software x264 (VAAPI is not used for the ladder), `split` + `scale` per variant, audio (AAC) in every variant.
 - Ladder rungs are defined by the short side: 360 / 480 / 720 / 1080, only those not larger than the source and whose width does not exceed the preset's `video.maxWidth` (default 1280), at most 4. A source below 360 gets a single variant at its own size; nothing is upscaled.
 - fMP4 (CMAF) segments of 4 s, `independent_segments`, VOD playlists. Keyframes are aligned across variants (`-g fps*4`, `-force_key_frames expr:gte(t,n_forced*4)`, `-sc_threshold 0`), so the player can switch at any segment boundary. The x264 preset is capped at `medium` (the `slow` default of the MP4 would make four variants too slow); bitrates per rung: 800k / 1400k / 2800k / 5000k maxrate on top of the preset CRF.
-- Layout (flat, relative URIs): `{project}/{blob_id}/hls/master.m3u8`, `v_360p.m3u8`, `init_360p.mp4`, `seg_360p_00000.m4s`, ...
+- Layout (flat, relative URIs): `{project}/video/{yyyy}/{mm}/{blob_id}/hls/master.m3u8`, `v_360p.m3u8`, `init_360p.mp4`, `seg_360p_00000.m4s`, ...
 - Uploaded with `application/vnd.apple.mpegurl` (playlists), `video/mp4` (init) and `video/iso.segment` (segments) and the same Cache-Control as the other renditions of the blob.
 - One rendition row is recorded: name `hls`, format `m3u8`, `storage_key` = the master playlist, `bytes` = size of the whole package (also counted in the blob's total/quota). Segments have no rows: blob GC and visibility change enumerate the `hls/` prefix with `Driver.List`, so a package can never leak objects.
 - Job progress: 0-50 % MP4, 50-100 % ladder. A failing ladder fails the asset (the preset asked for it).
@@ -179,11 +179,13 @@ A video preset with `"hls": true` additionally produces an adaptive package next
 
 - Playback: Chrome, Edge, Firefox, Android 10+ and Safari 17+ **only on devices with an AV1 hardware decoder** (iPhone 15 Pro and newer, Apple M3 and newer). Older iPhones/iPads cannot play it — use AV1 only where you control the clients, or keep an H.264 preset for them.
 - Encoding is slower than x264 on CPU (`video.preset` maps to SVT presets: `slow` → 6, `fast` → 8, `veryfast` → 10); VAAPI is not used.
-- CRF range 14–63 (good starting points: 30 compact, 26 balanced, 22 quality); `maxrate`/`bufsize` are ignored; `hls: true` requires H.264.
+- CRF range 14–63. The AV1 scale is not the x264 one: comparable to x264 CRF 30/26/20 are roughly AV1 CRF 42/36/30. `maxrate` becomes SVT-AV1 capped CRF (`mbr`), so high-motion clips cannot exceed it; `bufsize` is ignored; `hls: true` requires H.264.
+- Memory: SVT-AV1 peaks around 0.6 GB at 720p and 1.1 GB at 1080p with default parallelism. On small hosts set `KADR_VIDEO_AV1_LP=2` (1080p peak ≈ 0.9 GB, ~15 % slower).
 - The rendition's `encoder` field reads `libsvtav1`, so the product can emit `<source type='video/mp4; codecs="av01.0.05M.08"'>`.
 
 ```json
-"video": { "codec": "av1", "maxWidth": 1280, "fps": 30, "crf": 32, "preset": "slow" }
+"video": { "codec": "av1", "maxWidth": 1280, "fps": 30, "crf": 36, "maxrate": "600k", "preset": "slow" },
+"poster": { "atSec": 1, "maxBytes": 15360, "formats": ["avif"] }
 ```
 
 ### Later (M5)

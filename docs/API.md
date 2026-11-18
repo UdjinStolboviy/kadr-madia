@@ -147,8 +147,8 @@ The fetch is SSRF-safe: http/https only, no credentials in the URL, ports 80/443
   "preset_version": 3,
   "original": { "filename": "IMG_2231.HEIC", "content_type": "image/heic", "bytes": 4382110, "width": 4032, "height": 3024 },
   "renditions": [
-    { "name": "main", "format": "avif", "bytes": 19422, "width": 800, "height": 600, "url": "https://cdn.example.com/acme/blb_01jd…/main.avif" },
-    { "name": "main", "format": "webp", "bytes": 20110, "width": 800, "height": 600, "url": "https://cdn.example.com/acme/blb_01jd…/main.webp" }
+    { "name": "main", "format": "avif", "bytes": 19422, "width": 800, "height": 600, "url": "https://cdn.example.com/acme/image/2026/11/blb_01jd…/main-800x600.avif" },
+    { "name": "main", "format": "webp", "bytes": 20110, "width": 800, "height": 600, "url": "https://cdn.example.com/acme/image/2026/11/blb_01jd…/main-800x600.webp" }
   ],
   "placeholder": { "thumbhash": "1QcSHQRnh493V4dIh4eXh1h4kJUI", "dominant_color": "#a3866c" },
   "duration_sec": null,
@@ -182,7 +182,7 @@ The fetch is SSRF-safe: http/https only, no credentials in the URL, ports 80/443
 
 ```ts
 const url = kadr.signUrl(asset.renditions[0].key, { ttl: 3600, download: "receipt.avif" });
-// https://media.example.com/acme/blb_…/main.avif?exp=1763330400&kid=k3&sig=Base64Url(HMAC-SHA256(secret, "GET\n/acme/blb_…/main.avif\n1763330400\nreceipt.avif"))
+// https://media.example.com/acme/image/2026/11/blb_…/main-800x600.avif?exp=1763330400&kid=k3&sig=Base64Url(HMAC-SHA256(secret, "GET\n/acme/image/2026/11/blb_…/main-800x600.avif\n1763330400\nreceipt.avif"))
 ```
 
 The canonical form is specified in `sdk/node/README.md`. The `kadr-edge` Worker (`edge/kadr-edge`) verifies these URLs. Signing keys are created and rotated per project in the admin console (Signing keys tab) and published to the Worker with `POST /admin/api/signing-keys/publish` (or copied into the `SIGNING_KEYS` Worker secret).

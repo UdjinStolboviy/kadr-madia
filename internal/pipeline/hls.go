@@ -53,11 +53,11 @@ func (s *Service) packageHLS(ctx context.Context, pc *processCtx, info video.Sou
 }
 
 // uploadHLS uploads every file of the package under
-// {project}/{blob}/hls/ and returns the single rendition row (master
+// {blob prefix}/hls/ (see keys.go) and returns the single rendition row (master
 // playlist; bytes = size of the whole package) plus all uploaded keys (for
 // cleanup on failure).
 func (s *Service) uploadHLS(ctx context.Context, pc *processCtx, blob *db.Blob, bucket, cacheControl string, h *video.HLSOutput) (*db.Rendition, []string, error) {
-	prefix := fmt.Sprintf("%s/%s/%s/", pc.project.Slug, blob.ID, hlsSubdir)
+	prefix := blobPrefix(pc.project.Slug, blob) + hlsSubdir + "/"
 	var keys []string
 	for _, f := range h.Files {
 		key := prefix + f

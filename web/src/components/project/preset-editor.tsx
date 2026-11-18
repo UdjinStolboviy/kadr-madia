@@ -116,6 +116,28 @@ function SelectField({ id, value, onChange, options }: { id: string; value: stri
   );
 }
 
+/** Poster / document thumbnail encodings: unset (AVIF + WebP), AVIF only or WebP only. */
+function DerivedFormatsField({ id, path, draft, set }: { id: string; path: string[]; draft: Obj; set: (path: string[], v: unknown) => void }) {
+  const t = useT();
+  const cur = getIn(draft, path);
+  const list = Array.isArray(cur) ? (cur as string[]) : [];
+  const value = list.length === 1 ? (list[0] ?? "both") : "both";
+  return (
+    <Field label={t("presets.ed.derivedFormats")} htmlFor={id} hint={t("presets.ed.derivedFormatsHint")}>
+      <SelectField
+        id={id}
+        value={value}
+        onChange={(v) => set(path, v === "both" ? undefined : [v])}
+        options={[
+          { value: "both", label: t("presets.ed.formatsBoth") },
+          { value: "avif", label: t("presets.ed.formatsAvif") },
+          { value: "webp", label: t("presets.ed.formatsWebp") },
+        ]}
+      />
+    </Field>
+  );
+}
+
 const X264 = ["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower"];
 
 function ImageForm({ draft, set, err }: { draft: Obj; set: (path: string[], v: unknown) => void; err: (...keys: string[]) => string | undefined }) {
@@ -313,6 +335,7 @@ function VideoForm({ draft, set, err }: { draft: Obj; set: (path: string[], v: u
             suffix="KB"
           />
         </Field>
+        <DerivedFormatsField id="pe-pformats" path={["poster", "formats"]} draft={draft} set={set} />
         <SwitchRow id="pe-hls" label="HLS" hint={t("presets.ed.hlsHint")} checked={draft.hls === true} onChange={(v) => set(["hls"], v)} />
         <SwitchRow id="pe-vretain" label={t("presets.ed.retain")} hint={t("presets.ed.retainHint")} checked={draft.retainOriginal === true} onChange={(v) => set(["retainOriginal"], v)} />
       </Section>
@@ -381,6 +404,7 @@ function FileForm({ draft, set, err }: { draft: Obj; set: (path: string[], v: un
             <Field label={t("presets.ed.fileThumbKb")} htmlFor="pe-fkb" hint={t("presets.ed.fileThumbKbHint")} error={err("thumbnail.maxBytes")}>
               <NumberInput id="pe-fkb" value={kb(["thumbnail", "maxBytes"])} onChange={(v) => set(["thumbnail", "maxBytes"], v === undefined ? undefined : Math.round(v * 1024))} min={1} max={1024} suffix="KB" />
             </Field>
+            <DerivedFormatsField id="pe-tformats" path={["thumbnail", "formats"]} draft={draft} set={set} />
           </div>
         )}
       </Section>

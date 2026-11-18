@@ -32,6 +32,7 @@ type Config struct {
 	PoolImage       int
 	PoolVideo       int
 	PoolFile        int
+	VideoAV1LP      int      // KADR_VIDEO_AV1_LP: SVT-AV1 level of parallelism (0 = auto); lower uses less memory
 	VideoHW         string   // auto | vaapi | off
 	TelegramToken   string   // KADR_TELEGRAM_BOT_TOKEN (alerts)
 	TelegramChatID  string   // KADR_TELEGRAM_CHAT_ID
@@ -130,6 +131,12 @@ func Load(getenv Getenv) (*Config, error) {
 		return nil, err
 	}
 	if c.PoolFile, err = intEnv(getenv, "KADR_POOL_FILE", 1); err != nil {
+		return nil, err
+	}
+	if c.VideoAV1LP, err = intEnv(getenv, "KADR_VIDEO_AV1_LP", 0); err != nil || c.VideoAV1LP < 0 || c.VideoAV1LP > 64 {
+		if err == nil {
+			err = fmt.Errorf("KADR_VIDEO_AV1_LP must be 0–64")
+		}
 		return nil, err
 	}
 

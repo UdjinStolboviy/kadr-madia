@@ -416,6 +416,9 @@ func validateVideoParams(v *preset.VideoParams) string {
 	if v.Poster.MaxBytes <= 0 {
 		v.Poster.MaxBytes = 15360
 	}
+	if !preset.ValidDerivedFormats(v.Poster.Formats) {
+		return `poster.formats must list distinct formats from "avif", "webp"`
+	}
 	if v.Limits.MaxInputBytes <= 0 {
 		v.Limits = preset.VideoLimits{MaxInputBytes: 2 << 30, MaxDurationSec: 300, MaxWidth: 4096, MaxHeight: 4096}
 	}
@@ -455,6 +458,9 @@ func validateFileParams(f *preset.FileParams) string {
 		}
 	default:
 		return "optimize.strategy must be none, lossless or downsample"
+	}
+	if !preset.ValidDerivedFormats(f.Thumbnail.Formats) {
+		return `thumbnail.formats must list distinct formats from "avif", "webp"`
 	}
 	if f.Optimize.MinSavingsPercent < 0 || f.Optimize.MinSavingsPercent > 90 {
 		return "optimize.minSavingsPercent must be 0–90"

@@ -77,6 +77,25 @@ export function planImage(asset: KadrAssetLike, resolve: ResolveUrl = defaultRes
   return { sources, src: largest?.url, width: width ?? undefined, height: height ?? undefined };
 }
 
+/**
+ * The `<source type>` of a video rendition. With the codec in it a browser
+ * that cannot decode AV1 (e.g. older iPhones) skips the source and falls back
+ * to the next one instead of showing a broken player.
+ */
+export function videoType(r: KadrRendition): string {
+  const base = mimeFor(r.format);
+  if (r.format.toLowerCase() !== "mp4") return base;
+  switch (r.encoder) {
+    case "libsvtav1":
+      return `${base}; codecs="av01.0.08M.08, mp4a.40.2"`;
+    case "libx264":
+    case "h264_vaapi":
+      return `${base}; codecs="avc1.640029, mp4a.40.2"`;
+    default:
+      return base;
+  }
+}
+
 export interface VideoPlan {
   sources: { src: string; type: string }[];
   poster: string | undefined;
@@ -91,12 +110,15 @@ export function planVideo(asset: KadrAssetLike, resolve: ResolveUrl = defaultRes
   const ordered = [...vids].sort((a, b) => {
     const wa = a.format.toLowerCase() === "mp4" ? 0 : 1;
     const wb = b.format.toLowerCase() === "mp4" ? 0 : 1;
-    return wa - wb || (b.width ?? 0) - (a.width ?? 0);
+    // AV1 first (smaller); browsers without it skip to the H.264 source.
+    const ca = a.encoder === "libsvtav1" ? 0 : 1;
+    const cb = b.encoder === "libsvtav1" ? 0 : 1;
+    return wa - wb || ca - cb || (b.width ?? 0) - (a.width ?? 0);
   });
   const sources: { src: string; type: string }[] = [];
   for (const r of ordered) {
     const src = resolve(r);
-    if (src) sources.push({ src, type: mimeFor(r.format) });
+    if (src) sources.push({ src, type: videoType(r) });
   }
   const first = ordered[0];
   const poster = asset.poster ? resolve(asset.poster) : undefined;

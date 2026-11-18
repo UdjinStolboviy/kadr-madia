@@ -72,12 +72,9 @@ func posterParams(v preset.VideoParams) preset.ImageParams {
 		max = 15 << 10
 	}
 	return preset.ImageParams{
-		Kind:   "image",
-		Resize: preset.Resize{MaxWidth: 640, MaxHeight: 640, Fit: "inside"},
-		Outputs: []preset.ImageOutput{
-			{Name: "poster", Format: "avif", Effort: 4, Chroma: "4:2:0"},
-			{Name: "poster", Format: "webp", SmartSubsample: true},
-		},
+		Kind:        "image",
+		Resize:      preset.Resize{MaxWidth: 640, MaxHeight: 640, Fit: "inside"},
+		Outputs:     preset.DerivedOutputs("poster", v.Poster.Formats),
 		Quality:     preset.Quality{Mode: "budget", MaxBytes: max, QMax: 60, QMin: 25, DownscaleStep: 0.85, MinSide: 240},
 		Placeholder: preset.Placeholder{ThumbHash: true, DominantColor: true},
 		Limits:      preset.ImageLimits{MaxInputBytes: 64 << 20, MaxInputPixels: 40_000_000, Accept: []string{"png"}},
@@ -203,12 +200,9 @@ func thumbParams(f preset.FileParams) preset.ImageParams {
 		max = 20 << 10
 	}
 	return preset.ImageParams{
-		Kind:   "image",
-		Resize: preset.Resize{MaxWidth: side, MaxHeight: side, Fit: "inside"},
-		Outputs: []preset.ImageOutput{
-			{Name: "thumb", Format: "avif", Effort: 4, Chroma: "4:2:0"},
-			{Name: "thumb", Format: "webp", SmartSubsample: true},
-		},
+		Kind:        "image",
+		Resize:      preset.Resize{MaxWidth: side, MaxHeight: side, Fit: "inside"},
+		Outputs:     preset.DerivedOutputs("thumb", f.Thumbnail.Formats),
 		Quality:     preset.Quality{Mode: "budget", MaxBytes: max, QMax: 60, QMin: 25, DownscaleStep: 0.85, MinSide: 200},
 		Placeholder: preset.Placeholder{ThumbHash: true, DominantColor: true},
 		Limits:      preset.ImageLimits{MaxInputBytes: 64 << 20, MaxInputPixels: 40_000_000, Accept: []string{"png"}},

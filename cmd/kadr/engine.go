@@ -45,8 +45,8 @@ func (u unavailableEngine) Process(context.Context, image.SourceInfo, preset.Ima
 
 // newVideoEngine returns the ffmpeg engine, or nil when ffmpeg/ffprobe are
 // missing (video presets then fail with a retryable engine error).
-func newVideoEngine(log *slog.Logger) video.Engine {
-	e, err := video.New(video.Config{Nice: true})
+func newVideoEngine(log *slog.Logger, av1LP int) video.Engine {
+	e, err := video.New(video.Config{Nice: true, AV1LP: av1LP})
 	if err != nil {
 		log.Error("video engine unavailable; video jobs will fail until ffmpeg is installed", "err", err)
 		return nil

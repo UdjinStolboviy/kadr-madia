@@ -13,6 +13,8 @@ export interface KadrRendition {
   url?: string | undefined;
   /** Private renditions carry a storage key to be signed by your backend; see `resolveUrl`. */
   key?: string | undefined;
+  /** Video: the encoder that produced it (libx264, h264_vaapi, libsvtav1). */
+  encoder?: string | null | undefined;
 }
 
 export interface KadrPlaceholder {

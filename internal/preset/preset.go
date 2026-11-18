@@ -3,7 +3,10 @@
 // dependencies on engines or the pipeline, so both can import it.
 package preset
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"slices"
+)
 
 // ImageParams is params_json for kind=image presets.
 type ImageParams struct {
@@ -118,6 +121,47 @@ type Poster struct {
 	AtSec    float64 `json:"atSec"`
 	Preset   string  `json:"preset"`
 	MaxBytes int     `json:"maxBytes"`
+	// Formats are the poster encodings to store (avif, webp). Empty means
+	// both: AVIF plus a WebP fallback for clients without AVIF.
+	Formats []string `json:"formats,omitempty"`
+}
+
+// DerivedImageFormats are the encodings allowed for posters and document
+// thumbnails; DefaultDerivedFormats is used when a preset does not list any.
+var (
+	DerivedImageFormats   = []string{"avif", "webp"}
+	DefaultDerivedFormats = []string{"avif", "webp"}
+)
+
+// DerivedOutputs returns the image outputs named name for the given
+// formats (posters, document thumbnails); empty formats mean the default pair.
+func DerivedOutputs(name string, formats []string) []ImageOutput {
+	if len(formats) == 0 {
+		formats = DefaultDerivedFormats
+	}
+	out := make([]ImageOutput, 0, len(formats))
+	for _, f := range formats {
+		switch f {
+		case "avif":
+			out = append(out, ImageOutput{Name: name, Format: "avif", Effort: 4, Chroma: "4:2:0"})
+		case "webp":
+			out = append(out, ImageOutput{Name: name, Format: "webp", SmartSubsample: true})
+		}
+	}
+	return out
+}
+
+// ValidDerivedFormats reports whether formats is empty (default) or a list
+// of distinct supported encodings.
+func ValidDerivedFormats(formats []string) bool {
+	seen := map[string]bool{}
+	for _, f := range formats {
+		if seen[f] || !slices.Contains(DerivedImageFormats, f) {
+			return false
+		}
+		seen[f] = true
+	}
+	return true
 }
 
 // VideoLimits guard input size and duration.

@@ -238,7 +238,7 @@ export interface VideoParams {
   video: { codec?: string; maxWidth: number; fps: number; crf: number; maxrate?: string; bufsize?: string; preset?: string; hw?: string };
   audio: { codec?: string; bitrate?: string; channels?: number; sampleRate?: number };
   container?: { format?: string; faststart?: boolean };
-  poster?: { atSec?: number; preset?: string; maxBytes?: number };
+  poster?: { atSec?: number; preset?: string; maxBytes?: number; formats?: string[] };
   limits?: Record<string, unknown>;
   retainOriginal?: boolean;
   /** Also produce an adaptive HLS ladder. */
@@ -256,7 +256,7 @@ export interface FileParams {
   kind?: string;
   limits: { maxInputBytes: number; accept: string[] };
   optimize: { strategy: FileStrategy; imageDpi?: number; jpegQuality?: number; linearize: boolean; minSavingsPercent: number };
-  thumbnail: { enabled: boolean; maxSide: number; maxBytes: number };
+  thumbnail: { enabled: boolean; maxSide: number; maxBytes: number; formats?: string[] };
   retainOriginal: boolean;
   [k: string]: unknown;
 }

@@ -211,3 +211,23 @@ func TestTranscodeAV1(t *testing.T) {
 		t.Fatalf("output codec %q %v", got.VideoCodec, err)
 	}
 }
+
+func TestSvtParams(t *testing.T) {
+	cases := []struct {
+		lp      int
+		maxrate string
+		want    string
+	}{
+		{0, "", ""},
+		{2, "", "lp=2"},
+		{0, "900k", "mbr=900"},
+		{2, "4M", "lp=2:mbr=4000"},
+		{0, "1.5M", "mbr=1500"},
+		{0, "garbage", ""},
+	}
+	for _, c := range cases {
+		if got := svtParams(c.lp, c.maxrate); got != c.want {
+			t.Errorf("svtParams(%d, %q) = %q, want %q", c.lp, c.maxrate, got, c.want)
+		}
+	}
+}

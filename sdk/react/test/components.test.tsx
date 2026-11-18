@@ -71,6 +71,21 @@ describe("KadrVideo", () => {
     expect(s.getAttribute("type")).toBe("video/mp4");
   });
 
+  it("puts AV1 first with codec types so browsers can fall back to H.264", () => {
+    const asset: KadrAssetLike = {
+      renditions: [
+        { name: "main", format: "mp4", width: 1280, height: 720, url: "https://cdn/v/main-720p-h264.mp4", encoder: "libx264" },
+        { name: "main", format: "mp4", width: 1280, height: 720, url: "https://cdn/v/main-720p-av1.mp4", encoder: "libsvtav1" },
+      ],
+      poster: null,
+    };
+    const { container } = render(<KadrVideo asset={asset} />);
+    const s = [...container.querySelectorAll("source")];
+    expect(s.map((x) => x.getAttribute("src"))).toEqual(["https://cdn/v/main-720p-av1.mp4", "https://cdn/v/main-720p-h264.mp4"]);
+    expect(s[0]!.getAttribute("type")).toBe('video/mp4; codecs="av01.0.08M.08, mp4a.40.2"');
+    expect(s[1]!.getAttribute("type")).toBe('video/mp4; codecs="avc1.640029, mp4a.40.2"');
+  });
+
   it("falls back to a thumbhash poster", () => {
     const { container } = render(<KadrVideo asset={{ ...video, poster: null }} />);
     expect(container.querySelector("video")!.getAttribute("poster")).toMatch(/^data:image\/png;base64,/);

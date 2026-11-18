@@ -24,7 +24,11 @@ type Config struct {
 	FFprobe string // default "ffprobe"
 	Nice    bool   // lower CPU priority of children
 	Threads int    // x264 threads (default 2)
-	Device  string // VAAPI render node (default /dev/dri/renderD128)
+	// AV1LP is SVT-AV1's level of parallelism (0 = encoder default, about
+	// one per core). Lower values cut peak memory (1080p: ~1.1 GB → ~0.9 GB
+	// at 2) at a small speed cost.
+	AV1LP  int
+	Device string // VAAPI render node (default /dev/dri/renderD128)
 	// TimeoutPerMediaSecond bounds a transcode to duration*TimeoutPerMediaSecond (default 6s per
 	// second of video, at least MinTimeout).
 	TimeoutPerMediaSecond time.Duration
@@ -286,11 +290,15 @@ func (e *FFmpeg) run(ctx context.Context, src SourceInfo, p preset.VideoParams, 
 		args = append(args, "-vf", fmt.Sprintf("fps=%d,format=nv12,hwupload,scale_vaapi=w='%s':h=-2", fps, w),
 			"-c:v", "h264_vaapi", "-rc_mode", "QVBR", "-global_quality", strconv.Itoa(v.CRF))
 	} else if v.Codec == "av1" {
-		// SVT-AV1: ~30–50 % smaller than H.264 at the same quality; CRF only
-		// (maxrate is ignored), keyframe every 10 s for seeking.
+		// SVT-AV1: ~30–50 % smaller than H.264 at the same quality. A preset
+		// maxrate becomes capped CRF (mbr, kbps) so high-motion clips cannot
+		// blow the size; keyframe every 10 s for seeking.
 		args = append(args, "-vf", fmt.Sprintf("scale='%s':-2:flags=lanczos,fps=%d", w, fps),
 			"-c:v", "libsvtav1", "-pix_fmt", "yuv420p", "-crf", strconv.Itoa(v.CRF), "-preset", strconv.Itoa(svtPreset(v.Preset)),
 			"-g", strconv.Itoa(fps*10))
+		if sp := svtParams(e.cfg.AV1LP, v.Maxrate); sp != "" {
+			args = append(args, "-svtav1-params", sp)
+		}
 	} else {
 		args = append(args, "-vf", fmt.Sprintf("scale='%s':-2:flags=lanczos,fps=%d", w, fps),
 			"-c:v", "libx264", "-profile:v", "high", "-level", "4.1", "-pix_fmt", "yuv420p",
@@ -414,6 +422,35 @@ func errString(err error) string {
 }
 
 // svtPreset maps x264 preset names to SVT-AV1 presets (higher = faster).
+// svtParams builds -svtav1-params: level of parallelism and the capped-CRF
+// maximum bitrate from a maxrate like "900k" or "4M".
+func svtParams(lp int, maxrate string) string {
+	var p []string
+	if lp > 0 {
+		p = append(p, "lp="+strconv.Itoa(lp))
+	}
+	if kbps := bitrateKbps(maxrate); kbps > 0 {
+		p = append(p, "mbr="+strconv.Itoa(kbps))
+	}
+	return strings.Join(p, ":")
+}
+
+func bitrateKbps(s string) int {
+	s = strings.TrimSpace(strings.ToLower(s))
+	mul := 0.001
+	switch {
+	case strings.HasSuffix(s, "k"):
+		mul, s = 1, strings.TrimSuffix(s, "k")
+	case strings.HasSuffix(s, "m"):
+		mul, s = 1000, strings.TrimSuffix(s, "m")
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil || f <= 0 {
+		return 0
+	}
+	return int(f*mul + 0.5)
+}
+
 func svtPreset(x264 string) int {
 	switch x264 {
 	case "ultrafast":

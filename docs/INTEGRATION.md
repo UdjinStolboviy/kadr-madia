@@ -13,7 +13,7 @@ How a product (any web or mobile app with a backend) integrates with Kadr. Targe
 | **Visibility** | `public` (permanent CDN URL) or `private` (short-lived signed URL) |
 | **Webhook** | `POST https://<your-backend>/internal/kadr/webhook`, reachable from Kadr |
 
-Public URLs look like `https://cdn.example.com/acme/blb_…/main.avif`; private ones like `https://media.example.com/acme/blb_…/main.avif?exp=…&kid=…&sig=…`.
+Public URLs look like `https://cdn.example.com/acme/image/2026/11/blb_…/main-800x600.avif`; private ones like `https://media.example.com/acme/image/2026/11/blb_…/main-800x600.avif?exp=…&kid=…&sig=…`.
 
 ## 2. Setup checklist
 

@@ -26,7 +26,7 @@ func TestSignedURLsEndpoint(t *testing.T) {
 	expect(t, r, 200, "")
 	item := r.obj(t)["items"].([]any)[0].(map[string]any)
 	u, err := url.Parse(item["url"].(string))
-	if err != nil || u.Host != "media.example.com" || !strings.HasSuffix(u.Path, "/main.avif") {
+	if err != nil || u.Host != "media.example.com" || !strings.HasSuffix(u.Path, "/main-800x600.avif") {
 		t.Fatalf("url %v %v", item["url"], err)
 	}
 	q := u.Query()

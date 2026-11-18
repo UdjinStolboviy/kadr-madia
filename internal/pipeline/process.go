@@ -168,7 +168,7 @@ func (s *Service) runProcessImage(ctx context.Context, j *queue.Job) error {
 		}
 	}
 	for _, r := range out.files {
-		key := fmt.Sprintf("%s/%s/%s.%s", pc.project.Slug, blob.ID, r.name, r.format)
+		key := blobPrefix(pc.project.Slug, blob) + renditionFile(r)
 		if err := putFile(ctx, pc.tgt.driver, bucket, key, r.path, storage.PutOptions{
 			ContentType: renditionContentType(r.format), CacheControl: cacheControl, ContentDisposition: r.disposition,
 		}); err != nil {
@@ -201,7 +201,7 @@ func (s *Service) runProcessImage(ctx context.Context, j *queue.Job) error {
 		blob.TotalBytes += rd.Bytes
 	}
 	if out.retainOrigin {
-		key := fmt.Sprintf("originals/%s/%s.%s", pc.project.Slug, blob.ID, out.srcFormat)
+		key := originalKey(pc.project.Slug, blob, out.srcFormat)
 		if err := putFile(ctx, pc.tgt.driver, pc.tgt.profile.PrivateBucket, key, srcPath, storage.PutOptions{
 			ContentType: out.srcContentType, CacheControl: CacheControlPrivate,
 		}); err != nil {

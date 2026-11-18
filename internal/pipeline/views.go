@@ -157,7 +157,28 @@ func (s *Service) assetView(ctx context.Context, store *db.Store, a *db.Asset) (
 		}
 		v.Renditions = append(v.Renditions, rv)
 	}
+	v.Poster = pickPoster(v.Renditions)
 	return v, nil
+}
+
+// pickPoster returns the video poster rendition (AVIF preferred, the WebP
+// fallback otherwise), or nil. It is also listed in renditions.
+func pickPoster(rs []RenditionView) *RenditionView {
+	var found *RenditionView
+	for i := range rs {
+		if rs[i].Name != "poster" {
+			continue
+		}
+		if rs[i].Format == "avif" {
+			p := rs[i]
+			return &p
+		}
+		if found == nil {
+			p := rs[i]
+			found = &p
+		}
+	}
+	return found
 }
 
 // PresetView is a preset as returned by GET /v1/presets.

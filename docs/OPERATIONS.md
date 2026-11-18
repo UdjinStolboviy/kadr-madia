@@ -61,6 +61,7 @@ KADR_POOL_IMAGE=2
 KADR_POOL_VIDEO=1
 KADR_POOL_FILE=1                         # document jobs (PDF optimisation)
 KADR_VIDEO_HW=auto                       # auto | vaapi | off
+KADR_VIDEO_AV1_LP=0                      # SVT-AV1 parallelism for AV1 presets; 2 on hosts with ≤ 2 GB RAM
 KADR_EDGE_BASE_URL=https://media.example.com   # private delivery host (kadr-edge) for POST /v1/signed-urls
 KADR_WEBAUTHN_RP_ID=admin.example.com           # passkeys: relying party id (host of the admin UI)
 KADR_WEBAUTHN_ORIGINS=https://admin.example.com # passkeys: allowed origins, comma separated

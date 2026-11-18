@@ -128,7 +128,7 @@ func cmdServe(ctx context.Context, args []string, stderr io.Writer) error {
 	imgEngine := newImageEngine(cfg.PoolImage, *fakeEngine, log)
 	playground, _ := imgEngine.(admin.PlaygroundEngine)
 	svc := pipeline.New(pipeline.Config{
-		Store: store, Queue: q, Engine: imgEngine, Video: newVideoEngine(log), File: newFileEngine(log), EdgeBaseURL: cfg.EdgeBaseURL, Keyring: keyring,
+		Store: store, Queue: q, Engine: imgEngine, Video: newVideoEngine(log, cfg.VideoAV1LP), File: newFileEngine(log), EdgeBaseURL: cfg.EdgeBaseURL, Keyring: keyring,
 		Logger: log, Metrics: set, TmpDir: cfg.TmpDir, Webhooks: dispatcher,
 	})
 	if n, err := svc.EnsureModePresets(ctx); err != nil {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/UdjinStolboviy/kadr-madia/internal/engine/video"
@@ -58,6 +59,9 @@ func TestVideoUploadEndToEnd(t *testing.T) {
 			if enc := rv["encoder"]; enc != "libx264" && enc != "h264_vaapi" {
 				t.Fatalf("encoder not recorded: %v", enc)
 			}
+			if k, _ := rv["url"].(string); !strings.HasSuffix(k, "/main-480p-h264.mp4") || !strings.Contains(k, "/video/") {
+				t.Fatalf("video key: %v", rv["url"])
+			}
 		case rv["name"] == "poster":
 			poster++
 		}
@@ -67,6 +71,9 @@ func TestVideoUploadEndToEnd(t *testing.T) {
 	}
 	if a["placeholder"] == nil {
 		t.Fatal("no placeholder")
+	}
+	if p, _ := a["poster"].(map[string]any); p == nil || p["format"] != "avif" || p["name"] != "poster" {
+		t.Fatalf("poster: %v", a["poster"])
 	}
 }
 

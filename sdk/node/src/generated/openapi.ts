@@ -642,10 +642,10 @@ export interface components {
             height: number | null;
             /**
              * Format: uri
-             * @example https://cdn.example.com/acme/blb_01jd8x3k2m4n5p6q7r8s9t0v1w/main.avif
+             * @example https://cdn.example.com/acme/image/2026/11/blb_01jd8x3k2m4n5p6q7r8s9t0v1w/main-800x600.avif
              */
             url?: string;
-            /** @example acme/blb_01jd8x3k2m4n5p6q7r8s9t0v1w/main.avif */
+            /** @example acme/image/2026/11/blb_01jd8x3k2m4n5p6q7r8s9t0v1w/main-800x600.avif */
             key?: string;
             /**
              * @description Video renditions: the encoder that produced the file. `libx264` on a VAAPI host means the hardware encode fell back to software; `libsvtav1` means the video is AV1.

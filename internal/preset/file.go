@@ -42,6 +42,8 @@ type FileThumb struct {
 	Enabled  bool `json:"enabled"`
 	MaxSide  int  `json:"maxSide"`
 	MaxBytes int  `json:"maxBytes"`
+	// Formats as for video posters: empty means avif + webp.
+	Formats []string `json:"formats,omitempty"`
 }
 
 // DefaultFileFormats are the document formats accepted by the built-in presets.

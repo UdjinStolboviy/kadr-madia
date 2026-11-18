@@ -162,7 +162,7 @@ sequenceDiagram
 
 ### 5.2 Public delivery
 
-`https://cdn.<domain>/{project}/{blobId}/{rendition}.{ext}` — R2 Custom Domain, Cloudflare cache, `immutable`. The SDK renders `<picture>` with AVIF and WebP, so no Worker is needed on the public path (no Worker invocation cost).
+`https://cdn.<domain>/{project}/{kind}/{yyyy}/{mm}/{blobId}/{file}` (DATA_MODEL.md §R2 object keys) — R2 Custom Domain, Cloudflare cache, `immutable`. The SDK renders `<picture>` with AVIF and WebP, so no Worker is needed on the public path (no Worker invocation cost).
 
 ### 5.3 Private delivery
 
@@ -217,7 +217,7 @@ stateDiagram-v2
 
 | Bucket | Access | Contents | Lifecycle |
 |---|---|---|---|
-| `kadr-public` | Custom Domain `cdn.<domain>` | Public renditions `{project}/{blobId}/…` | — |
+| `kadr-public` | Custom Domain `cdn.<domain>` | Public renditions `{project}/{kind}/{yyyy}/{mm}/{blobId}/…` | — |
 | `kadr-private` | Closed; reads only via Worker binding or presigned GET | `tmp/…` sources, private renditions, originals (if the preset keeps them) | `tmp/` 1 day, abort multipart 1 day, `originals/` per policy |
 | `kadr-system` | Closed, separate token | Litestream replica, exports | Versions 30 days |
 
