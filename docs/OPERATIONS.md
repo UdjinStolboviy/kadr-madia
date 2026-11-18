@@ -68,7 +68,13 @@ KADR_TELEGRAM_BOT_TOKEN=…                # built-in alerts (optional)
 KADR_TELEGRAM_CHAT_ID=…
 KADR_CF_ACCOUNT_ID=…                     # to publish keys to kadr-edge
 KADR_CF_API_TOKEN=…                      # scope: Workers Scripts:Edit (this Worker only)
-KADR_ADMIN_PUBLIC_URL=https://admin.example.com # external admin URL: MCP setup snippets, approval notification links
+KADR_ADMIN_PUBLIC_URL=https://admin.example.com # external admin URL: MCP/OAuth issuer, setup snippets, notification links
+KADR_CF_ACCESS_TEAM_DOMAIN=myteam.cloudflareaccess.com # verify Cloudflare Access JWTs on the admin listener (optional)
+KADR_CF_ACCESS_AUD=…                     # Access application AUD tag(s), comma separated
+# KADR_CF_ACCESS_EXEMPT=/healthz,/readyz,/mcp,/admin/mcp,/oauth/token,/oauth/register,/.well-known/
+ANTHROPIC_API_KEY=…                      # AI moderation (Claude vision) and scheduled agent runs (optional)
+# KADR_AI_MODEL=claude-opus-5-5
+# KADR_AI_CLASSIFIER_URL=http://127.0.0.1:9100/classify  # self-hosted moderation classifier instead of Claude
 KADR_LOG_LEVEL=info
 ```
 
@@ -134,6 +140,7 @@ Migrations are forward-only and backward compatible with the previous version (e
   - tmp free space < 5 GB;
   - Litestream lag > 60 s;
   - dead webhooks > 0.
+- AI: `kadr_ai_moderations_total{status}`, `kadr_ai_moderation_errors_total`, `kadr_ai_moderation_seconds`, `kadr_ai_agent_runs_total{status}`; jobs `ai.moderate` / `ai.agent_run` run in pool `ai` (concurrency 2), `ai.tick` every minute in `maintenance`.
 - AI agents: a pending approval sends a Telegram message (same bot); agent actions are in the audit log (`actor_type=agent`). Emergency stop: admin → AI agents → turn off agent access.
 - Logs: JSON in journald (`journalctl -u kadr -o cat | jq`), `request_id`/`job_id`/`asset_id` on every record.
 

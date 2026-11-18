@@ -53,7 +53,7 @@ type RenditionView struct {
 	Height *int64 `json:"height"`
 	URL    string `json:"url,omitempty"`
 	Key    string `json:"key,omitempty"`
-	// Encoder is the video encoder that produced the rendition (h264_vaapi | libx264).
+	// Encoder is the video encoder that produced the rendition (h264_vaapi | libx264 | libsvtav1).
 	Encoder string `json:"encoder,omitempty"`
 }
 

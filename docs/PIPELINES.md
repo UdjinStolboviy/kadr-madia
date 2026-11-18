@@ -65,6 +65,8 @@ flowchart LR
   J --> K --> L[asset.ready]
 ```
 
+**Why two files (`main.avif` and `main.webp`) per image:** they are not duplicates but two encodings of the same rendition. AVIF is ~20–30 % smaller; WebP is the fallback for clients without AVIF (older Safari/iOS < 16, some in-app browsers, e-mail clients). Serve them with `<picture><source type="image/avif" srcset="…main.avif"><img src="…main.webp"></picture>`. Both are byte-budgeted, so the pair typically costs ~2× a few KB. If every client of a product supports AVIF, remove the `webp` output from the preset (preset editor → outputs) and only `main.avif` is stored; likewise a WebP-only preset is valid. Video posters follow the same rule (`poster.avif` + `poster.webp`).
+
 **Why an intermediate `.v`:** decoding and resizing (the expensive part) happen once; encoding at different qualities works on an already small raster and takes tens of milliseconds.
 
 ### Budget encoding algorithm
@@ -171,10 +173,23 @@ A video preset with `"hls": true` additionally produces an adaptive package next
 
 **Private assets.** A per-object signature cannot work for HLS (a player requests dozens of segment URLs it derives from the playlist, without the query string). For a rendition of format `m3u8`, `POST /v1/sign-urls` therefore returns a directory-scoped URL: `...master.m3u8?exp=&kid=&sig=&prefix=1`, where `sig` signs the canonical string `GETP\n/{dir}/\n{exp}\n` (distinct from the per-object `GET\n/{key}\n{exp}\n{download}` form, which is unchanged). kadr-edge authorizes any object directly inside `{dir}/` for such a request and rewrites relative URIs in playlists to carry the same `exp/kid/sig/prefix`, so unmodified players (hls.js, Safari) work. Consequences: one URL grants the whole package until `exp`; `download` is ignored; the playlist is rewritten per request and not cached at the edge; the Node SDK has no helper for the prefix form yet (use `sign-urls`).
 
+### AV1 (`"codec": "av1"`, opt-in)
+
+`video.codec` is `h264` (default) or `av1`. AV1 is encoded with SVT-AV1 (`libsvtav1`) in software into the same MP4 container (`main.mp4`, faststart) and is typically **30–50 % smaller than H.264 at the same visual quality**. Trade-offs, which is why it is not the default:
+
+- Playback: Chrome, Edge, Firefox, Android 10+ and Safari 17+ **only on devices with an AV1 hardware decoder** (iPhone 15 Pro and newer, Apple M3 and newer). Older iPhones/iPads cannot play it — use AV1 only where you control the clients, or keep an H.264 preset for them.
+- Encoding is slower than x264 on CPU (`video.preset` maps to SVT presets: `slow` → 6, `fast` → 8, `veryfast` → 10); VAAPI is not used.
+- CRF range 14–63 (good starting points: 30 compact, 26 balanced, 22 quality); `maxrate`/`bufsize` are ignored; `hls: true` requires H.264.
+- The rendition's `encoder` field reads `libsvtav1`, so the product can emit `<source type='video/mp4; codecs="av01.0.05M.08"'>`.
+
+```json
+"video": { "codec": "av1", "maxWidth": 1280, "fps": 30, "crf": 32, "preset": "slow" }
+```
+
 ### Later (M5)
 
 - Timeline sprites (VTT) and a 3-second silent preview.
-- AV1 (SVT-AV1) as an extra rendition for long-form content.
+- AV1 + H.264 fallback pair in one preset (two MP4 renditions) for mixed audiences.
 
 ## 4. Quality assurance
 

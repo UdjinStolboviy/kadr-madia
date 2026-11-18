@@ -41,7 +41,13 @@ type Config struct {
 	CFWorkerName    string   // KADR_CF_WORKER_NAME (default kadr-edge)
 	WebAuthnRPID    string   // KADR_WEBAUTHN_RP_ID (default localhost in dev; empty disables passkeys)
 	WebAuthnOrigins []string // KADR_WEBAUTHN_ORIGINS, comma separated
-	AdminPublicURL  string   // KADR_ADMIN_PUBLIC_URL — external admin URL (MCP endpoint, notification links)
+	AdminPublicURL  string   // KADR_ADMIN_PUBLIC_URL — external admin URL (MCP endpoint, OAuth issuer, notification links)
+	CFAccessTeam    string   // KADR_CF_ACCESS_TEAM_DOMAIN — e.g. myteam.cloudflareaccess.com; enables Access JWT checks
+	CFAccessAUD     []string // KADR_CF_ACCESS_AUD — Application Audience tag(s), comma separated
+	CFAccessExempt  []string // KADR_CF_ACCESS_EXEMPT — path prefixes served without an Access token
+	AnthropicAPIKey string   // ANTHROPIC_API_KEY — enables AI moderation and scheduled agent runs
+	AIModel         string   // KADR_AI_MODEL (default claude-opus-5-5)
+	AIClassifierURL string   // KADR_AI_CLASSIFIER_URL — external moderation classifier (instead of Claude)
 	LogLevel        slog.Level
 	Dev             bool
 }
@@ -99,6 +105,16 @@ func Load(getenv Getenv) (*Config, error) {
 	}
 	setStr(&c.EdgeBaseURL, strings.TrimRight(getenv("KADR_EDGE_BASE_URL"), "/"))
 	setStr(&c.AdminPublicURL, strings.TrimRight(getenv("KADR_ADMIN_PUBLIC_URL"), "/"))
+	setStr(&c.CFAccessTeam, strings.TrimSpace(getenv("KADR_CF_ACCESS_TEAM_DOMAIN")))
+	c.CFAccessAUD = splitList(getenv("KADR_CF_ACCESS_AUD"))
+	c.CFAccessExempt = []string{"/healthz", "/readyz", "/mcp", "/admin/mcp", "/oauth/token", "/oauth/register", "/.well-known/"}
+	if v := splitList(getenv("KADR_CF_ACCESS_EXEMPT")); v != nil {
+		c.CFAccessExempt = v
+	}
+	setStr(&c.AnthropicAPIKey, strings.TrimSpace(getenv("ANTHROPIC_API_KEY")))
+	c.AIModel = "claude-opus-5-5"
+	setStr(&c.AIModel, strings.TrimSpace(getenv("KADR_AI_MODEL")))
+	setStr(&c.AIClassifierURL, strings.TrimSpace(getenv("KADR_AI_CLASSIFIER_URL")))
 
 	if p := getenv("KADR_API_KEY_PEPPER"); p != "" {
 		c.APIKeyPepper = []byte(p)
@@ -165,6 +181,9 @@ func (c *Config) Validate() error {
 	if c.TmpDir == "" {
 		errs = append(errs, errors.New("KADR_TMP_DIR is not set"))
 	}
+	if (c.CFAccessTeam == "") != (len(c.CFAccessAUD) == 0) {
+		errs = append(errs, errors.New("set both KADR_CF_ACCESS_TEAM_DOMAIN and KADR_CF_ACCESS_AUD, or neither"))
+	}
 	if len(errs) > 0 {
 		return fmt.Errorf("config: %w", errors.Join(errs...))
 	}
@@ -203,4 +222,15 @@ func intEnv(getenv Getenv, name string, def int) (int, error) {
 		return 0, fmt.Errorf("config: %s must be a positive integer, got %q", name, v)
 	}
 	return n, nil
+}
+
+// splitList splits a comma separated value, dropping empty items (nil when empty).
+func splitList(v string) []string {
+	var out []string
+	for _, x := range strings.Split(v, ",") {
+		if x = strings.TrimSpace(x); x != "" {
+			out = append(out, x)
+		}
+	}
+	return out
 }

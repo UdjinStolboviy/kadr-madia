@@ -33,7 +33,8 @@ export const loginRoute = createRoute({
   beforeLoad: async ({ context, search }) => {
     // Already signed in → skip the login form.
     const me = await context.queryClient.fetchQuery(meQuery).catch(() => null);
-    if (me) throw redirect({ to: search.redirect ?? "/" });
+    // href (not to): the saved location may carry a query string, e.g. /oauth/consent?grant=…
+    if (me) throw redirect({ href: search.redirect ?? "/" });
   },
   component: lazyRouteComponent(() => import("@/routes/login")),
 });
@@ -138,8 +139,8 @@ const playgroundRoute = createRoute({
   component: lazyRouteComponent(() => import("@/routes/playground")),
 });
 
-export type AgentsTab = "agents" | "approvals" | "activity";
-const AGENT_TABS: AgentsTab[] = ["agents", "approvals", "activity"];
+export type AgentsTab = "agents" | "approvals" | "schedules" | "activity";
+const AGENT_TABS: AgentsTab[] = ["agents", "approvals", "schedules", "activity"];
 
 const agentsRoute = createRoute({
   getParentRoute: () => appRoute,
@@ -162,6 +163,14 @@ const moderationRoute = createRoute({
   component: lazyRouteComponent(() => import("@/routes/moderation")),
 });
 
+const oauthConsentRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/oauth/consent",
+  validateSearch: (s: Record<string, unknown>): { grant?: string } =>
+    typeof s.grant === "string" && s.grant ? { grant: s.grant } : {},
+  component: lazyRouteComponent(() => import("@/routes/oauth-consent")),
+});
+
 const routeTree = rootRoute.addChildren([
   loginRoute,
   appRoute.addChildren([
@@ -177,6 +186,7 @@ const routeTree = rootRoute.addChildren([
     auditRoute,
     agentsRoute,
     moderationRoute,
+    oauthConsentRoute,
   ]),
 ]);
 

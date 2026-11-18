@@ -1,6 +1,7 @@
 package video
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -182,5 +183,31 @@ func TestVideoModesAreOrdered(t *testing.T) {
 	}
 	if widths[preset.ModeCompact] != 854 || widths[preset.ModeBalanced] != 1280 || widths[preset.ModeQuality] != 1920 {
 		t.Fatalf("widths: %v", widths)
+	}
+}
+
+func TestTranscodeAV1(t *testing.T) {
+	e := engine(t)
+	if out, _ := exec.Command("ffmpeg", "-hide_banner", "-encoders").Output(); !bytes.Contains(out, []byte("libsvtav1")) {
+		t.Skip("ffmpeg without libsvtav1")
+	}
+	dir := t.TempDir()
+	src := gen(t, dir, "in.mp4", "-f", "lavfi", "-i", "sine=f=440:d=3", "-c:v", "libx264", "-c:a", "aac", "-shortest")
+	p := videoParams(t)
+	p.Video.Codec, p.Video.CRF = "av1", 38
+	info, err := e.Probe(context.Background(), src, p.Limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := e.Transcode(context.Background(), info, p, dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Encoder != "libsvtav1" || out.HWFallback || out.Width != 1280 {
+		t.Fatalf("out %+v", out)
+	}
+	got, err := e.Probe(context.Background(), out.VideoPath, preset.VideoLimits{})
+	if err != nil || got.VideoCodec != "av1" {
+		t.Fatalf("output codec %q %v", got.VideoCodec, err)
 	}
 }

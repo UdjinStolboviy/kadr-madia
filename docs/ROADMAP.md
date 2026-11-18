@@ -61,7 +61,10 @@ Estimates assume one full-time engineer working with AI agents.
 - Agent tokens with levels read / edit / full, owner-granted sensitive permissions, project scope, IP allowlist, expiry, rotation.
 - One permission table for every Admin API route; approvals (human in the loop) with encrypted held requests; deletion budget, rate limits, kill switch; reason + tool in the audit log.
 - Moderation decisions (`asset_moderation`, `asset.moderated` webhook) and image previews for vision models.
-- Next: OAuth 2.1 for one-click MCP connectors; per-agent activity analytics; scheduled agent runs (nightly moderation / health reports).
+- OAuth 2.1 authorization server for MCP (discovery, dynamic registration, PKCE, consent in the admin, refresh rotation) — claude.ai connectors.
+- AI moderation per project (Claude vision or a self-hosted classifier, `flag_only` / `decide`), scheduled and ad-hoc agent runs with Telegram reports.
+- Cloudflare Access JWT verification on the admin listener; opt-in AV1 (SVT-AV1) video codec.
+- Next: per-agent activity analytics; AV1 + H.264 pair in one preset.
 
 ## M5 — Scale & SaaS-ready (as needed)
 

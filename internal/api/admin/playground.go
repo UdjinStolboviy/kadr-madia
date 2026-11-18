@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -367,8 +368,11 @@ func validateVideoParams(v *preset.VideoParams) string {
 	if v.Video.Codec == "" {
 		v.Video.Codec = "h264"
 	}
-	if v.Video.Codec != "h264" {
-		return "video.codec must be h264"
+	if v.Video.Codec != "h264" && v.Video.Codec != "av1" {
+		return `video.codec must be "h264" or "av1"`
+	}
+	if v.Video.Codec == "av1" && v.HLS {
+		return "HLS is produced with H.264 only; use codec h264 with hls"
 	}
 	if v.Video.MaxWidth < 160 || v.Video.MaxWidth > 4096 {
 		return "video.maxWidth must be 160–4096"
@@ -376,8 +380,8 @@ func validateVideoParams(v *preset.VideoParams) string {
 	if v.Video.FPS < 1 || v.Video.FPS > 60 {
 		return "video.fps must be 1–60"
 	}
-	if v.Video.CRF < 14 || v.Video.CRF > 40 {
-		return "video.crf must be 14–40"
+	if maxCRF := map[string]int{"h264": 40, "av1": 63}[v.Video.Codec]; v.Video.CRF < 14 || v.Video.CRF > maxCRF {
+		return fmt.Sprintf("video.crf must be 14–%d for %s", maxCRF, v.Video.Codec)
 	}
 	if v.Video.Maxrate != "" && !bitrateRe.MatchString(v.Video.Maxrate) {
 		return `video.maxrate must look like "900k" or "4M"`

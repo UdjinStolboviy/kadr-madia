@@ -37,7 +37,7 @@ func (s *Server) mcpHandler() http.Handler {
 		Authenticate: func(w http.ResponseWriter, r *http.Request) (context.Context, *mcp.Catalog, bool) {
 			secret, ok := bearerToken(r)
 			if !ok || !strings.HasPrefix(secret, "kd_agent_") {
-				w.Header().Set("WWW-Authenticate", `Bearer realm="kadr", error="invalid_token", error_description="send an agent token issued in the Kadr admin (AI agents)"`)
+				w.Header().Set("WWW-Authenticate", `Bearer realm="kadr", resource_metadata="`+s.issuer(r)+`/.well-known/oauth-protected-resource/mcp"`)
 				httpx.WriteProblem(w, http.StatusUnauthorized, "unauthenticated", "an agent token is required (Authorization: Bearer kd_agent_…)")
 				return nil, nil, false
 			}
@@ -46,7 +46,7 @@ func (s *Server) mcpHandler() http.Handler {
 				var p *problem
 				if errors.As(err, &p) {
 					if p.status == http.StatusUnauthorized {
-						w.Header().Set("WWW-Authenticate", `Bearer realm="kadr", error="invalid_token"`)
+						w.Header().Set("WWW-Authenticate", `Bearer realm="kadr", error="invalid_token", resource_metadata="`+s.issuer(r)+`/.well-known/oauth-protected-resource/mcp"`)
 					}
 					httpx.WriteProblem(w, p.status, p.code, p.detail)
 					return nil, nil, false

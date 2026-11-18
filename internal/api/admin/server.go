@@ -19,6 +19,7 @@ import (
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/go-chi/chi/v5"
 
+	"github.com/UdjinStolboviy/kadr-madia/internal/ai"
 	"github.com/UdjinStolboviy/kadr-madia/internal/api/httpx"
 	"github.com/UdjinStolboviy/kadr-madia/internal/auth"
 	"github.com/UdjinStolboviy/kadr-madia/internal/capabilities"
@@ -27,6 +28,7 @@ import (
 	"github.com/UdjinStolboviy/kadr-madia/internal/edgepublish"
 	"github.com/UdjinStolboviy/kadr-madia/internal/observability"
 	"github.com/UdjinStolboviy/kadr-madia/internal/pipeline"
+	"github.com/UdjinStolboviy/kadr-madia/internal/queue"
 	"github.com/UdjinStolboviy/kadr-madia/internal/storage"
 	"github.com/UdjinStolboviy/kadr-madia/internal/webhook"
 )
@@ -72,6 +74,15 @@ type Config struct {
 	// WebAuthnRPID / WebAuthnOrigins configure passkeys (empty → disabled, 503).
 	WebAuthnRPID    string
 	WebAuthnOrigins []string
+	// AI is the Claude client for scheduled agent runs (optional).
+	AI *ai.Client
+	// Classifier moderates assets automatically (optional; Claude or self-hosted).
+	Classifier ai.Classifier
+	// Queue enqueues AI jobs (optional; required for AI features).
+	Queue *queue.Queue
+	// AccessGuard verifies Cloudflare Access tokens on the admin listener
+	// (optional; see internal/cfaccess).
+	AccessGuard func(http.Handler) http.Handler
 	// Notifier alerts operators about agent actions waiting for approval
 	// (optional, e.g. Telegram).
 	Notifier Notifier
@@ -180,7 +191,11 @@ func (s *Server) buildHandler() http.Handler {
 
 	r.Get("/healthz", observability.Healthz)
 	r.Get("/readyz", observability.Readyz(s.log, map[string]observability.Pinger{"db": s.store.DB()}))
+	if s.cfg.AccessGuard != nil {
+		r.Use(s.cfg.AccessGuard)
+	}
 	r.Mount("/admin/api", s.apiRouter())
+	s.oauthRoutes(r)
 	mcpSrv := s.mcpHandler()
 	r.Handle("/mcp", mcpSrv)
 	r.Handle("/admin/mcp", mcpSrv)

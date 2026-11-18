@@ -160,7 +160,7 @@ The fetch is SSRF-safe: http/https only, no credentials in the URL, ports 80/443
 }
 ```
 
-- `renditions[].encoder` (video renditions): the encoder that produced the file, `h264_vaapi` or `libx264` — `libx264` on a VAAPI host means the hardware encode failed and fell back to software.
+- `renditions[].encoder` (video renditions): the encoder that produced the file: `h264_vaapi` or `libx264` (H.264; `libx264` on a VAAPI host means the hardware encode fell back to software) or `libsvtav1` (AV1 presets, see PIPELINES.md).
 - `status`: `processing` → `ready` | `failed`. `deleted` appears only in `asset.deleted` webhook payloads.
 - `kind`: `image` or `video` (only image presets are processed in this version).
 - `original.filename`, `original.content_type`, `width`, `height`, `placeholder` (and its fields), `duration_sec`, `poster`, `savings_ratio` and `ready_at` may be `null`. `content_type` is the declared type until processing detects the real one.

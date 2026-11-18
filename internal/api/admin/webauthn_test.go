@@ -46,7 +46,11 @@ func (k *softKey) register(t *testing.T, options map[string]any, origin string) 
 	t.Helper()
 	pk := options["publicKey"].(map[string]any)
 	cd := clientData("webauthn.create", pk["challenge"].(string), origin)
-	x, y := k.priv.PublicKey.X.FillBytes(make([]byte, 32)), k.priv.PublicKey.Y.FillBytes(make([]byte, 32))
+	raw, err := k.priv.PublicKey.Bytes() // uncompressed point: 0x04 || X || Y
+	if err != nil {
+		t.Fatal(err)
+	}
+	x, y := raw[1:33], raw[33:65]
 	cose, err := cbor.Marshal(map[int]any{1: 2, 3: -7, -1: 1, -2: x, -3: y})
 	if err != nil {
 		t.Fatal(err)

@@ -42,11 +42,12 @@ type env struct {
 	admin    http.Handler
 	public   http.Handler
 	webhooks *webhook.Dispatcher
+	srv      *Server
 }
 
 func newEnv(t *testing.T, ui fstest.MapFS) *env { return newEnvDev(t, ui, true) }
 
-func newEnvDev(t *testing.T, ui fstest.MapFS, dev bool) *env {
+func newEnvDev(t *testing.T, ui fstest.MapFS, dev bool, mutate ...func(*Config)) *env {
 	t.Helper()
 	ctx := context.Background()
 	d, err := db.Open(ctx, filepath.Join(t.TempDir(), "kadr.db"))
@@ -81,9 +82,13 @@ func newEnvDev(t *testing.T, ui fstest.MapFS, dev bool) *env {
 	if ui != nil {
 		cfg.UI = ui
 	}
+	for _, m := range mutate {
+		m(&cfg)
+	}
 	pub := public.Handler(public.Config{Store: store, Logger: log, Metrics: set,
 		Verifier: &auth.KeyVerifier{Store: store, Pepper: testPepper}})
-	return &env{t: t, store: store, admin: New(cfg).Handler(), public: pub, webhooks: disp}
+	srv := New(cfg)
+	return &env{t: t, store: store, admin: srv.Handler(), public: pub, webhooks: disp, srv: srv}
 }
 
 type client struct {

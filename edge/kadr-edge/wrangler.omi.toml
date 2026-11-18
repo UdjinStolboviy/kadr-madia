@@ -1,0 +1,10 @@
+name = "kadr-edge-omi"
+main = "src/worker.ts"
+compatibility_date = "2025-01-01"
+workers_dev = false
+
+routes = [{ pattern = "media.omi.kim", custom_domain = true }]
+
+[[r2_buckets]]
+binding = "PRIVATE"
+bucket_name = "omi-private"

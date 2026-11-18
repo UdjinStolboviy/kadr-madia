@@ -114,13 +114,26 @@ For clients that only start local (stdio) servers, use the bridge built into the
 }
 ```
 
+### OAuth (claude.ai connectors and other OAuth-capable clients)
+
+Kadr is also an OAuth 2.1 authorization server for MCP, so a client can connect without pasting a token:
+
+1. Add a custom connector with the URL `https://admin.example.com/mcp` (claude.ai → Settings → Connectors, or any MCP client that supports OAuth).
+2. The client discovers `/.well-known/oauth-protected-resource/mcp` and `/.well-known/oauth-authorization-server`, registers itself (`POST /oauth/register`, RFC 7591, public clients with PKCE S256) and opens `/oauth/authorize` in your browser.
+3. You sign in to the admin. The consent screen shows the application, its redirect host and the requested scope (`kadr:read|edit|full`). You choose the level, projects, approval mode and the other limits — the same form as for manual tokens. **Approve** issues an agent token marked *OAuth* under AI agents; **Deny** returns `access_denied`.
+4. `POST /oauth/token` exchanges the code (single use, 2 minutes, PKCE verified) for `access_token` (an agent token) and `refresh_token`. Each refresh rotates both. Revoking the agent in the admin invalidates both immediately.
+
+Redirect URIs must be `https://…` (or `http://localhost` for native apps). For claude.ai the Kadr admin must be reachable from the internet over HTTPS (`KADR_ADMIN_PUBLIC_URL`), with `/mcp`, `/oauth/token`, `/oauth/register` and `/.well-known/` published past Cloudflare Access; `/oauth/authorize` and the consent page stay behind it.
+
 ### Cloudflare Access
 
 The admin listener sits behind Cloudflare Access. Pick one option:
 - **Service token (recommended):** create an Access *Service Token* and add a policy for it on the admin application (action *Service Auth*). The client then sends `CF-Access-Client-Id` and `CF-Access-Client-Secret` alongside the bearer token. With `kadr mcp-bridge`, pass `--cf-client-id` / `--cf-client-secret` (or `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET`).
 - **Bypass for the MCP path:** create a separate Access application for the path `/mcp` with a *Bypass* policy restricted to known IP ranges. The agent token then protects the endpoint on its own, so also set the token's IP allowlist.
 
-Set `KADR_ADMIN_PUBLIC_URL=https://admin.example.com` so that setup snippets and notifications show the public URL.
+Set `KADR_ADMIN_PUBLIC_URL=https://admin.example.com` so that setup snippets, OAuth metadata and notifications show the public URL.
+
+**Origin protection.** With `KADR_CF_ACCESS_TEAM_DOMAIN` (e.g. `myteam.cloudflareaccess.com`) and `KADR_CF_ACCESS_AUD` (the application's AUD tag), Kadr verifies the `Cf-Access-Jwt-Assertion` header (RS256, team keys, issuer, audience, expiry) on every admin request and answers `403 access_required` otherwise. Exempt paths default to `/healthz,/readyz,/mcp,/admin/mcp,/oauth/token,/oauth/register,/.well-known/` (override with `KADR_CF_ACCESS_EXEMPT`); they must match the paths you publish with a Bypass policy.
 
 ## Tools
 
@@ -154,6 +167,27 @@ Kadr is not on the read path, so moderation is a **decision that the product enf
 
 Admin API: `GET /projects/{id}/moderation?status=unreviewed|approved|flagged|rejected|all`, `GET|PUT /projects/{id}/assets/{asset_id}/moderation`, `GET /projects/{id}/assets/{asset_id}/preview?width=`.
 
+## AI moderation (automatic)
+
+Each project can have new assets moderated automatically (admin → Moderation → *Automatic AI moderation*):
+
+- **Classifier:** Claude vision (`ANTHROPIC_API_KEY`, model `KADR_AI_MODEL`, default `claude-opus-5-5`) or a self-hosted model (`KADR_AI_CLASSIFIER_URL`, e.g. an open-source NSFW classifier behind a small HTTP service; request `{image_base64, mime_type, policy}`, response `{status, labels, note, confidence}`). The self-hosted classifier takes precedence for moderation when both are set — choose it when images must not leave your infrastructure.
+- **Policy:** free text per project (a sensible default is filled in).
+- **Mode:** `flag_only` (default) — the AI approves or flags, never rejects; `decide` — it may reject.
+- **Scope:** kinds `image`, `video` (poster frame), `file` (document thumbnail). Only assets created after enabling are queued (every minute, pool `ai`); *Review backlog* queues up to 1000 existing unreviewed assets.
+- Decisions are ordinary moderation records (`actor_type: system`, `actor_id: claude:<model>` or `http:<url>`), emit `asset.moderated`, are audited with the confidence, and never overwrite a decision a human or agent already made.
+- Refusals by the model become `flagged` with label `ai_refused`. Metrics: `kadr_ai_moderations_total{status}`, `kadr_ai_moderation_errors_total`, `kadr_ai_moderation_seconds`.
+- **Privacy:** with Claude, a preview (≤ 1024 px) of each moderated asset is sent to the Anthropic API. Mention it in your processing records; use the self-hosted classifier otherwise.
+
+## Scheduled runs
+
+Kadr can run Claude itself, on a schedule or on demand, with the MCP tools of an agent token (admin → AI agents → *Schedules*). Requires `ANTHROPIC_API_KEY`.
+
+- A schedule = agent token + prompt + frequency (`hourly` at minute MM, `daily` at HH:MM UTC, `weekly` on a weekday) + max turns + Telegram report on/off.
+- **The run has exactly the token's permissions:** its project scope, approval mode (held actions wait in Approvals and are listed in the report), deletion budget and rate limits. Tool calls are audited with the run id; the run itself as `agent.run`.
+- Templates in the UI: nightly moderation, morning health report, weekly cost review. Give report-only schedules a `read` token.
+- History: `GET /agent-runs` (status, report, tool calls, tokens, model). A run that cannot start (token revoked, agents switched off) fails with a reason. Runs are limited to 30 minutes and the configured turns.
+
 ## Prompt injection
 
 File names, metadata, image content and webhook payloads come from end users. An agent that reads them and also holds delete rights is an attack surface. Kadr limits the damage:
@@ -179,5 +213,14 @@ Give moderation agents `edit` (they can flag, not delete) and keep `full` for su
 | GET | `/admin/api/agent/me` | agent | own identity and permissions |
 | GET | `/admin/api/agent/approvals[/{id}]` | agent | own held requests and their results |
 | GET | `/admin/api/audit?actor_type=agent&actor_id=` | any | agent activity |
+| GET / POST | `/admin/api/agent-schedules` | view / owner/admin | schedules (POST: `{name, agent_id, prompt, frequency, time_utc, weekday, max_turns, notify, enabled}`) |
+| PATCH / DELETE | `/admin/api/agent-schedules/{id}` | owner/admin | change, remove |
+| POST | `/admin/api/agent-schedules/{id}/run` | owner/admin | run now → `202 run` |
+| GET / POST | `/admin/api/agent-runs` | view / owner/admin | history; POST `{agent_id, prompt}` starts an ad-hoc run |
+| GET | `/admin/api/agent-runs/{id}` | any admin | one run with its report |
+| GET / PUT | `/admin/api/projects/{id}/moderation/settings` | `assets:read` / `projects:write` | `{settings: {enabled, policy, mode, kinds, since}, ai}` |
+| POST | `/admin/api/projects/{id}/moderation/backlog` | `moderation:write` | queue unreviewed assets → `202 {queued}` |
+| GET | `/admin/api/ai/status` | `system:read` | `{available, classifier, agent_runs, model}` |
+| GET | `/admin/api/oauth/grants/{id}` · POST `/approve` · `/deny` | owner/admin | OAuth consent |
 
 Error codes: `insufficient_scope` (403), `project_not_allowed` (403), `agents_disabled` (403), `ip_not_allowed` (403), `reason_required` (422), `rate_limited` / `delete_budget_exhausted` (429), `not_pending` / `agent_inactive` (409).

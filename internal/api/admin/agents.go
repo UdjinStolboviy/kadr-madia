@@ -45,6 +45,7 @@ type agentDTO struct {
 	MaxDeletesPerHour int      `json:"max_deletes_per_hour"`
 	Status            string   `json:"status"` // active | expired | revoked
 	CreatedBy         string   `json:"created_by"`
+	OAuthClientID     *string  `json:"oauth_client_id"` // connected through OAuth (e.g. a claude.ai connector)
 	LastUsedAt        *string  `json:"last_used_at"`
 	LastUsedIP        *string  `json:"last_used_ip"`
 	ExpiresAt         *string  `json:"expires_at"`
@@ -66,7 +67,7 @@ func agentStatus(t *db.AgentToken, now time.Time) string {
 func (s *Server) toAgentDTO(t *db.AgentToken) agentDTO {
 	return agentDTO{ID: t.ID, Name: t.Name, Description: t.Description, Prefix: t.Prefix, Level: t.Level,
 		ExtraScopes: t.ExtraScopes, Permissions: grantOf(t).Actions(), ProjectIDs: t.ProjectIDs, ApprovalMode: t.ApprovalMode,
-		AllowedIPs: t.AllowedIPs, MaxDeletesPerHour: t.MaxDeletesPerHour, Status: agentStatus(t, s.now()), CreatedBy: t.CreatedBy,
+		AllowedIPs: t.AllowedIPs, MaxDeletesPerHour: t.MaxDeletesPerHour, Status: agentStatus(t, s.now()), CreatedBy: t.CreatedBy, OAuthClientID: t.OAuthClientID,
 		LastUsedAt: tsp(t.LastUsedAt), LastUsedIP: t.LastUsedIP, ExpiresAt: tsp(t.ExpiresAt), RevokedAt: tsp(t.RevokedAt),
 		CreatedAt: ts(t.CreatedAt), UpdatedAt: ts(t.UpdatedAt)}
 }

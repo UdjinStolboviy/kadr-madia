@@ -7,7 +7,11 @@ import type {
   AgentApproval,
   AgentInput,
   AgentLevel,
+  AgentRun,
+  AgentSchedule,
   AuditEntry,
+  ModerationSettings,
+  ScheduleInput,
   Moderation,
   ModerationItem,
   SetModerationRequest,
@@ -851,7 +855,7 @@ function seedAgents() {
   const a: Agent = {
     id: ulid("agt_"), name: "claude-moderator", description: "Reviews new uploads against the content policy", prefix: `kd_agent_${randomBase62(8)}`,
     level: "edit", extra_scopes: [], permissions: agentPerms("edit", []), project_ids: [p.id], approval_mode: "destructive",
-    allowed_ips: [], max_deletes_per_hour: 50, status: "active", created_by: db.admin.id, last_used_at: new Date(Date.now() - 600_000).toISOString(),
+    allowed_ips: [], max_deletes_per_hour: 50, status: "active", created_by: db.admin.id, oauth_client_id: null, last_used_at: new Date(Date.now() - 600_000).toISOString(),
     last_used_ip: "203.0.113.7", expires_at: new Date(Date.now() + 80 * 86400_000).toISOString(), revoked_at: null, created_at: nowIso(), updated_at: nowIso(),
   };
   mockAgents.push(a);
@@ -903,7 +907,7 @@ on("POST", "/agents", ({ body }) => {
   const token = `kd_agent_${randomBase62(8)}_${randomBase62(32)}`;
   const a: Agent = {
     id: ulid("agt_"), name: "", description: "", prefix: token.slice(0, 17), level: "read", extra_scopes: [], permissions: [],
-    project_ids: null, approval_mode: "destructive", allowed_ips: [], max_deletes_per_hour: 50, status: "active", created_by: db.admin.id,
+    project_ids: null, approval_mode: "destructive", allowed_ips: [], max_deletes_per_hour: 50, status: "active", created_by: db.admin.id, oauth_client_id: null,
     last_used_at: null, last_used_ip: null, expires_at: null, revoked_at: null, created_at: nowIso(), updated_at: nowIso(),
   };
   const b = body as AgentInput;
@@ -1004,6 +1008,215 @@ on("GET", "/projects/:id/assets/:aid/preview", ({ params }) => {
   const color = MOCK_COLORS[n % MOCK_COLORS.length]!;
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="480"><rect width="100%" height="100%" fill="${color}"/><circle cx="240" cy="200" r="90" fill="#ffffff55"/><rect x="90" y="330" width="300" height="40" rx="8" fill="#ffffff44"/></svg>`;
   return new Response(svg, { status: 200, headers: { "Content-Type": "image/svg+xml" } });
+});
+
+// ---- AI operations ------------------------------------------------------------
+
+const MOCK_AI = { available: true, classifier: "claude:claude-opus-5-5", agent_runs: true, model: "claude-opus-5-5" };
+const mockModerationSettings = new Map<string, ModerationSettings>();
+const DEFAULT_POLICY =
+  "No sexual content or nudity, no graphic violence or gore, no hate symbols, no visible personal data (ID documents, bank cards, addresses), no spam or advertising overlays.";
+
+on("GET", "/ai/status", () => json(200, MOCK_AI));
+on("GET", "/projects/:id/moderation/settings", ({ params }) => {
+  findProject(params[0]!);
+  const st = mockModerationSettings.get(params[0]!) ?? { enabled: false, policy: DEFAULT_POLICY, mode: "flag_only", kinds: ["image", "video"], since: "" };
+  return json(200, { settings: st, ai: MOCK_AI });
+});
+on("PUT", "/projects/:id/moderation/settings", ({ params, body }) => {
+  findProject(params[0]!);
+  const b = body as ModerationSettings;
+  const prev = mockModerationSettings.get(params[0]!);
+  const st: ModerationSettings = {
+    enabled: !!b.enabled,
+    policy: b.policy?.trim() || DEFAULT_POLICY,
+    mode: b.mode === "decide" ? "decide" : "flag_only",
+    kinds: b.kinds?.length ? b.kinds : ["image", "video"],
+    since: b.enabled ? (prev?.enabled && prev.since ? prev.since : nowIso()) : (prev?.since ?? ""),
+  };
+  mockModerationSettings.set(params[0]!, st);
+  audit("moderation.settings", params[0]!, params[0]!, { enabled: st.enabled, mode: st.mode });
+  return json(200, { settings: st, ai: MOCK_AI });
+});
+on("POST", "/projects/:id/moderation/backlog", ({ params }) => {
+  findProject(params[0]!);
+  let n = 0;
+  for (const it of moderationItems(params[0]!)) {
+    if (it.moderation.status !== "unreviewed") continue;
+    n++;
+    const flagged = n % 3 === 0;
+    mockModeration.set(it.asset_id, {
+      asset_id: it.asset_id, status: flagged ? "flagged" : "approved", labels: flagged ? ["nsfw"] : [],
+      note: flagged ? "Partly visible nudity; needs a human look." : null, actor_type: "system", actor_id: MOCK_AI.classifier, updated_at: nowIso(),
+    });
+  }
+  return json(202, { queued: n });
+});
+
+const mockSchedules: AgentSchedule[] = [];
+const mockRuns: AgentRun[] = [];
+
+function nextRunIso(s: Pick<AgentSchedule, "frequency" | "time_utc" | "weekday">): string {
+  const now = new Date();
+  const [h, m] = s.time_utc.split(":").map(Number) as [number, number];
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), s.frequency === "hourly" ? now.getUTCHours() : h, m));
+  if (s.frequency === "weekly") d.setUTCDate(d.getUTCDate() + ((s.weekday - d.getUTCDay() + 7) % 7));
+  while (d <= now) d.setTime(d.getTime() + (s.frequency === "hourly" ? 3600_000 : s.frequency === "weekly" ? 7 * 86400_000 : 86400_000));
+  return d.toISOString();
+}
+
+function seedSchedules() {
+  seedAgents();
+  if (mockSchedules.length || !mockAgents.length) return;
+  const a = mockAgents[0]!;
+  const s: AgentSchedule = {
+    id: ulid("ags_"), name: "Nightly moderation", agent_id: a.id, agent_name: a.name,
+    prompt: "Review unreviewed assets of every project against the policy; approve clear cases, flag doubtful ones; never delete. Report counts per project.",
+    frequency: "daily", time_utc: "02:30", weekday: 1, max_turns: 30, notify: true, enabled: true,
+    last_run_at: new Date(Date.now() - 20 * 3600_000).toISOString(), next_run_at: null, created_at: nowIso(),
+  };
+  s.next_run_at = nextRunIso(s);
+  mockSchedules.push(s);
+  mockRuns.push({
+    id: ulid("agr_"), schedule_id: s.id, agent_id: a.id, agent_name: a.name, trigger: "schedule", prompt: s.prompt, status: "succeeded",
+    output: "## Nightly moderation\n\n| Project | Approved | Flagged |\n|---|---|---|\n| Acme | 41 | 3 |\n\nFlagged items need a human look (labels: nsfw ×2, pii ×1). Nothing was deleted.",
+    error: null, tool_calls: 52, input_tokens: 184_220, output_tokens: 6_310, model: MOCK_AI.model,
+    created_at: s.last_run_at!, started_at: s.last_run_at, finished_at: new Date(Date.parse(s.last_run_at!) + 240_000).toISOString(),
+  });
+}
+
+function findSchedule(id: string) {
+  const s = mockSchedules.find((x) => x.id === id);
+  if (!s) throw new HttpError(404, "not_found", "Not found", "schedule not found");
+  return s;
+}
+
+function startMockRun(agentId: string, prompt: string, scheduleId: string | null): AgentRun {
+  const a = mockAgents.find((x) => x.id === agentId);
+  const run: AgentRun = {
+    id: ulid("agr_"), schedule_id: scheduleId, agent_id: agentId, agent_name: a?.name ?? agentId, trigger: "manual", prompt, status: "queued",
+    output: null, error: null, tool_calls: 0, input_tokens: 0, output_tokens: 0, model: MOCK_AI.model, created_at: nowIso(), started_at: null, finished_at: null,
+  };
+  mockRuns.unshift(run);
+  setTimeout(() => {
+    run.status = "running";
+    run.started_at = nowIso();
+  }, 1500);
+  setTimeout(() => {
+    run.status = "succeeded";
+    run.finished_at = nowIso();
+    run.tool_calls = 7;
+    run.input_tokens = 21_400;
+    run.output_tokens = 900;
+    run.output = "## Report\n\nAll projects healthy. No failed jobs in the last 24 hours; webhook deliveries 100% successful.";
+  }, 8000);
+  return run;
+}
+
+function applySchedule(s: AgentSchedule, b: ScheduleInput) {
+  const errors: Record<string, string> = {};
+  if (b.name !== undefined) s.name = b.name.trim();
+  if (!s.name) errors.name = "required, at most 100 characters";
+  if (b.agent_id !== undefined) s.agent_id = b.agent_id;
+  const a = mockAgents.find((x) => x.id === s.agent_id);
+  if (!a || a.status === "revoked") errors.agent_id = "choose an active agent token; the run gets exactly its permissions";
+  else s.agent_name = a.name;
+  if (b.prompt !== undefined) s.prompt = b.prompt.trim();
+  if (!s.prompt) errors.prompt = "required, at most 20000 characters";
+  if (b.frequency !== undefined) s.frequency = b.frequency;
+  if (b.time_utc !== undefined) s.time_utc = b.time_utc;
+  if (!/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(s.time_utc)) errors.time_utc = "HH:MM (UTC)";
+  if (b.weekday !== undefined) s.weekday = b.weekday;
+  if (b.max_turns !== undefined) s.max_turns = b.max_turns;
+  if (b.notify !== undefined) s.notify = b.notify;
+  if (b.enabled !== undefined) s.enabled = b.enabled;
+  if (Object.keys(errors).length) throw validationError(errors);
+  s.next_run_at = s.enabled ? nextRunIso(s) : null;
+}
+
+on("GET", "/agent-schedules", () => {
+  seedSchedules();
+  return json(200, { items: mockSchedules, ai: MOCK_AI });
+});
+on("POST", "/agent-schedules", ({ body }) => {
+  seedSchedules();
+  const s: AgentSchedule = {
+    id: ulid("ags_"), name: "", agent_id: "", agent_name: "", prompt: "", frequency: "daily", time_utc: "03:00", weekday: 1, max_turns: 30,
+    notify: true, enabled: true, last_run_at: null, next_run_at: null, created_at: nowIso(),
+  };
+  applySchedule(s, body as ScheduleInput);
+  mockSchedules.unshift(s);
+  audit("agent.schedule.create", s.id, null, { name: s.name });
+  return json(201, s);
+});
+on("PATCH", "/agent-schedules/:id", ({ params, body }) => {
+  const s = findSchedule(params[0]!);
+  applySchedule(s, body as ScheduleInput);
+  audit("agent.schedule.update", s.id);
+  return json(200, s);
+});
+on("DELETE", "/agent-schedules/:id", ({ params }) => {
+  const s = findSchedule(params[0]!);
+  mockSchedules.splice(mockSchedules.indexOf(s), 1);
+  audit("agent.schedule.delete", s.id);
+  return noContent();
+});
+on("POST", "/agent-schedules/:id/run", ({ params }) => {
+  const s = findSchedule(params[0]!);
+  return json(202, startMockRun(s.agent_id, s.prompt, s.id));
+});
+on("GET", "/agent-runs", ({ query }) => {
+  seedSchedules();
+  const sid = query.get("schedule_id");
+  return json(200, { items: mockRuns.filter((r) => !sid || r.schedule_id === sid) });
+});
+on("GET", "/agent-runs/:id", ({ params }) => {
+  const r = mockRuns.find((x) => x.id === params[0]);
+  if (!r) throw new HttpError(404, "not_found", "Not found", "run not found");
+  return json(200, r);
+});
+on("POST", "/agent-runs", ({ body }) => {
+  seedAgents();
+  const b = body as { agent_id: string; prompt: string };
+  const errors: Record<string, string> = {};
+  if (!b.prompt?.trim()) errors.prompt = "required, at most 20000 characters";
+  if (!mockAgents.some((a) => a.id === b.agent_id && a.status === "active")) errors.agent_id = "choose an active agent token";
+  if (Object.keys(errors).length) throw validationError(errors);
+  return json(202, startMockRun(b.agent_id, b.prompt.trim(), null));
+});
+
+// ---- OAuth consent --------------------------------------------------------------
+
+const mockGrants = new Map<string, "pending" | "approved" | "denied">();
+on("GET", "/oauth/grants/:id", ({ params }) => {
+  const st = mockGrants.get(params[0]!) ?? "pending";
+  if (st !== "pending") throw new HttpError(409, "not_pending", "Conflict", "this authorization request was already answered or has expired");
+  return json(200, {
+    id: params[0]!, client_id: "oac_01JMOCKCLAUDE0000000000000", client_name: "Claude", redirect_host: "claude.ai",
+    redirect_uri: "https://claude.ai/api/mcp/auth_callback", scope: "kadr:edit", suggested_level: "edit",
+    client_registered_at: new Date(Date.now() - 60_000).toISOString(), expires_at: new Date(Date.now() + 9 * 60_000).toISOString(),
+  });
+});
+on("POST", "/oauth/grants/:id/approve", ({ params, body }) => {
+  if ((mockGrants.get(params[0]!) ?? "pending") !== "pending") throw new HttpError(409, "not_pending", "Conflict", "already answered");
+  mockGrants.set(params[0]!, "approved");
+  const b = body as AgentInput;
+  const a: Agent = {
+    id: ulid("agt_"), name: "", description: "", prefix: `kd_agent_${randomBase62(8)}`, level: "read", extra_scopes: [], permissions: [],
+    project_ids: null, approval_mode: "destructive", allowed_ips: [], max_deletes_per_hour: 50, status: "active", created_by: db.admin.id,
+    oauth_client_id: "oac_01JMOCKCLAUDE0000000000000", last_used_at: null, last_used_ip: null, expires_at: null, revoked_at: null,
+    created_at: nowIso(), updated_at: nowIso(),
+  };
+  applyAgent(a, { expires_in_days: 90, ...b }, true);
+  mockAgents.unshift(a);
+  audit("agent.oauth.approve", a.id, null, { client_name: "Claude" });
+  persist();
+  // The mock cannot leave the app: return to the agents list instead of claude.ai.
+  return json(200, { redirect_url: "/agents", agent: a });
+});
+on("POST", "/oauth/grants/:id/deny", ({ params }) => {
+  mockGrants.set(params[0]!, "denied");
+  return json(200, { redirect_url: "/agents" });
 });
 
 // ---- Installation -----------------------------------------------------------

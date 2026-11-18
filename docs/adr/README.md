@@ -18,3 +18,4 @@ Format: Context → Decision → Consequences → Alternatives considered. Statu
 | [0012](0012-rclone-on-demand.md) | rclone as a one-off process for cloud imports | Accepted |
 | [0013](0013-single-account-byos.md) | One legitimate platform storage account + BYOS | Accepted |
 | [0014](0014-agent-access-mcp.md) | AI agent access through MCP on top of the Admin API | Accepted |
+| [0015](0015-ai-operations.md) | AI operations: Claude moderation and scheduled agent runs | Accepted |

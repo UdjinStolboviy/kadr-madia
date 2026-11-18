@@ -2,10 +2,16 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
+	"time"
+
+	"github.com/UdjinStolboviy/kadr-madia/internal/preset"
 )
 
 // previewFormats are rendition formats that can be shown as an image, best
@@ -90,5 +96,53 @@ func (s *Service) ReadPreview(ctx context.Context, projectID, assetID string, ta
 	if int64(len(data)) > maxBytes {
 		return nil, apiErr(http.StatusUnprocessableEntity, "no_preview", "the preview rendition of %s is too large", assetID)
 	}
-	return &Preview{Name: r.Name, Format: r.Format, Width: r.Width, Height: r.Height, Data: data}, nil
+	pv := &Preview{Name: r.Name, Format: r.Format, Width: r.Width, Height: r.Height, Data: data}
+	if pv.Format == "jpg" {
+		pv.Format = "jpeg"
+	}
+	if pv.Format == "avif" && s.engine != nil {
+		// Browsers and vision models read WebP; AVIF is converted on the fly.
+		if conv, err := s.toWebP(ctx, data, targetWidth); err == nil {
+			pv.Data, pv.Format = conv, "webp"
+		} else {
+			s.log.WarnContext(ctx, "preview conversion failed; serving avif", "asset_id", assetID, "err", err)
+		}
+	}
+	return pv, nil
+}
+
+func (s *Service) toWebP(ctx context.Context, src []byte, width int64) ([]byte, error) {
+	dir, err := os.MkdirTemp(s.tmpDir, "preview-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+	in := filepath.Join(dir, "source")
+	if err := os.WriteFile(in, src, 0o600); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	limits := preset.ImageLimits{MaxInputBytes: int64(len(src)) + 1, MaxInputPixels: 40_000_000}
+	info, err := s.engine.Probe(ctx, in, limits)
+	if err != nil {
+		return nil, err
+	}
+	w := int(width)
+	params := preset.ImageParams{Kind: "image",
+		Resize:  preset.Resize{MaxWidth: w, MaxHeight: w, Fit: "inside"},
+		Outputs: []preset.ImageOutput{{Name: "preview", Format: "webp"}},
+		Quality: preset.Quality{Mode: "fixed", Q: 80}, Limits: limits}
+	out := filepath.Join(dir, "out")
+	if err := os.MkdirAll(out, 0o700); err != nil {
+		return nil, err
+	}
+	res, err := s.engine.Process(ctx, info, params, out)
+	if err != nil {
+		return nil, err
+	}
+	if len(res.Renditions) == 0 {
+		return nil, errors.New("no rendition produced")
+	}
+	return os.ReadFile(res.Renditions[0].Path)
 }

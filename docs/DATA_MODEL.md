@@ -25,7 +25,7 @@ erDiagram
   assets ||--o| asset_moderation : "moderated by"
 ```
 
-Later migrations: `0005_files.sql` (documents), `0006_agents.sql` (`agent_tokens`, `agent_approvals`, `asset_moderation`; see [AGENTS.md](AGENTS.md)), `0007_audit_agent_actor.sql` (`audit_log.actor_type = 'agent'`), `0008_rendition_encoder.sql` (`renditions.encoder`).
+Later migrations: `0005_files.sql` (documents), `0006_agents.sql` (`agent_tokens`, `agent_approvals`, `asset_moderation`; see [AGENTS.md](AGENTS.md)), `0007_audit_agent_actor.sql` (`audit_log.actor_type = 'agent'`), `0008_rendition_encoder.sql` (`renditions.encoder`), `0009_oauth.sql` (`oauth_clients`, `oauth_grants`, `agent_tokens.oauth_client_id/refresh_hash`), `0010_agent_schedules.sql` (`agent_schedules`, `agent_runs`).
 
 ## Key decisions
 

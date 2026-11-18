@@ -228,14 +228,25 @@ function VideoForm({ draft, set, err }: { draft: Obj; set: (path: string[], v: u
     <>
       <Section title={t("presets.ed.video")}>
         <div className="grid grid-cols-2 items-start gap-3 [&>*]:min-w-0">
+          <Field label={t("presets.ed.codec")} htmlFor="pe-codec" hint={str(["video", "codec"], "h264") === "av1" ? t("presets.ed.codecAv1Hint") : t("presets.ed.codecH264Hint")} error={err("video.codec")}>
+            <SelectField
+              id="pe-codec"
+              value={str(["video", "codec"], "h264")}
+              onChange={(v) => set(["video", "codec"], v)}
+              options={[
+                { value: "h264", label: "H.264" },
+                { value: "av1", label: "AV1 (SVT-AV1)" },
+              ]}
+            />
+          </Field>
           <Field label={t("presets.ed.maxWidth")} htmlFor="pe-vw" hint={t("presets.ed.maxWidthHint")} error={err("video.maxWidth")}>
             <NumberInput id="pe-vw" value={getIn(draft, ["video", "maxWidth"])} onChange={(v) => set(["video", "maxWidth"], v)} min={160} max={4096} step={2} suffix="px" />
           </Field>
           <Field label={t("presets.ed.frameRate")} htmlFor="pe-fps" hint="1–60" error={err("video.fps")}>
             <NumberInput id="pe-fps" value={getIn(draft, ["video", "fps"])} onChange={(v) => set(["video", "fps"], v)} min={1} max={60} suffix="fps" />
           </Field>
-          <Field label="CRF" htmlFor="pe-crf" hint={t("presets.ed.crfHint")} error={err("video.crf")}>
-            <NumberInput id="pe-crf" value={getIn(draft, ["video", "crf"])} onChange={(v) => set(["video", "crf"], v)} min={14} max={40} />
+          <Field label="CRF" htmlFor="pe-crf" hint={str(["video", "codec"], "h264") === "av1" ? t("presets.ed.crfHintAv1") : t("presets.ed.crfHint")} error={err("video.crf")}>
+            <NumberInput id="pe-crf" value={getIn(draft, ["video", "crf"])} onChange={(v) => set(["video", "crf"], v)} min={14} max={str(["video", "codec"], "h264") === "av1" ? 63 : 40} />
           </Field>
           <Field label={t("presets.ed.x264")} htmlFor="pe-x264" hint={t("presets.ed.x264Hint")}>
             <SelectField id="pe-x264" value={str(["video", "preset"], "slow")} onChange={(v) => set(["video", "preset"], v)} options={X264.map((v) => ({ value: v, label: v }))} />

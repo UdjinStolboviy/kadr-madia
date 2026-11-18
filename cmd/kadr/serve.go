@@ -16,11 +16,14 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 
+	"github.com/UdjinStolboviy/kadr-madia/internal/ai"
 	"github.com/UdjinStolboviy/kadr-madia/internal/alerts"
 	"github.com/UdjinStolboviy/kadr-madia/internal/api/admin"
 	"github.com/UdjinStolboviy/kadr-madia/internal/api/public"
 	"github.com/UdjinStolboviy/kadr-madia/internal/auth"
 	"github.com/UdjinStolboviy/kadr-madia/internal/capabilities"
+	"github.com/UdjinStolboviy/kadr-madia/internal/cfaccess"
+	"github.com/UdjinStolboviy/kadr-madia/internal/config"
 	"github.com/UdjinStolboviy/kadr-madia/internal/crypto"
 	"github.com/UdjinStolboviy/kadr-madia/internal/db"
 	"github.com/UdjinStolboviy/kadr-madia/internal/devstorage"
@@ -148,10 +151,24 @@ func cmdServe(ctx context.Context, args []string, stderr io.Writer) error {
 		log.Info("alerting enabled", "channel", "telegram")
 	}
 	runner := queue.NewRunner(q, queue.RunnerConfig{
-		Pools:  map[string]int{queue.PoolImage: cfg.PoolImage, queue.PoolVideo: cfg.PoolVideo, queue.PoolFile: cfg.PoolFile, queue.PoolMaintenance: 1},
+		Pools: map[string]int{queue.PoolImage: cfg.PoolImage, queue.PoolVideo: cfg.PoolVideo, queue.PoolFile: cfg.PoolFile, queue.PoolMaintenance: 1,
+			admin.PoolAI: 2},
 		Logger: log, Metrics: set,
 	})
 	svc.Register(runner)
+
+	// AI: Claude for agent runs (and moderation unless a self-hosted classifier is set).
+	var aiClient *ai.Client
+	var classifier ai.Classifier
+	if cfg.AnthropicAPIKey != "" {
+		aiClient = ai.New(cfg.AnthropicAPIKey, cfg.AIModel)
+		classifier = aiClient
+		log.Info("AI enabled", "model", cfg.AIModel)
+	}
+	if cfg.AIClassifierURL != "" {
+		classifier = &ai.HTTPClassifier{URL: cfg.AIClassifierURL}
+		log.Info("AI moderation classifier", "url", cfg.AIClassifierURL)
+	}
 
 	ui := web.Dist()
 	if ui == nil {
@@ -162,8 +179,10 @@ func cmdServe(ctx context.Context, args []string, stderr io.Writer) error {
 		Build: admin.BuildInfo{Version: version, Commit: commit, StartedAt: started},
 		Caps:  caps, TmpDir: cfg.TmpDir, Pipeline: svc, Wake: q.Notify, Edge: &edgepublish.Publisher{AccountID: cfg.CFAccountID, APIToken: cfg.CFAPIToken, WorkerName: cfg.CFWorkerName}, Playground: playground, UI: ui, FallbackHTML: web.FallbackHTML(), Webhooks: dispatcher,
 		WebAuthnRPID: cfg.WebAuthnRPID, WebAuthnOrigins: cfg.WebAuthnOrigins,
-		Notifier: notifier, PublicURL: cfg.AdminPublicURL,
+		Notifier: notifier, PublicURL: cfg.AdminPublicURL, AccessGuard: accessGuard(cfg, log),
+		AI: aiClient, Classifier: classifier, Queue: q,
 	})
+	adminSrv.RegisterJobs(runner)
 	publicHandler := public.Handler(public.Config{
 		Store: store, Logger: log, Metrics: set, Pipeline: svc, TmpDir: cfg.TmpDir,
 		Verifier: &auth.KeyVerifier{Store: store, Pepper: cfg.APIKeyPepper},
@@ -206,7 +225,7 @@ func cmdServe(ctx context.Context, args []string, stderr io.Writer) error {
 	}()
 	go func() {
 		defer bg.Done()
-		q.RunScheduler(bgCtx, pipeline.Schedules(), log)
+		q.RunScheduler(bgCtx, append(pipeline.Schedules(), admin.Schedules()...), log)
 	}()
 	runner.Start(ctx)
 	dispatcher.Start(ctx)
@@ -312,4 +331,15 @@ func startDevStorage(ctx context.Context, dbPath string, store *db.Store, kr *cr
 	log.Warn("dev storage running (no authentication, development only)", "endpoint", ds.Endpoint,
 		"public_base_url", ds.PublicBaseURL(), "profile_id", p.ID, "profile_created", created)
 	return ds, nil
+}
+
+// accessGuard returns the Cloudflare Access verification middleware when
+// KADR_CF_ACCESS_TEAM_DOMAIN and KADR_CF_ACCESS_AUD are configured.
+func accessGuard(cfg *config.Config, log *slog.Logger) func(http.Handler) http.Handler {
+	if cfg.CFAccessTeam == "" {
+		return nil
+	}
+	log.Info("cloudflare access verification enabled", "team", cfg.CFAccessTeam, "exempt", cfg.CFAccessExempt)
+	v := &cfaccess.Verifier{TeamDomain: cfg.CFAccessTeam, Audiences: cfg.CFAccessAUD, Logger: log}
+	return v.Middleware(cfg.CFAccessExempt)
 }

@@ -4,20 +4,16 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/UdjinStolboviy/kadr-madia/internal/api/httpx"
 	"github.com/UdjinStolboviy/kadr-madia/internal/db"
 	"github.com/UdjinStolboviy/kadr-madia/internal/pipeline"
-	"github.com/UdjinStolboviy/kadr-madia/internal/preset"
 	"github.com/UdjinStolboviy/kadr-madia/internal/webhook"
 )
 
@@ -179,10 +175,22 @@ func (s *Server) handleSetModeration(w http.ResponseWriter, r *http.Request) {
 	}
 	id := actorID(ctx)
 	m.ActorID = &id
-	prev, err := s.store.GetModeration(ctx, a.ID)
-	if err != nil && !errors.Is(err, db.ErrNotFound) {
+	err := s.saveModeration(ctx, m, a.NS, func(tx *db.Store, prev string) error {
+		return s.audit(r, tx, "asset.moderate", &p.ID, &a.ID, map[string]any{"status": m.Status, "previous_status": prev, "labels": m.Labels})
+	})
+	if err != nil {
 		s.internalError(w, r, err)
 		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, toModerationDTO(a.ID, m))
+}
+
+// saveModeration stores a decision, emits asset.moderated and lets audit
+// record it, all in one transaction.
+func (s *Server) saveModeration(ctx context.Context, m *db.AssetModeration, ns string, audit func(tx *db.Store, prev string) error) error {
+	prev, err := s.store.GetModeration(ctx, m.AssetID)
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
+		return err
 	}
 	prevStatus := "unreviewed"
 	if prev != nil {
@@ -192,22 +200,18 @@ func (s *Server) handleSetModeration(w http.ResponseWriter, r *http.Request) {
 		if err := tx.UpsertModeration(ctx, m); err != nil {
 			return err
 		}
-		if _, err := webhook.Emit(ctx, tx, p.ID, webhook.EventAssetModerated, map[string]any{
-			"asset_id": a.ID, "namespace": a.NS, "status": m.Status, "previous_status": prevStatus, "labels": m.Labels,
+		if _, err := webhook.Emit(ctx, tx, m.ProjectID, webhook.EventAssetModerated, map[string]any{
+			"asset_id": m.AssetID, "namespace": ns, "status": m.Status, "previous_status": prevStatus, "labels": m.Labels,
 			"note": m.Note, "actor_type": m.ActorType,
 		}, s.now()); err != nil {
 			return err
 		}
-		return s.audit(r, tx, "asset.moderate", &p.ID, &a.ID, map[string]any{"status": m.Status, "previous_status": prevStatus, "labels": m.Labels})
+		return audit(tx, prevStatus)
 	})
-	if err != nil {
-		s.internalError(w, r, err)
-		return
-	}
-	if s.cfg.Webhooks != nil {
+	if err == nil && s.cfg.Webhooks != nil {
 		s.cfg.Webhooks.Notify()
 	}
-	httpx.WriteJSON(w, http.StatusOK, toModerationDTO(a.ID, m))
+	return err
 }
 
 // handleAssetPreview: GET /projects/{id}/assets/{asset_id}/preview?width=1024 —
@@ -230,7 +234,8 @@ func (s *Server) handleAssetPreview(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(data)
 }
 
-// assetPreview returns preview bytes and their format (webp, jpeg, png, gif or avif).
+// assetPreview returns preview bytes and their format (webp, jpeg, png, gif
+// or avif when no image engine is available).
 func (s *Server) assetPreview(ctx context.Context, projectID, assetID string, width int) ([]byte, string, error) {
 	if s.cfg.Pipeline == nil {
 		return nil, "", &pipeline.Error{Status: http.StatusServiceUnavailable, Code: "unavailable", Detail: "the media pipeline is not available"}
@@ -242,52 +247,5 @@ func (s *Server) assetPreview(ctx context.Context, projectID, assetID string, wi
 	if err != nil {
 		return nil, "", err
 	}
-	format := pv.Format
-	if format == "jpg" {
-		format = "jpeg"
-	}
-	if format != "avif" || s.cfg.Playground == nil {
-		return pv.Data, format, nil
-	}
-	if conv, err := s.convertToWebP(ctx, pv.Data, width); err == nil {
-		return conv, "webp", nil
-	} else {
-		s.log.WarnContext(ctx, "preview conversion failed; serving avif", "asset", assetID, "err", err)
-	}
-	return pv.Data, format, nil
-}
-
-func (s *Server) convertToWebP(ctx context.Context, src []byte, width int) ([]byte, error) {
-	dir, err := os.MkdirTemp(s.cfg.TmpDir, "preview-")
-	if err != nil {
-		return nil, err
-	}
-	defer os.RemoveAll(dir)
-	in := filepath.Join(dir, "source")
-	if err := os.WriteFile(in, src, 0o600); err != nil {
-		return nil, err
-	}
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	limits := preset.ImageLimits{MaxInputBytes: previewMaxBytes, MaxInputPixels: 40_000_000}
-	info, err := s.cfg.Playground.Probe(ctx, in, limits)
-	if err != nil {
-		return nil, err
-	}
-	params := preset.ImageParams{Kind: "image",
-		Resize:  preset.Resize{MaxWidth: width, MaxHeight: width, Fit: "inside"},
-		Outputs: []preset.ImageOutput{{Name: "preview", Format: "webp"}},
-		Quality: preset.Quality{Mode: "fixed", Q: 80}, Limits: limits}
-	out := filepath.Join(dir, "out")
-	if err := os.MkdirAll(out, 0o700); err != nil {
-		return nil, err
-	}
-	res, err := s.cfg.Playground.Process(ctx, info, params, out)
-	if err != nil {
-		return nil, err
-	}
-	if len(res.Renditions) == 0 {
-		return nil, errors.New("no rendition produced")
-	}
-	return os.ReadFile(res.Renditions[0].Path)
+	return pv.Data, pv.Format, nil
 }

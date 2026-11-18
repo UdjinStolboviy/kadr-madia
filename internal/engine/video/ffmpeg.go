@@ -25,11 +25,11 @@ type Config struct {
 	Nice    bool   // lower CPU priority of children
 	Threads int    // x264 threads (default 2)
 	Device  string // VAAPI render node (default /dev/dri/renderD128)
-	// TimeoutPerSec bounds a transcode to duration*TimeoutPerSec (default 6s per
+	// TimeoutPerMediaSecond bounds a transcode to duration*TimeoutPerMediaSecond (default 6s per
 	// second of video, at least MinTimeout).
-	TimeoutPerSec time.Duration
-	MinTimeout    time.Duration
-	ProbeTimeout  time.Duration
+	TimeoutPerMediaSecond time.Duration
+	MinTimeout            time.Duration
+	ProbeTimeout          time.Duration
 }
 
 // FFmpeg is the ffmpeg/ffprobe implementation of Engine.
@@ -52,8 +52,8 @@ func New(cfg Config) (*FFmpeg, error) {
 	if cfg.Device == "" {
 		cfg.Device = "/dev/dri/renderD128"
 	}
-	if cfg.TimeoutPerSec <= 0 {
-		cfg.TimeoutPerSec = 6 * time.Second
+	if cfg.TimeoutPerMediaSecond <= 0 {
+		cfg.TimeoutPerMediaSecond = 6 * time.Second
 	}
 	if cfg.MinTimeout <= 0 {
 		cfg.MinTimeout = 2 * time.Minute
@@ -202,15 +202,16 @@ func parseRate(s string) float64 {
 
 // Transcode implements Engine.
 func (e *FFmpeg) Transcode(ctx context.Context, src SourceInfo, p preset.VideoParams, workDir string, progress func(int)) (*Output, error) {
-	if p.Video.Codec != "" && p.Video.Codec != "h264" {
+	av1 := p.Video.Codec == "av1"
+	if p.Video.Codec != "" && p.Video.Codec != "h264" && !av1 {
 		return nil, &Error{Code: CodeEngineFailure, Detail: "unsupported codec " + p.Video.Codec}
 	}
 	outPath := filepath.Join(workDir, "video.mp4")
-	useHW := e.vaapi && p.Video.HW != "off"
+	useHW := e.vaapi && p.Video.HW != "off" && !av1 // AV1 is encoded in software (SVT-AV1)
 	if p.Video.HW == "vaapi" && !e.vaapi {
 		useHW = false // requested but unavailable: fall back to software
 	}
-	timeout := time.Duration(src.DurationSec * float64(e.cfg.TimeoutPerSec))
+	timeout := time.Duration(src.DurationSec * float64(e.cfg.TimeoutPerMediaSecond))
 	if timeout < e.cfg.MinTimeout {
 		timeout = e.cfg.MinTimeout
 	}
@@ -218,6 +219,9 @@ func (e *FFmpeg) Transcode(ctx context.Context, src SourceInfo, p preset.VideoPa
 	defer cancel()
 
 	enc := "libx264"
+	if av1 {
+		enc = "libsvtav1"
+	}
 	err := error(nil)
 	var hwErr error
 	if useHW {
@@ -281,12 +285,18 @@ func (e *FFmpeg) run(ctx context.Context, src SourceInfo, p preset.VideoParams, 
 	if hw {
 		args = append(args, "-vf", fmt.Sprintf("fps=%d,format=nv12,hwupload,scale_vaapi=w='%s':h=-2", fps, w),
 			"-c:v", "h264_vaapi", "-rc_mode", "QVBR", "-global_quality", strconv.Itoa(v.CRF))
+	} else if v.Codec == "av1" {
+		// SVT-AV1: ~30–50 % smaller than H.264 at the same quality; CRF only
+		// (maxrate is ignored), keyframe every 10 s for seeking.
+		args = append(args, "-vf", fmt.Sprintf("scale='%s':-2:flags=lanczos,fps=%d", w, fps),
+			"-c:v", "libsvtav1", "-pix_fmt", "yuv420p", "-crf", strconv.Itoa(v.CRF), "-preset", strconv.Itoa(svtPreset(v.Preset)),
+			"-g", strconv.Itoa(fps*10))
 	} else {
 		args = append(args, "-vf", fmt.Sprintf("scale='%s':-2:flags=lanczos,fps=%d", w, fps),
 			"-c:v", "libx264", "-profile:v", "high", "-level", "4.1", "-pix_fmt", "yuv420p",
 			"-crf", strconv.Itoa(v.CRF), "-preset", orDefault(v.Preset, "slow"), "-threads", strconv.Itoa(e.cfg.Threads))
 	}
-	if v.Maxrate != "" {
+	if v.Maxrate != "" && v.Codec != "av1" {
 		args = append(args, "-maxrate", v.Maxrate)
 		args = append(args, "-bufsize", orDefault(v.Bufsize, v.Maxrate))
 	}
@@ -401,4 +411,25 @@ func errString(err error) string {
 		msg = msg[:500] + "…"
 	}
 	return msg
+}
+
+// svtPreset maps x264 preset names to SVT-AV1 presets (higher = faster).
+func svtPreset(x264 string) int {
+	switch x264 {
+	case "ultrafast":
+		return 12
+	case "superfast":
+		return 11
+	case "veryfast":
+		return 10
+	case "faster":
+		return 9
+	case "fast":
+		return 8
+	case "medium":
+		return 7
+	case "slower":
+		return 5
+	}
+	return 6 // slow (default)
 }

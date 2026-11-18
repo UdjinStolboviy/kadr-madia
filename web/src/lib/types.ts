@@ -605,6 +605,8 @@ export interface Agent {
   max_deletes_per_hour: number;
   status: AgentStatus;
   created_by: string;
+  /** Set when the token was obtained through OAuth (e.g. a claude.ai connector). */
+  oauth_client_id: string | null;
   last_used_at: ISODateTime | null;
   last_used_ip: string | null;
   expires_at: ISODateTime | null;
@@ -710,4 +712,108 @@ export interface SetModerationRequest {
   status: ModerationDecision;
   labels?: string[];
   note?: string;
+}
+
+// ---- OAuth consent --------------------------------------------------------------
+
+export interface OAuthGrant {
+  id: string;
+  client_id: string;
+  client_name: string;
+  redirect_host: string;
+  redirect_uri: string;
+  scope: string | null;
+  suggested_level: AgentLevel;
+  client_registered_at: ISODateTime;
+  expires_at: ISODateTime;
+}
+
+export interface OAuthApproveResponse {
+  redirect_url: string;
+  agent: Agent;
+}
+
+// ---- AI operations ----------------------------------------------------------------
+
+export interface AiStatus {
+  available: boolean;
+  classifier: string | null;
+  agent_runs: boolean;
+  model: string | null;
+}
+
+export const AI_MODERATION_MODES = ["flag_only", "decide"] as const;
+export type AiModerationMode = (typeof AI_MODERATION_MODES)[number];
+
+export interface ModerationSettings {
+  enabled: boolean;
+  policy: string;
+  mode: AiModerationMode;
+  kinds: string[];
+  since?: string;
+}
+
+export interface ModerationSettingsResponse {
+  settings: ModerationSettings;
+  ai: AiStatus;
+}
+
+export const SCHEDULE_FREQUENCIES = ["hourly", "daily", "weekly"] as const;
+export type ScheduleFrequency = (typeof SCHEDULE_FREQUENCIES)[number];
+
+export interface AgentSchedule {
+  id: string;
+  name: string;
+  agent_id: string;
+  agent_name: string;
+  prompt: string;
+  frequency: ScheduleFrequency;
+  /** HH:MM in UTC (hourly: only the minute counts). */
+  time_utc: string;
+  /** 0 = Sunday (weekly only). */
+  weekday: number;
+  max_turns: number;
+  notify: boolean;
+  enabled: boolean;
+  last_run_at: ISODateTime | null;
+  next_run_at: ISODateTime | null;
+  created_at: ISODateTime;
+}
+
+export interface ScheduleInput {
+  name?: string;
+  agent_id?: string;
+  prompt?: string;
+  frequency?: ScheduleFrequency;
+  time_utc?: string;
+  weekday?: number;
+  max_turns?: number;
+  notify?: boolean;
+  enabled?: boolean;
+}
+
+export interface SchedulesResponse {
+  items: AgentSchedule[];
+  ai: AiStatus;
+}
+
+export type AgentRunStatus = "queued" | "running" | "succeeded" | "failed";
+
+export interface AgentRun {
+  id: string;
+  schedule_id: string | null;
+  agent_id: string;
+  agent_name: string;
+  trigger: "schedule" | "manual";
+  prompt: string;
+  status: AgentRunStatus;
+  output: string | null;
+  error: string | null;
+  tool_calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  model: string | null;
+  created_at: ISODateTime;
+  started_at: ISODateTime | null;
+  finished_at: ISODateTime | null;
 }

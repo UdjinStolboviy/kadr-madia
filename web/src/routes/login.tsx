@@ -65,7 +65,7 @@ export default function LoginPage() {
     try {
       const session = await api.auth.login({ ...values, ...(totp ? { totp_code: totp } : {}) });
       qc.setQueryData(qk.me, session);
-      await navigate({ to: search.redirect ?? "/", replace: true });
+      await navigate({ href: search.redirect ?? "/", replace: true });
     } catch (e) {
       if (isApiError(e, "totp_required")) {
         setCreds(values);
@@ -93,7 +93,7 @@ export default function LoginPage() {
       const credential = await getCredential(begin.options);
       const session = await api.auth.passkeyLoginFinish({ ceremony_id: begin.ceremony_id, credential });
       qc.setQueryData(qk.me, session);
-      await navigate({ to: search.redirect ?? "/", replace: true });
+      await navigate({ href: search.redirect ?? "/", replace: true });
     } catch (e) {
       if (isWebAuthnCancelled(e)) {
         // dismissed the browser prompt

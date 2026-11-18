@@ -7,6 +7,7 @@ import { ActivityTab } from "@/components/agents/activity-tab";
 import { AgentFormSheet } from "@/components/agents/agent-form";
 import { APPROVAL_LABEL, LEVEL_LABEL } from "@/components/agents/labels";
 import { ApprovalsTab } from "@/components/agents/approvals-tab";
+import { SchedulesTab } from "@/components/agents/schedules-tab";
 import { AgentTokenDialog } from "@/components/agents/token-dialog";
 import { CopyButton, PageHeader, RelativeTime, StatusBadge } from "@/components/common";
 import { EmptyState, ErrorState } from "@/components/states";
@@ -170,7 +171,17 @@ function AgentsList({ onNew }: { onNew: () => void }) {
                 return (
                   <TableRow key={a.id} className={cn(a.status !== "active" && "opacity-60")}>
                     <TableCell className="pl-4">
-                      <div className="font-medium">{a.name}</div>
+                      <div className="flex items-center gap-1.5 font-medium">
+                        {a.name}
+                        {a.oauth_client_id && (
+                          <span
+                            className="rounded bg-brand/10 px-1 py-0.5 text-[10px] font-semibold text-brand"
+                            title={t("agents.oauthBadgeTitle")}
+                          >
+                            {t("agents.oauthBadge")}
+                          </span>
+                        )}
+                      </div>
                       <div className="font-mono text-xs text-muted-foreground">{a.prefix}…</div>
                       {a.description && <div className="max-w-[18rem] truncate text-xs text-muted-foreground">{a.description}</div>}
                     </TableCell>
@@ -302,6 +313,12 @@ export default function AgentsPage() {
           )
         }
       />
+      {settings.data && !settings.data.enabled && (
+        <p className="mb-4 flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive" role="alert">
+          <ShieldOff className="size-4 shrink-0" />
+          {t("agents.switch.offBanner")}
+        </p>
+      )}
       {!canManage && <p className="mb-4 rounded-lg border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">{t("agents.viewerNote")}</p>}
       <KillSwitch />
 
@@ -316,6 +333,9 @@ export default function AgentsPage() {
               <span className="rounded-full bg-warning px-1.5 text-[11px] font-semibold text-white tabular-nums">{pending}</span>
             )}
           </TabsTrigger>
+          <TabsTrigger className="flex-none px-3" value="schedules">
+            {t("agents.tab.schedules")}
+          </TabsTrigger>
           <TabsTrigger className="flex-none px-3" value="activity">
             {t("agents.tab.activity")}
           </TabsTrigger>
@@ -325,6 +345,9 @@ export default function AgentsPage() {
         </TabsContent>
         <TabsContent value="approvals">
           <ApprovalsTab />
+        </TabsContent>
+        <TabsContent value="schedules">
+          <SchedulesTab />
         </TabsContent>
         <TabsContent value="activity">
           <ActivityTab />

@@ -47,7 +47,7 @@ kadr ──► R2 / webhooks / imports — outbound connections
 
 - `/v1` is not published through the tunnel at all.
 - Admin console: Cloudflare Access + own login (argon2id) + TOTP. Optional WebAuthn passkeys (discoverable, user-verified; counts as MFA; sign-count regression rejected; see ADMIN_API.md).
-- Additionally: the admin server verifies the `Cf-Access-Jwt-Assertion` header.
+- Additionally, when `KADR_CF_ACCESS_TEAM_DOMAIN` and `KADR_CF_ACCESS_AUD` are set, the admin server verifies the `Cf-Access-Jwt-Assertion` header (RS256 against the team's published keys, issuer, audience, expiry) and refuses requests without it (`403 access_required`), except the exempt paths published with a Bypass policy (`KADR_CF_ACCESS_EXEMPT`). Without these variables the check is off — set them in production.
 - MCP (`/mcp`) on the admin listener accepts only agent tokens; it rejects foreign browser `Origin`s (DNS rebinding). Behind Cloudflare Access use a service token or a path bypass restricted by IP plus the token's IP allowlist.
 
 ## 4. systemd sandbox
@@ -92,6 +92,11 @@ CapabilityBoundingSet=
 - `go mod verify`, `govulncheck` in CI; Renovate for dependencies.
 - Reproducible builds (`-trimpath`, pinned Go), SHA-256 and artifact signing (cosign / minisign).
 - `ffmpeg`, `libvips`, `rclone` from official Debian packages (security updates via `unattended-upgrades`).
+
+## AI data flows
+
+- AI moderation with Claude sends a downscaled preview (≤ 1024 px) of each moderated asset to the Anthropic API; scheduled agent runs send tool results (project metadata, analytics, previews the agent asks for). Nothing is sent while `ANTHROPIC_API_KEY` is unset. A self-hosted classifier (`KADR_AI_CLASSIFIER_URL`) keeps moderation images on your infrastructure.
+- OAuth: public clients with mandatory PKCE (S256); codes are single-use, hashed, valid 2 minutes; refresh tokens are hashed and rotated on every use; redirect URIs must be pre-registered (https or loopback) and are matched exactly; consent requires an owner/admin session behind Cloudflare Access.
 
 ## Documents
 

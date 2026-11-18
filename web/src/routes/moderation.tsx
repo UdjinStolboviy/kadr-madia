@@ -1,10 +1,11 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
-import { Bot, Check, Flag, FolderKanban, ImageOff, Loader2, ShieldCheck, X } from "lucide-react";
+import { Bot, Check, Flag, FolderKanban, ImageOff, Loader2, ShieldCheck, Sparkles, X } from "lucide-react";
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
 
 import { Field, PageHeader, RelativeTime, StatusBadge } from "@/components/common";
+import { AiModerationCard } from "@/components/moderation/ai-settings";
 import { FilterSelect, ProjectSelect } from "@/components/project-select";
 import { EmptyState, ErrorState } from "@/components/states";
 import { TagInput } from "@/components/tag-input";
@@ -109,6 +110,7 @@ export default function ModerationPage() {
         <EmptyState icon={<FolderKanban />} title={t("moderation.noProjectsTitle")} description={t("moderation.noProjectsDesc")} />
       ) : (
         <>
+          {pid && <AiModerationCard projectId={pid} />}
           <div className="mb-4 flex flex-wrap items-center gap-2">
             <div className="flex flex-wrap gap-1 rounded-lg border p-0.5" role="tablist" aria-label={t("moderation.status")}>
               {FILTERS.map((f) => (
@@ -154,6 +156,15 @@ export default function ModerationPage() {
                           {it.moderation.actor_type === "agent" && (
                             <span className="inline-flex items-center gap-0.5 text-[11px] text-brand" title={t("moderation.byAgent")}>
                               <Bot className="size-3" />
+                            </span>
+                          )}
+                          {it.moderation.actor_type === "system" && (
+                            <span
+                              className="inline-flex max-w-[60%] items-center gap-0.5 truncate rounded bg-brand/10 px-1 text-[10px] font-semibold text-brand"
+                              title={t("moderation.byAi", { name: it.moderation.actor_id ?? "" })}
+                            >
+                              <Sparkles className="size-3 shrink-0" />
+                              AI
                             </span>
                           )}
                         </div>

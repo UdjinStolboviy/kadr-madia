@@ -648,10 +648,10 @@ export interface components {
             /** @example acme/blb_01jd8x3k2m4n5p6q7r8s9t0v1w/main.avif */
             key?: string;
             /**
-             * @description Video renditions: the encoder that produced the file. `libx264` on a VAAPI host means the hardware encode fell back to software.
+             * @description Video renditions: the encoder that produced the file. `libx264` on a VAAPI host means the hardware encode fell back to software; `libsvtav1` means the video is AV1.
              * @enum {string}
              */
-            encoder?: "h264_vaapi" | "libx264";
+            encoder?: "h264_vaapi" | "libx264" | "libsvtav1";
         };
         Placeholder: {
             /** @description Standard base64 of the ThumbHash bytes. */

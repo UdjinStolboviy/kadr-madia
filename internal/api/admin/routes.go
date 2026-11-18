@@ -184,6 +184,25 @@ func apiRoutes() []route {
 		{"POST", "/agent-approvals/{approval_id}/approve", access.AgentsManage, scopeNone, nil, h((*Server).handleApprove)},
 		{"POST", "/agent-approvals/{approval_id}/reject", access.AgentsManage, scopeNone, nil, h((*Server).handleReject)},
 
+		// AI operations.
+		{"GET", "/ai/status", access.SystemRead, scopeNone, nil, h((*Server).handleAIStatus)},
+		{"GET", "/projects/{id}/moderation/settings", access.AssetsRead, scopeProject, nil, h((*Server).handleGetModerationSettings)},
+		{"PUT", "/projects/{id}/moderation/settings", access.ProjectsWrite, scopeProject, nil, h((*Server).handlePutModerationSettings)},
+		{"POST", "/projects/{id}/moderation/backlog", access.ModerationWrite, scopeProject, nil, h((*Server).handleModerationBacklog)},
+		{"GET", "/agent-schedules", access.AgentsView, scopeNone, nil, h((*Server).handleListSchedules)},
+		{"POST", "/agent-schedules", access.AgentsManage, scopeNone, nil, h((*Server).handleCreateSchedule)},
+		{"PATCH", "/agent-schedules/{schedule_id}", access.AgentsManage, scopeNone, nil, h((*Server).handlePatchSchedule)},
+		{"DELETE", "/agent-schedules/{schedule_id}", access.AgentsManage, scopeNone, nil, h((*Server).handleDeleteSchedule)},
+		{"POST", "/agent-schedules/{schedule_id}/run", access.AgentsManage, scopeNone, nil, h((*Server).handleRunSchedule)},
+		{"GET", "/agent-runs", access.AgentsView, scopeNone, nil, h((*Server).handleListRuns)},
+		{"POST", "/agent-runs", access.AgentsManage, scopeNone, nil, h((*Server).handleCreateRun)},
+		{"GET", "/agent-runs/{run_id}", access.AgentsView, scopeNone, nil, h((*Server).handleGetRun)},
+
+		// OAuth consent (MCP clients such as claude.ai connectors).
+		{"GET", "/oauth/grants/{grant_id}", access.AgentsManage, scopeNone, nil, h((*Server).handleGetGrant)},
+		{"POST", "/oauth/grants/{grant_id}/approve", access.AgentsManage, scopeNone, nil, h((*Server).handleApproveGrant)},
+		{"POST", "/oauth/grants/{grant_id}/deny", access.AgentsManage, scopeNone, nil, h((*Server).handleDenyGrant)},
+
 		// The calling agent itself.
 		{"GET", "/agent/me", access.AgentSelf, scopeNone, nil, h((*Server).handleAgentMe)},
 		{"GET", "/agent/approvals", access.AgentSelf, scopeNone, nil, h((*Server).handleAgentApprovals)},

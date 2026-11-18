@@ -48,6 +48,25 @@ needed in `--local` mode. Sign URLs with `signUrl()` from `sdk/node`.
 5. Optional `PATH_PREFIX` var if the host serves keys under a prefix.
 6. `pnpm deploy`.
 
+### Several Cloudflare accounts
+
+One kadr-edge Worker runs per Cloudflare account (its R2 binding can only read
+that account's private bucket). Keep one config file per account next to
+`wrangler.toml` and deploy each with its own credentials:
+
+| File | Worker | Host | Private bucket |
+|---|---|---|---|
+| `wrangler.toml` | `kadr-edge` | `media.do1ob.com` | `kadr-private` |
+| `wrangler.omi.toml` | `kadr-edge-omi` | `media.omi.kim` | `omi-private` |
+
+```bash
+CLOUDFLARE_ACCOUNT_ID=<omi account> pnpm exec wrangler deploy -c wrangler.omi.toml
+CLOUDFLARE_ACCOUNT_ID=<omi account> pnpm exec wrangler secret put SIGNING_KEYS -c wrangler.omi.toml
+```
+
+The storage profile of the projects on that account sets `private_base_url`
+to `https://media.omi.kim`, so signed URLs point at the right Worker.
+
 ## What was verified locally (workerd, `--local`)
 
 Valid signed URL (200, exact bytes, headers), URL from the Node SDK, signature

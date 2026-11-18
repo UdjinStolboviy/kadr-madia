@@ -7,6 +7,9 @@ import { t } from "@/i18n/store";
 import { api, errorMessage, isApiError } from "./api";
 import type {
   AgentInput,
+  AgentRun,
+  ModerationSettings,
+  ScheduleInput,
   SetModerationRequest,
   CreateApiKeyRequest,
   CreateCloudConnectionRequest,
@@ -55,6 +58,11 @@ export const qk = {
   agentSettings: ["agents", "settings"] as const,
   approvals: ["agent-approvals"] as const,
   moderation: (projectId: string) => ["projects", projectId, "moderation"] as const,
+  moderationSettings: (projectId: string) => ["projects", projectId, "moderation-settings"] as const,
+  oauthGrant: (id: string) => ["oauth", "grants", id] as const,
+  schedules: ["agent-schedules"] as const,
+  runs: ["agent-runs"] as const,
+  run: (id: string) => ["agent-runs", id] as const,
 };
 
 export const meQuery = queryOptions({
@@ -126,6 +134,26 @@ export const agentSettingsQuery = queryOptions({
   queryKey: qk.agentSettings,
   queryFn: () => api.agents.settings(),
   refetchInterval: 30_000,
+});
+
+export const moderationSettingsQuery = (projectId: string) =>
+  queryOptions({ queryKey: qk.moderationSettings(projectId), queryFn: () => api.moderation.settings(projectId) });
+
+export const oauthGrantQuery = (id: string) =>
+  queryOptions({ queryKey: qk.oauthGrant(id), queryFn: () => api.oauth.grant(id), staleTime: Infinity });
+
+export const schedulesQuery = queryOptions({
+  queryKey: qk.schedules,
+  queryFn: () => api.schedules.list(),
+});
+
+const activeRun = (r: AgentRun) => r.status === "queued" || r.status === "running";
+
+export const runsQuery = queryOptions({
+  queryKey: qk.runs,
+  queryFn: () => api.runs.list({ limit: 100 }).then((r) => r.items),
+  // Poll while something is in flight.
+  refetchInterval: (q) => ((q.state.data ?? []).some(activeRun) ? 5_000 : 30_000),
 });
 
 export const approvalsQuery = queryOptions({
@@ -480,5 +508,90 @@ export function useSetModeration(projectId: string) {
       void qc.invalidateQueries({ queryKey: qk.audit });
     },
     onError: onErrorToast("moderation.toast.failed"),
+  });
+}
+
+export function useSaveModerationSettings(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Omit<ModerationSettings, "since">) => api.moderation.setSettings(projectId, body),
+    onSuccess: (res) => {
+      qc.setQueryData(qk.moderationSettings(projectId), res);
+      toast.success(t("moderation.ai.saved"));
+      void qc.invalidateQueries({ queryKey: qk.audit });
+    },
+  });
+}
+
+export function useModerationBacklog(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.moderation.backlog(projectId),
+    onSuccess: (r) => {
+      toast.success(t("moderation.ai.backlogQueued", { count: r.queued }));
+      void qc.invalidateQueries({ queryKey: qk.moderation(projectId) });
+    },
+    onError: onErrorToast("moderation.ai.backlogFailed"),
+  });
+}
+
+function invalidateSchedules(qc: ReturnType<typeof useQueryClient>) {
+  void qc.invalidateQueries({ queryKey: qk.schedules });
+  void qc.invalidateQueries({ queryKey: qk.runs });
+  void qc.invalidateQueries({ queryKey: qk.audit });
+}
+
+export function useSaveSchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id?: string; body: ScheduleInput }) => (v.id ? api.schedules.update(v.id, v.body) : api.schedules.create(v.body)),
+    onSuccess: () => {
+      toast.success(t("agents.schedules.saved"));
+      invalidateSchedules(qc);
+    },
+  });
+}
+
+export function useToggleSchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: string; enabled: boolean }) => api.schedules.update(v.id, { enabled: v.enabled }),
+    onSuccess: () => invalidateSchedules(qc),
+    onError: onErrorToast("agents.schedules.saveFailed"),
+  });
+}
+
+export function useDeleteSchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.schedules.remove(id),
+    onSuccess: () => {
+      toast.success(t("agents.schedules.deleted"));
+      invalidateSchedules(qc);
+    },
+    onError: onErrorToast("agents.schedules.deleteFailed"),
+  });
+}
+
+export function useRunSchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.schedules.run(id),
+    onSuccess: () => {
+      toast.success(t("agents.runs.started"));
+      invalidateSchedules(qc);
+    },
+    onError: onErrorToast("agents.runs.startFailed"),
+  });
+}
+
+export function useStartRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { agent_id: string; prompt: string }) => api.runs.create(body),
+    onSuccess: () => {
+      toast.success(t("agents.runs.started"));
+      invalidateSchedules(qc);
+    },
   });
 }

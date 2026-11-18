@@ -3,12 +3,20 @@ import { t } from "@/i18n/store";
 import type {
   Agent,
   AgentApproval,
+  AgentRun,
+  AgentSchedule,
   AgentInput,
   AgentSecretResponse,
   AgentSettings,
   AuditFilters,
   Moderation,
   ModerationPage,
+  ModerationSettings,
+  ModerationSettingsResponse,
+  OAuthApproveResponse,
+  OAuthGrant,
+  ScheduleInput,
+  SchedulesResponse,
   SetModerationRequest,
   Analytics,
   ApiErrorCode,
@@ -379,5 +387,29 @@ export const api = {
       request<Moderation>(`/projects/${enc(projectId)}/assets/${enc(assetId)}/moderation`, { method: "PUT", body }),
     previewUrl: (projectId: string, assetId: string, width = 480) =>
       `${API_BASE}/projects/${enc(projectId)}/assets/${enc(assetId)}/preview?width=${width}`,
+    settings: (projectId: string) => request<ModerationSettingsResponse>(`/projects/${enc(projectId)}/moderation/settings`),
+    setSettings: (projectId: string, body: Omit<ModerationSettings, "since">) =>
+      request<ModerationSettingsResponse>(`/projects/${enc(projectId)}/moderation/settings`, { method: "PUT", body }),
+    backlog: (projectId: string) => request<{ queued: number }>(`/projects/${enc(projectId)}/moderation/backlog`, { method: "POST" }),
+  },
+
+  oauth: {
+    grant: (id: string) => request<OAuthGrant>(`/oauth/grants/${enc(id)}`),
+    approve: (id: string, body: AgentInput) => request<OAuthApproveResponse>(`/oauth/grants/${enc(id)}/approve`, { method: "POST", body }),
+    deny: (id: string) => request<{ redirect_url: string }>(`/oauth/grants/${enc(id)}/deny`, { method: "POST" }),
+  },
+
+  schedules: {
+    list: () => request<SchedulesResponse>("/agent-schedules"),
+    create: (body: ScheduleInput) => request<AgentSchedule>("/agent-schedules", { method: "POST", body }),
+    update: (id: string, body: ScheduleInput) => request<AgentSchedule>(`/agent-schedules/${enc(id)}`, { method: "PATCH", body }),
+    remove: (id: string) => request<void>(`/agent-schedules/${enc(id)}`, { method: "DELETE" }),
+    run: (id: string) => request<AgentRun>(`/agent-schedules/${enc(id)}/run`, { method: "POST" }),
+  },
+
+  runs: {
+    list: (p: { schedule_id?: string; limit?: number } = {}) => request<ItemsResponse<AgentRun>>("/agent-runs", { query: { ...p } }),
+    get: (id: string) => request<AgentRun>(`/agent-runs/${enc(id)}`),
+    create: (body: { agent_id: string; prompt: string }) => request<AgentRun>("/agent-runs", { method: "POST", body }),
   },
 };

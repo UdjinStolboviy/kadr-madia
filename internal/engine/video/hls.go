@@ -165,7 +165,7 @@ func (e *FFmpeg) PackageHLS(ctx context.Context, src SourceInfo, p preset.VideoP
 		"-var_stream_map", strings.Join(vsm, " "),
 		"-progress", "pipe:1", "-nostats", filepath.Join(dir, "v_%v.m3u8"))
 
-	timeout := time.Duration(src.DurationSec * float64(e.cfg.TimeoutPerSec) * float64(n+1) / 2)
+	timeout := time.Duration(src.DurationSec * float64(e.cfg.TimeoutPerMediaSecond) * float64(n+1) / 2)
 	if timeout < e.cfg.MinTimeout {
 		timeout = e.cfg.MinTimeout
 	}

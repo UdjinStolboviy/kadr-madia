@@ -174,21 +174,3 @@ func curveSlope(samples []sample, def float64) float64 {
 	}
 	return def
 }
-
-// nearestSample returns the sample whose q is closest to q.
-func nearestSample(samples []sample, q int) sample {
-	best := samples[0]
-	for _, s := range samples[1:] {
-		if abs(s.q-q) < abs(best.q-q) {
-			best = s
-		}
-	}
-	return best
-}
-
-func abs(x int) int {
-	if x < 0 {
-		return -x
-	}
-	return x
-}

@@ -39,6 +39,7 @@ type AgentToken struct {
 	AllowedIPs        []string // CIDRs; empty = any address
 	MaxDeletesPerHour int
 	CreatedBy         string
+	OAuthClientID     *string // set when the token was obtained through OAuth
 	LastUsedAt        *time.Time
 	LastUsedIP        *string
 	ExpiresAt         *time.Time
@@ -69,16 +70,16 @@ func (t *AgentToken) Active(now time.Time) bool {
 }
 
 const agentTokenCols = `id, name, description, prefix, secret_hash, level, extra_scopes, project_ids, approval_mode,
-	allowed_ips, max_deletes_per_hour, created_by, last_used_at, last_used_ip, expires_at, revoked_at, created_at, updated_at`
+	allowed_ips, max_deletes_per_hour, created_by, oauth_client_id, last_used_at, last_used_ip, expires_at, revoked_at, created_at, updated_at`
 
 func scanAgentToken(row interface{ Scan(...any) error }) (*AgentToken, error) {
 	var t AgentToken
 	var extra, ips string
-	var projects, lastIP sql.NullString
+	var projects, lastIP, oauthClient sql.NullString
 	var last, exp, rev sql.NullInt64
 	var created, updated int64
 	if err := row.Scan(&t.ID, &t.Name, &t.Description, &t.Prefix, &t.SecretHash, &t.Level, &extra, &projects, &t.ApprovalMode,
-		&ips, &t.MaxDeletesPerHour, &t.CreatedBy, &last, &lastIP, &exp, &rev, &created, &updated); err != nil {
+		&ips, &t.MaxDeletesPerHour, &t.CreatedBy, &oauthClient, &last, &lastIP, &exp, &rev, &created, &updated); err != nil {
 		return nil, mapErr(err)
 	}
 	if err := json.Unmarshal([]byte(extra), &t.ExtraScopes); err != nil {
@@ -99,7 +100,7 @@ func scanAgentToken(row interface{ Scan(...any) error }) (*AgentToken, error) {
 	if t.AllowedIPs == nil {
 		t.AllowedIPs = []string{}
 	}
-	t.LastUsedIP = fromNullStr(lastIP)
+	t.LastUsedIP, t.OAuthClientID = fromNullStr(lastIP), fromNullStr(oauthClient)
 	t.LastUsedAt, t.ExpiresAt, t.RevokedAt = fromNullMs(last), fromNullMs(exp), fromNullMs(rev)
 	t.CreatedAt, t.UpdatedAt = fromMs(created), fromMs(updated)
 	return &t, nil
@@ -124,10 +125,10 @@ func nullJSONList(v []string) sql.NullString {
 func (s *Store) CreateAgentToken(ctx context.Context, t *AgentToken) error {
 	_, err := s.w.ExecContext(ctx,
 		`INSERT INTO agent_tokens (id, name, description, prefix, secret_hash, level, extra_scopes, project_ids, approval_mode,
-		   allowed_ips, max_deletes_per_hour, created_by, expires_at, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		   allowed_ips, max_deletes_per_hour, created_by, oauth_client_id, expires_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.ID, t.Name, t.Description, t.Prefix, t.SecretHash, t.Level, jsonList(t.ExtraScopes), nullJSONList(t.ProjectIDs),
-		t.ApprovalMode, jsonList(t.AllowedIPs), t.MaxDeletesPerHour, t.CreatedBy, nullMs(t.ExpiresAt), ms(t.CreatedAt), ms(t.UpdatedAt))
+		t.ApprovalMode, jsonList(t.AllowedIPs), t.MaxDeletesPerHour, t.CreatedBy, nullStr(t.OAuthClientID), nullMs(t.ExpiresAt), ms(t.CreatedAt), ms(t.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("create agent token: %w", mapErr(err))
 	}
@@ -178,7 +179,7 @@ func (s *Store) GetAgentTokenByPrefix(ctx context.Context, prefix string) (*Agen
 // RevokeAgentToken sets revoked_at (idempotent).
 func (s *Store) RevokeAgentToken(ctx context.Context, id string, now time.Time) error {
 	res, err := s.w.ExecContext(ctx,
-		`UPDATE agent_tokens SET revoked_at = COALESCE(revoked_at, ?), updated_at = ? WHERE id = ?`, ms(now), ms(now), id)
+		`UPDATE agent_tokens SET revoked_at = COALESCE(revoked_at, ?), refresh_hash = NULL, updated_at = ? WHERE id = ?`, ms(now), ms(now), id)
 	if err != nil {
 		return mapErr(err)
 	}
