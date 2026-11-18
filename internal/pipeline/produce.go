@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/UdjinStolboviy/kadr-madia/internal/engine/file"
 	"github.com/UdjinStolboviy/kadr-madia/internal/engine/image"
@@ -38,6 +39,7 @@ type producedFile struct {
 	bitrate            int64
 	overBudget         bool
 	disposition        string // Content-Disposition stored with the object
+	encoder            string // video: h264_vaapi | libx264
 }
 
 func (s *Service) produceImage(ctx context.Context, pc *processCtx, srcPath, outDir string) (*produced, error) {
@@ -103,10 +105,12 @@ func (s *Service) produceVideo(ctx context.Context, pc *processCtx, srcPath, out
 	if pc.vparams.HLS {
 		mp4Report = func(pct int) { report(pct / 2) }
 	}
+	started := time.Now()
 	vo, err := s.video.Transcode(ctx, info, pc.vparams, outDir, mp4Report)
 	if err != nil {
 		return nil, classifyEngineError(err)
 	}
+	s.recordTranscode(pc, info, vo, time.Since(started))
 	var ho *video.HLSOutput
 	if pc.vparams.HLS {
 		if ho, err = s.packageHLS(ctx, pc, info, outDir, func(pct int) { report(50 + pct/2) }); err != nil {
@@ -120,7 +124,7 @@ func (s *Service) produceVideo(ctx context.Context, pc *processCtx, srcPath, out
 		bitrate = vo.Bytes * 8 * 1000 / vo.DurationMs
 	}
 	p.files = append(p.files, producedFile{name: "main", format: "mp4", path: vo.VideoPath, bytes: vo.Bytes,
-		width: vo.Width, height: vo.Height, bitrate: bitrate})
+		width: vo.Width, height: vo.Height, bitrate: bitrate, encoder: vo.Encoder})
 
 	// Poster: compress the extracted frame with the image engine.
 	posterDir := filepath.Join(outDir, "poster")

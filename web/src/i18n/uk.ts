@@ -18,6 +18,8 @@ import * as presets from "./messages/presets";
 import * as settings from "./messages/settings";
 import * as signing from "./messages/signing";
 import * as webhooks from "./messages/webhooks";
+import * as agents from "./messages/agents";
+import * as moderation from "./messages/moderation";
 
 export const uk = {
   ...common.uk,
@@ -40,4 +42,6 @@ export const uk = {
   ...settings.uk,
   ...signing.uk,
   ...webhooks.uk,
+  ...agents.uk,
+  ...moderation.uk,
 };

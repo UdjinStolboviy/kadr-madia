@@ -15,7 +15,8 @@
 | | Secrets leaked from the DB | Envelope encryption; the master key lives outside the DB and outside backups |
 | **DoS** | "Bombs" (decompression, 100k×100k PNG, 10-hour video) | `maxInputBytes`, `maxInputPixels`, ffprobe limits before ffmpeg runs, process timeouts, pool semaphores, quotas |
 | | Ticket flooding | Rate limits per key and namespace (token bucket), quota reservation |
-| **Elevation of privilege** | RCE via a codec bug | Child processes without a shell (`exec.Command` with an argument array), dedicated unprivileged `kadr` user, systemd sandboxing, unprivileged LXC, libvips/ffmpeg updates |
+| **Elevation of privilege** | AI agent exceeds its mandate (bug, prompt injection via file names / images / webhook payloads) | Separate agent tokens with level + explicit sensitive grants (owner only), project scope, per-route actions enforced in one middleware, approvals for destructive actions (default), deletion budget, rate limits, IP allowlist, expiry, global kill switch, reason + tool in every audit entry, `agent.denied` logging ([AGENTS.md](AGENTS.md)) |
+| | RCE via a codec bug | Child processes without a shell (`exec.Command` with an argument array), dedicated unprivileged `kadr` user, systemd sandboxing, unprivileged LXC, libvips/ffmpeg updates |
 | | SSRF via URL import | Resolve → check IP (RFC 1918, loopback, link-local, CGNAT, metadata, IPv6 ULA) → dial the verified IP; http/https only; limited redirects, each re-checked |
 
 ## 2. Keys and secrets
@@ -28,6 +29,8 @@
 | URL signing secrets | `signing_keys.secret_enc` + Worker secrets | 32 bytes, `kid` |
 | S3/R2 credentials, OAuth tokens, webhook secrets | `*_enc` in the DB | AES-256-GCM, per-record DEK, DEK wrapped by the KEK |
 | Admin sessions | SHA-256 of the token in the DB | 32 bytes, cookie `__Host-kadr_session` |
+| Agent tokens | Only SHA-256(secret‖pepper) in the DB | `kd_agent_<8-char prefix>_<32 base62 chars>`, shown once, rotatable |
+| Held agent requests / results | `agent_approvals.body`, `result_body` | AES-256-GCM envelope, AAD bound to the approval id |
 
 **Rotation:**
 - `kadr keys rotate-master` — re-wraps every DEK with the new KEK (data untouched).
@@ -45,6 +48,7 @@ kadr ──► R2 / webhooks / imports — outbound connections
 - `/v1` is not published through the tunnel at all.
 - Admin console: Cloudflare Access + own login (argon2id) + TOTP. Optional WebAuthn passkeys (discoverable, user-verified; counts as MFA; sign-count regression rejected; see ADMIN_API.md).
 - Additionally: the admin server verifies the `Cf-Access-Jwt-Assertion` header.
+- MCP (`/mcp`) on the admin listener accepts only agent tokens; it rejects foreign browser `Origin`s (DNS rebinding). Behind Cloudflare Access use a service token or a path bypass restricted by IP plus the token's IP allowlist.
 
 ## 4. systemd sandbox
 

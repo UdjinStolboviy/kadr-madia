@@ -3,6 +3,14 @@
 // via a dynamic import guarded by import.meta.env.VITE_MOCK, so it is never part
 // of a production build.
 import type {
+  Agent,
+  AgentApproval,
+  AgentInput,
+  AgentLevel,
+  AuditEntry,
+  Moderation,
+  ModerationItem,
+  SetModerationRequest,
   ApiKey,
   Asset,
   ApiKeyScope,
@@ -774,9 +782,228 @@ on("GET", "/audit", ({ query }) => {
   const limit = Math.min(200, Math.max(1, Number(query.get("limit") ?? 50)));
   const cursor = query.get("cursor");
   const start = cursor ? Number(cursor) : 0;
-  const items = db.audit.slice(start, start + limit);
-  const next = start + limit < db.audit.length ? String(start + limit) : null;
+  const actorType = query.get("actor_type");
+  const actorId = query.get("actor_id");
+  const all = [...mockAgentAudit, ...db.audit].filter(
+    (e) => (!actorType || e.actor_type === actorType) && (!actorId || e.actor_id === actorId),
+  );
+  const items = all.slice(start, start + limit);
+  const next = start + limit < all.length ? String(start + limit) : null;
   return json(200, { items, next_cursor: next });
+});
+
+// ---- AI agents --------------------------------------------------------------
+
+const LEVEL_PERMS: Record<AgentLevel, string[]> = {
+  read: ["analytics:read", "assets:read", "audit:read", "jobs:read", "keys:read", "projects:read", "storage:read", "system:read", "webhooks:read"],
+  edit: [],
+  full: [],
+};
+LEVEL_PERMS.edit = [...LEVEL_PERMS.read, "jobs:write", "moderation:write", "presets:write", "projects:write", "webhooks:write"].sort();
+LEVEL_PERMS.full = [...LEVEL_PERMS.edit, "assets:delete", "keys:revoke", "webhooks:delete"].sort();
+
+let agentsEnabled = true;
+const mockAgents: Agent[] = [];
+const mockApprovals: AgentApproval[] = [];
+const mockAgentAudit: AuditEntry[] = [];
+
+function agentPerms(level: AgentLevel, extra: string[]) {
+  return [...LEVEL_PERMS[level], ...(level === "read" ? [] : extra)].sort();
+}
+
+function mcpSetup(token: string) {
+  const url = `${window.location.origin}/mcp`;
+  return {
+    url,
+    claude_code_command: `claude mcp add --transport http kadr ${url} --header "Authorization: Bearer ${token}"`,
+    json_config: JSON.stringify({ mcpServers: { kadr: { type: "http", url, headers: { Authorization: `Bearer ${token}` } } } }, null, 2),
+  };
+}
+
+function applyAgent(a: Agent, b: AgentInput, create: boolean) {
+  const errors: Record<string, string> = {};
+  if (b.name !== undefined || create) {
+    if (!b.name?.trim()) errors.name = "required, at most 100 characters";
+    else a.name = b.name.trim();
+  }
+  if (b.description !== undefined) a.description = b.description;
+  if (b.level !== undefined) a.level = b.level;
+  if (b.extra_scopes !== undefined) a.extra_scopes = b.extra_scopes;
+  if (a.level === "read" && a.extra_scopes.length) errors.extra_scopes = "sensitive permissions need the edit or full level";
+  if (b.project_ids !== undefined) {
+    if (b.project_ids !== null && b.project_ids.length === 0) errors.project_ids = "list at least one project, or null for all projects";
+    a.project_ids = b.project_ids;
+  }
+  if (b.approval_mode !== undefined) a.approval_mode = b.approval_mode;
+  if (b.allowed_ips !== undefined) a.allowed_ips = b.allowed_ips;
+  if (b.max_deletes_per_hour !== undefined) a.max_deletes_per_hour = b.max_deletes_per_hour;
+  if (b.expires_in_days !== undefined) {
+    a.expires_at = b.expires_in_days === 0 ? null : new Date(Date.now() + b.expires_in_days * 86400_000).toISOString();
+  }
+  if (Object.keys(errors).length) throw validationError(errors);
+  a.permissions = agentPerms(a.level, a.extra_scopes);
+  a.updated_at = nowIso();
+}
+
+function seedAgents() {
+  if (mockAgents.length || !db.projects.length) return;
+  const p = db.projects[0]!;
+  const a: Agent = {
+    id: ulid("agt_"), name: "claude-moderator", description: "Reviews new uploads against the content policy", prefix: `kd_agent_${randomBase62(8)}`,
+    level: "edit", extra_scopes: [], permissions: agentPerms("edit", []), project_ids: [p.id], approval_mode: "destructive",
+    allowed_ips: [], max_deletes_per_hour: 50, status: "active", created_by: db.admin.id, last_used_at: new Date(Date.now() - 600_000).toISOString(),
+    last_used_ip: "203.0.113.7", expires_at: new Date(Date.now() + 80 * 86400_000).toISOString(), revoked_at: null, created_at: nowIso(), updated_at: nowIso(),
+  };
+  mockAgents.push(a);
+  mockApprovals.push({
+    id: ulid("apr_"), agent_id: a.id, agent_name: a.name, project_id: p.id, action: "assets:delete", tool: "kadr_delete_asset",
+    method: "DELETE", path: `/projects/${p.id}/assets/ast_01JSPAM00000000000000000`, body: null,
+    reason: "Spam advertisement overlay, rejected by moderation policy", status: "pending", result_status: null, result: null,
+    decided_by: null, decision_note: null, created_at: nowIso(), expires_at: new Date(Date.now() + 86400_000).toISOString(), decided_at: null,
+  });
+  mockAgentAudit.push({
+    id: "aud_agent1", actor_type: "agent", actor_id: a.id, project_id: p.id, action: "asset.moderate", target: "ast_01JDOC000000000000000000AB",
+    details: { status: "flagged", labels: ["pii"], reason: "Document shows a passport number", tool: "kadr_set_moderation" }, ip: "203.0.113.7", created_at: nowIso(),
+  });
+}
+
+function findAgent(id: string) {
+  const a = mockAgents.find((x) => x.id === id);
+  if (!a) throw new HttpError(404, "not_found", "Not found", "agent not found");
+  return a;
+}
+
+on("GET", "/agents", () => {
+  seedAgents();
+  return json(200, { items: mockAgents });
+});
+on("GET", "/agents/settings", () => {
+  seedAgents();
+  return json(200, {
+    enabled: agentsEnabled,
+    pending_approvals: mockApprovals.filter((a) => a.status === "pending").length,
+    mcp_url: `${window.location.origin}/mcp`,
+    levels: LEVEL_PERMS,
+    sensitive_scopes: ["keys:issue", "storage:manage", "edge:publish", "billing:manage", "cloud:connect"],
+  });
+});
+on("PUT", "/agents/settings", ({ body }) => {
+  agentsEnabled = (body as { enabled: boolean }).enabled;
+  audit(agentsEnabled ? "agents.enable" : "agents.disable", null);
+  persist();
+  return json(200, {
+    enabled: agentsEnabled,
+    pending_approvals: mockApprovals.filter((a) => a.status === "pending").length,
+    mcp_url: `${window.location.origin}/mcp`,
+    levels: LEVEL_PERMS,
+    sensitive_scopes: ["keys:issue", "storage:manage", "edge:publish", "billing:manage", "cloud:connect"],
+  });
+});
+on("POST", "/agents", ({ body }) => {
+  const token = `kd_agent_${randomBase62(8)}_${randomBase62(32)}`;
+  const a: Agent = {
+    id: ulid("agt_"), name: "", description: "", prefix: token.slice(0, 17), level: "read", extra_scopes: [], permissions: [],
+    project_ids: null, approval_mode: "destructive", allowed_ips: [], max_deletes_per_hour: 50, status: "active", created_by: db.admin.id,
+    last_used_at: null, last_used_ip: null, expires_at: null, revoked_at: null, created_at: nowIso(), updated_at: nowIso(),
+  };
+  const b = body as AgentInput;
+  applyAgent(a, { expires_in_days: 90, ...b }, true);
+  mockAgents.unshift(a);
+  audit("agent.create", a.id, null, { name: a.name, level: a.level });
+  persist();
+  return json(201, { agent: a, token, mcp: mcpSetup(token) });
+});
+on("GET", "/agents/:id", ({ params }) => json(200, findAgent(params[0]!)));
+on("PATCH", "/agents/:id", ({ params, body }) => {
+  const a = findAgent(params[0]!);
+  if (a.revoked_at) throw new HttpError(409, "revoked", "Conflict", "a revoked agent token cannot be changed");
+  applyAgent(a, body as AgentInput, false);
+  audit("agent.update", a.id);
+  persist();
+  return json(200, a);
+});
+on("POST", "/agents/:id/rotate", ({ params }) => {
+  const a = findAgent(params[0]!);
+  const token = `kd_agent_${randomBase62(8)}_${randomBase62(32)}`;
+  a.prefix = token.slice(0, 17);
+  audit("agent.rotate", a.id);
+  persist();
+  return json(200, { agent: a, token, mcp: mcpSetup(token) });
+});
+on("DELETE", "/agents/:id", ({ params }) => {
+  const a = findAgent(params[0]!);
+  a.revoked_at = nowIso();
+  a.status = "revoked";
+  for (const x of mockApprovals) if (x.agent_id === a.id && x.status === "pending") x.status = "rejected";
+  audit("agent.revoke", a.id);
+  persist();
+  return noContent();
+});
+on("GET", "/agent-approvals", ({ query }) => {
+  const st = query.get("status");
+  return json(200, { items: mockApprovals.filter((a) => !st || a.status === st) });
+});
+on("GET", "/agent-approvals/:id", ({ params }) => {
+  const a = mockApprovals.find((x) => x.id === params[0]);
+  if (!a) throw new HttpError(404, "not_found", "Not found", "approval not found");
+  return json(200, a);
+});
+const decideApproval = (approve: boolean) => (ctx: { params: string[]; body: unknown }) => {
+  const a = mockApprovals.find((x) => x.id === ctx.params[0]);
+  if (!a) throw new HttpError(404, "not_found", "Not found", "approval not found");
+  if (a.status !== "pending") throw new HttpError(409, "not_pending", "Conflict", "the request was already decided or has expired");
+  const note = (ctx.body as { note?: string } | undefined)?.note;
+  a.status = approve ? "executed" : "rejected";
+  a.decided_by = db.admin.id;
+  a.decided_at = nowIso();
+  a.decision_note = note || null;
+  if (approve) a.result_status = 204;
+  audit(approve ? "agent.approval.approve" : "agent.approval.reject", a.id, a.project_id);
+  persist();
+  return json(200, a);
+};
+on("POST", "/agent-approvals/:id/approve", decideApproval(true));
+on("POST", "/agent-approvals/:id/reject", decideApproval(false));
+
+// ---- Moderation ---------------------------------------------------------------
+
+const mockModeration = new Map<string, Moderation>();
+const MOCK_COLORS = ["#f59e0b", "#6366f1", "#10b981", "#ef4444", "#0ea5e9", "#a855f7"];
+function moderationItems(projectId: string): ModerationItem[] {
+  return Array.from({ length: 10 }, (_, i) => {
+    const id = `ast_01JMOD${String(i).padStart(2, "0")}${projectId.slice(-12).toUpperCase()}`.slice(0, 30);
+    return {
+      asset_id: id,
+      kind: i % 4 === 3 ? "video" : "image",
+      namespace: `user_${100 + i}`,
+      visibility: i % 3 === 0 ? "private" : "public",
+      created_at: new Date(Date.now() - i * 3_600_000).toISOString(),
+      moderation: mockModeration.get(id) ?? { asset_id: id, status: "unreviewed", labels: [], note: null, actor_type: null, actor_id: null, updated_at: null },
+    };
+  });
+}
+on("GET", "/projects/:id/moderation", ({ params, query }) => {
+  findProject(params[0]!);
+  const st = query.get("status") || "unreviewed";
+  const kind = query.get("kind");
+  const items = moderationItems(params[0]!).filter((it) => (st === "all" || it.moderation.status === st) && (!kind || it.kind === kind));
+  return json(200, { items, next_cursor: null });
+});
+on("PUT", "/projects/:id/assets/:aid/moderation", ({ params, body }) => {
+  findProject(params[0]!);
+  const b = body as SetModerationRequest;
+  if (!["approved", "flagged", "rejected"].includes(b.status)) throw validationError({ status: "must be approved, flagged or rejected" });
+  const m: Moderation = { asset_id: params[1]!, status: b.status, labels: b.labels ?? [], note: b.note ?? null, actor_type: "admin", actor_id: db.admin.id, updated_at: nowIso() };
+  mockModeration.set(params[1]!, m);
+  audit("asset.moderate", params[1]!, params[0]!, { status: b.status, labels: m.labels });
+  persist();
+  return json(200, m);
+});
+on("GET", "/projects/:id/assets/:aid/preview", ({ params }) => {
+  const n = Number(params[1]!.slice(8, 10)) || 0;
+  const color = MOCK_COLORS[n % MOCK_COLORS.length]!;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="480"><rect width="100%" height="100%" fill="${color}"/><circle cx="240" cy="200" r="90" fill="#ffffff55"/><rect x="90" y="330" width="300" height="40" rx="8" fill="#ffffff44"/></svg>`;
+  return new Response(svg, { status: 200, headers: { "Content-Type": "image/svg+xml" } });
 });
 
 // ---- Installation -----------------------------------------------------------

@@ -178,6 +178,9 @@ func (s *Service) runProcessImage(ctx context.Context, j *queue.Job) error {
 		uploaded = append(uploaded, key)
 		rd := &db.Rendition{BlobID: blob.ID, Name: r.name, Format: r.format, StorageKey: key, Bytes: r.bytes,
 			Width: ptr(int64(r.width)), Height: ptr(int64(r.height)), OverBudget: r.overBudget}
+		if r.encoder != "" {
+			rd.Encoder = ptr(r.encoder)
+		}
 		if r.quality > 0 {
 			rd.Quality = ptr(int64(r.quality))
 		}

@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/VictoriaMetrics/metrics"
@@ -71,8 +72,19 @@ type Config struct {
 	// WebAuthnRPID / WebAuthnOrigins configure passkeys (empty → disabled, 503).
 	WebAuthnRPID    string
 	WebAuthnOrigins []string
+	// Notifier alerts operators about agent actions waiting for approval
+	// (optional, e.g. Telegram).
+	Notifier Notifier
+	// PublicURL is the external base URL of the admin listener, used in
+	// notifications and MCP setup snippets (optional).
+	PublicURL string
 	// Now overrides the clock (tests).
 	Now func() time.Time
+}
+
+// Notifier delivers an operator notification.
+type Notifier interface {
+	Notify(ctx context.Context, text string) error
 }
 
 // AssetService is the part of the media pipeline used by the asset explorer.
@@ -80,6 +92,7 @@ type AssetService interface {
 	ListAssets(ctx context.Context, projectID string, in pipeline.ListAssetsInput) (*pipeline.AssetPage, error)
 	GetAsset(ctx context.Context, projectID, id string) (*pipeline.AssetView, error)
 	DeleteAsset(ctx context.Context, projectID, id string) error
+	ReadPreview(ctx context.Context, projectID, assetID string, targetWidth, maxBytes int64) (*pipeline.Preview, error)
 }
 
 // Server is the admin HTTP handler.
@@ -92,6 +105,12 @@ type Server struct {
 	cookieName string
 	playSem    chan struct{}
 	wa         *webAuthnState
+
+	agentLimit      *auth.RateLimiter // all requests per agent token
+	agentWriteLimit *auth.RateLimiter // state-changing requests per agent token
+	agentDeletes    *windowCounter    // deletions per agent token and hour
+	rootOnce        sync.Once
+	root            http.Handler // the full handler, for replaying approved requests
 }
 
 // Session cookie names (docs/ADMIN_API.md).
@@ -138,12 +157,21 @@ func New(cfg Config) *Server {
 		cookieName: name,
 		playSem:    make(chan struct{}, 2),
 		wa:         newWebAuthnState(cfg),
+
+		agentLimit:      auth.NewRateLimiter(300, time.Minute),
+		agentWriteLimit: auth.NewRateLimiter(60, time.Minute),
+		agentDeletes:    newWindowCounter(time.Hour),
 	}
 }
 
 // Handler returns the full admin listener handler: health endpoints, the
 // Admin API and the SPA.
 func (s *Server) Handler() http.Handler {
+	s.rootOnce.Do(func() { s.root = s.buildHandler() })
+	return s.root
+}
+
+func (s *Server) buildHandler() http.Handler {
 	r := chi.NewRouter()
 	r.Use(observability.RequestID)
 	r.Use(observability.Recoverer(s.log))
@@ -153,90 +181,13 @@ func (s *Server) Handler() http.Handler {
 	r.Get("/healthz", observability.Healthz)
 	r.Get("/readyz", observability.Readyz(s.log, map[string]observability.Pinger{"db": s.store.DB()}))
 	r.Mount("/admin/api", s.apiRouter())
+	mcpSrv := s.mcpHandler()
+	r.Handle("/mcp", mcpSrv)
+	r.Handle("/admin/mcp", mcpSrv)
 
 	spa := newSPAHandler(s.cfg.UI, s.cfg.FallbackHTML)
 	r.Get("/*", spa.ServeHTTP)
 	r.Head("/*", spa.ServeHTTP)
-	return r
-}
-
-func (s *Server) apiRouter() http.Handler {
-	r := chi.NewRouter()
-	r.NotFound(func(w http.ResponseWriter, _ *http.Request) {
-		httpx.WriteProblem(w, http.StatusNotFound, "not_found", "no such endpoint")
-	})
-	r.MethodNotAllowed(func(w http.ResponseWriter, _ *http.Request) {
-		httpx.WriteProblem(w, http.StatusMethodNotAllowed, "method_not_allowed", "")
-	})
-
-	r.Post("/auth/login", s.handleLogin)
-	r.Post("/auth/webauthn/login/begin", s.handleWebAuthnLoginBegin)
-	r.Post("/auth/webauthn/login/finish", s.handleWebAuthnLoginFinish)
-
-	r.Group(func(r chi.Router) {
-		r.Use(s.requireSession)
-		r.Use(s.requireCSRF)
-		r.Use(s.requireWriteRole)
-
-		r.Post("/auth/logout", s.handleLogout)
-		r.Get("/auth/me", s.handleMe)
-		r.Post("/auth/totp/setup", s.handleTOTPSetup)
-		r.Post("/auth/totp/enable", s.handleTOTPEnable)
-		r.Post("/auth/totp/disable", s.handleTOTPDisable)
-		r.Post("/auth/webauthn/register/begin", s.handleWebAuthnRegisterBegin)
-		r.Post("/auth/webauthn/register/finish", s.handleWebAuthnRegisterFinish)
-		r.Get("/auth/webauthn/credentials", s.handleWebAuthnList)
-		r.Delete("/auth/webauthn/credentials/{id}", s.handleWebAuthnDelete)
-
-		r.Get("/projects", s.handleListProjects)
-		r.Post("/projects", s.handleCreateProject)
-		r.Get("/projects/{id}", s.handleGetProject)
-		r.Patch("/projects/{id}", s.handlePatchProject)
-		r.Get("/projects/{id}/api-keys", s.handleListAPIKeys)
-		r.Post("/projects/{id}/api-keys", s.handleCreateAPIKey)
-		r.Get("/projects/{id}/presets", s.handleListPresets)
-		r.Delete("/api-keys/{key_id}", s.handleRevokeAPIKey)
-		r.Get("/projects/{id}/webhooks", s.handleListWebhooks)
-		r.Post("/projects/{id}/webhooks", s.handleCreateWebhook)
-		r.Delete("/webhooks/{id}", s.handleDeleteWebhook)
-		r.Post("/webhooks/{id}/test", s.handleTestWebhook)
-		r.Get("/projects/{id}/deliveries", s.handleListDeliveries)
-		r.Post("/deliveries/{id}/retry", s.handleRetryDelivery)
-
-		r.Get("/storage-profiles", s.handleListStorageProfiles)
-		r.Post("/storage-profiles", s.handleCreateStorageProfile)
-		r.Get("/storage-profiles/{id}", s.handleGetStorageProfile)
-		r.Patch("/storage-profiles/{id}", s.handlePatchStorageProfile)
-		r.Delete("/storage-profiles/{id}", s.handleDeleteStorageProfile)
-		r.Post("/storage-profiles/{id}/test", s.handleTestStorageProfile)
-
-		r.Get("/projects/{id}/assets", s.handleListAssets)
-		r.Get("/projects/{id}/assets/{asset_id}", s.handleGetAsset)
-		r.Delete("/projects/{id}/assets/{asset_id}", s.handleDeleteAsset)
-		r.Post("/playground", s.handlePlayground)
-		r.Post("/projects/{id}/presets/{slug}/versions", s.handleSavePresetVersion)
-		r.Post("/projects/{id}/presets/{slug}/reset", s.handleResetPreset)
-		r.Get("/projects/{id}/modes", s.handleListModes)
-		r.Get("/projects/{id}/analytics", s.handleAnalytics)
-		r.Get("/projects/{id}/billing", s.handleBilling)
-		r.Get("/billing/rates", s.handleGetBillingRates)
-		r.Put("/billing/rates", s.handlePutBillingRates)
-		r.Get("/projects/{id}/signing-keys", s.handleListSigningKeys)
-		r.Post("/projects/{id}/signing-keys", s.handleCreateSigningKey)
-		r.Delete("/signing-keys/{kid}", s.handleRetireSigningKey)
-		r.Get("/signing-keys/edge-config", s.handleEdgeConfig)
-		r.Post("/signing-keys/publish", s.handlePublishSigningKeys)
-		r.Get("/projects/{id}/cloud-connections", s.handleListCloudConnections)
-		r.Post("/projects/{id}/cloud-connections", s.handleCreateCloudConnection)
-		r.Delete("/cloud-connections/{id}", s.handleRevokeCloudConnection)
-		r.Get("/jobs", s.handleListJobs)
-		r.Get("/jobs/stream", s.handleJobsStream)
-		r.Post("/jobs/{id}/retry", s.handleRetryJob)
-		r.Post("/jobs/{id}/cancel", s.handleCancelJob)
-
-		r.Get("/system", s.handleSystem)
-		r.Get("/audit", s.handleListAudit)
-	})
 	return r
 }
 
@@ -324,6 +275,9 @@ func (s *Server) audit(r *http.Request, store *db.Store, action string, projectI
 	e := &db.AuditEntry{ActorType: db.ActorAdmin, ProjectID: projectID, Action: action, Target: target, CreatedAt: s.now()}
 	if a := adminFrom(r.Context()); a != nil {
 		e.ActorID = &a.ID
+	} else if t := agentFrom(r.Context()); t != nil {
+		e.ActorType, e.ActorID = db.ActorAgent, &t.ID
+		details = withReason(r, details)
 	}
 	ip := httpx.ClientIP(r)
 	e.IP = &ip

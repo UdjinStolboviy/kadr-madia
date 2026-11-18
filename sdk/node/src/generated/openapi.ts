@@ -388,6 +388,23 @@ export interface webhooks {
         patch?: never;
         trace?: never;
     };
+    "asset.moderated": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A human or AI agent recorded a moderation decision in the admin */
+        post: operations["onAssetModerated"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "upload.expired": {
         parameters: {
             query?: never;
@@ -630,6 +647,11 @@ export interface components {
             url?: string;
             /** @example acme/blb_01jd8x3k2m4n5p6q7r8s9t0v1w/main.avif */
             key?: string;
+            /**
+             * @description Video renditions: the encoder that produced the file. `libx264` on a VAAPI host means the hardware encode fell back to software.
+             * @enum {string}
+             */
+            encoder?: "h264_vaapi" | "libx264";
         };
         Placeholder: {
             /** @description Standard base64 of the ThumbHash bytes. */
@@ -717,6 +739,33 @@ export interface components {
                 /** @description The asset as it was, with `status` set to `deleted`. */
                 asset: components["schemas"]["Asset"];
                 metadata: components["schemas"]["Metadata"];
+            };
+        };
+        AssetModeratedEvent: {
+            /** @constant */
+            type: "asset.moderated";
+            /** Format: date-time */
+            timestamp: string;
+            /**
+             * @description Kadr does not block delivery itself: hide or remove the asset in the
+             *     product (or call DELETE /v1/assets/{id}) according to `status`.
+             */
+            data: {
+                asset_id: string;
+                namespace: string;
+                /** @enum {string} */
+                status: "approved" | "flagged" | "rejected";
+                /** @enum {string} */
+                previous_status: "unreviewed" | "approved" | "flagged" | "rejected";
+                /**
+                 * @example [
+                 *       "nsfw"
+                 *     ]
+                 */
+                labels: string[];
+                note: string | null;
+                /** @enum {string} */
+                actor_type: "admin" | "agent";
             };
         };
         UploadExpiredEvent: {
@@ -1622,6 +1671,40 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["AssetDeletedEvent"];
+            };
+        };
+        responses: {
+            /** @description Accepted. Any other status (or no answer within 10 s) is retried. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    onAssetModerated: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The event id (`evt_…`). Identical across retries — deduplicate on it. */
+                "webhook-id": components["parameters"]["WebhookId"];
+                /** @description Unix seconds of the attempt. Reject values more than 5 minutes off. */
+                "webhook-timestamp": components["parameters"]["WebhookTimestamp"];
+                /**
+                 * @description Space-separated list of `v1,<base64>` signatures, where the value is
+                 *     HMAC-SHA256 over `{webhook-id}.{webhook-timestamp}.{raw body}` keyed
+                 *     with the base64-decoded part of the endpoint secret after `whsec_`
+                 *     (Standard Webhooks).
+                 */
+                "webhook-signature": components["parameters"]["WebhookSignature"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssetModeratedEvent"];
             };
         };
         responses: {

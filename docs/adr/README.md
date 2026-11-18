@@ -17,3 +17,4 @@ Format: Context → Decision → Consequences → Alternatives considered. Statu
 | [0011](0011-webhooks-outbox.md) | Webhooks via transactional outbox, Standard Webhooks | Accepted |
 | [0012](0012-rclone-on-demand.md) | rclone as a one-off process for cloud imports | Accepted |
 | [0013](0013-single-account-byos.md) | One legitimate platform storage account + BYOS | Accepted |
+| [0014](0014-agent-access-mcp.md) | AI agent access through MCP on top of the Admin API | Accepted |

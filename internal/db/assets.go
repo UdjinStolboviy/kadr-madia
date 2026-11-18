@@ -212,6 +212,7 @@ type Rendition struct {
 	Bitrate    *int64
 	Quality    *int64
 	OverBudget bool
+	Encoder    *string // video: h264_vaapi | libx264
 }
 
 const blobCols = `id, project_id, storage_profile_id, visibility, preset_id, preset_version, source_sha256, kind,
@@ -252,10 +253,10 @@ func (s *Store) CreateBlob(ctx context.Context, b *Blob, rs []*Rendition) error 
 		}
 		for _, r := range rs {
 			if _, err := tx.w.ExecContext(ctx,
-				`INSERT INTO renditions (blob_id, name, format, storage_key, bytes, width, height, bitrate, quality, over_budget)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				`INSERT INTO renditions (blob_id, name, format, storage_key, bytes, width, height, bitrate, quality, over_budget, encoder)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				b.ID, r.Name, r.Format, r.StorageKey, r.Bytes, nullInt(r.Width), nullInt(r.Height), nullInt(r.Bitrate),
-				nullInt(r.Quality), r.OverBudget); err != nil {
+				nullInt(r.Quality), r.OverBudget, nullStr(r.Encoder)); err != nil {
 				return fmt.Errorf("create rendition %s.%s: %w", r.Name, r.Format, mapErr(err))
 			}
 		}
@@ -322,7 +323,7 @@ func (s *Store) MarkBlobDeleted(ctx context.Context, id string) (bool, error) {
 // ListRenditions returns the renditions of a blob in a stable order.
 func (s *Store) ListRenditions(ctx context.Context, blobID string) ([]*Rendition, error) {
 	rows, err := s.r.QueryContext(ctx,
-		`SELECT blob_id, name, format, storage_key, bytes, width, height, bitrate, quality, over_budget
+		`SELECT blob_id, name, format, storage_key, bytes, width, height, bitrate, quality, over_budget, encoder
 		 FROM renditions WHERE blob_id = ? ORDER BY rowid`, blobID)
 	if err != nil {
 		return nil, mapErr(err)
@@ -332,10 +333,12 @@ func (s *Store) ListRenditions(ctx context.Context, blobID string) ([]*Rendition
 	for rows.Next() {
 		var r Rendition
 		var w, h, br, q sql.NullInt64
-		if err := rows.Scan(&r.BlobID, &r.Name, &r.Format, &r.StorageKey, &r.Bytes, &w, &h, &br, &q, &r.OverBudget); err != nil {
+		var enc sql.NullString
+		if err := rows.Scan(&r.BlobID, &r.Name, &r.Format, &r.StorageKey, &r.Bytes, &w, &h, &br, &q, &r.OverBudget, &enc); err != nil {
 			return nil, mapErr(err)
 		}
 		r.Width, r.Height, r.Bitrate, r.Quality = fromNullInt(w), fromNullInt(h), fromNullInt(br), fromNullInt(q)
+		r.Encoder = fromNullStr(enc)
 		out = append(out, &r)
 	}
 	return out, mapErr(rows.Err())

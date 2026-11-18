@@ -160,6 +160,8 @@ export type AssetReadyEvent = WithId<Camelize<Schemas["AssetReadyEvent"]>>;
 export type AssetFailedEvent = WithId<Camelize<Schemas["AssetFailedEvent"]>>;
 export type AssetUpdatedEvent = WithId<Camelize<Schemas["AssetUpdatedEvent"]>>;
 export type AssetDeletedEvent = WithId<Camelize<Schemas["AssetDeletedEvent"]>>;
+/** A moderation decision recorded in the admin (by a human or an AI agent). Enforce it in your product. */
+export type AssetModeratedEvent = WithId<Camelize<Schemas["AssetModeratedEvent"]>>;
 export type UploadExpiredEvent = WithId<Camelize<Schemas["UploadExpiredEvent"]>>;
 export type QuotaWarningEvent = WithId<Camelize<Schemas["QuotaWarningEvent"]>>;
 export type QuotaExceededEvent = WithId<Camelize<Schemas["QuotaExceededEvent"]>>;
@@ -175,6 +177,7 @@ export type WebhookEvent =
   | AssetFailedEvent
   | AssetUpdatedEvent
   | AssetDeletedEvent
+  | AssetModeratedEvent
   | UploadExpiredEvent
   | QuotaWarningEvent
   | QuotaExceededEvent

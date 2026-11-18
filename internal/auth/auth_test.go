@@ -146,3 +146,26 @@ func TestRateLimiter(t *testing.T) {
 		t.Fatal("refill wrong")
 	}
 }
+
+func TestAgentToken(t *testing.T) {
+	pepper := []byte("pepper")
+	k, err := GenerateAgentToken(pepper)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !IsAgentToken(k.Secret) || !strings.HasPrefix(k.Prefix, "kd_agent_") {
+		t.Fatalf("token %q prefix %q", k.Secret, k.Prefix)
+	}
+	p, err := ParseAgentToken(k.Secret)
+	if err != nil || p != k.Prefix {
+		t.Fatalf("parse: %q %v", p, err)
+	}
+	for _, bad := range []string{"", "kd_live_AAAAAAAA_" + strings.Repeat("A", 32), "kd_agent_AAAA_x", "kd_agent_AAAAAAAA_" + strings.Repeat("!", 32)} {
+		if _, err := ParseAgentToken(bad); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+	if _, _, err := ParseAPIKey(k.Secret); err == nil {
+		t.Fatal("an agent token must not parse as a project API key")
+	}
+}

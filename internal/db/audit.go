@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -13,6 +14,7 @@ const (
 	ActorAdmin  = "admin"
 	ActorAPIKey = "api_key"
 	ActorSystem = "system"
+	ActorAgent  = "agent"
 )
 
 // AuditEntry is one row of audit_log.
@@ -52,17 +54,61 @@ func (s *Store) InsertAudit(ctx context.Context, e *AuditEntry, details any) err
 	return nil
 }
 
+// AuditFilter narrows ListAuditFiltered. Empty fields match everything;
+// ProjectIDs (when non-nil) restricts entries to those projects.
+type AuditFilter struct {
+	ActorType  string
+	ActorID    string
+	ProjectID  string
+	ProjectIDs []string
+	BeforeID   int64
+	Limit      int
+}
+
 // ListAudit returns up to limit entries with id < beforeID (0 = from newest),
 // newest first.
 func (s *Store) ListAudit(ctx context.Context, limit int, beforeID int64) ([]*AuditEntry, error) {
+	return s.ListAuditFiltered(ctx, AuditFilter{Limit: limit, BeforeID: beforeID})
+}
+
+// ListAuditFiltered returns entries matching f, newest first.
+func (s *Store) ListAuditFiltered(ctx context.Context, f AuditFilter) ([]*AuditEntry, error) {
 	q := `SELECT id, actor_type, actor_id, project_id, action, target, details_json, ip, created_at FROM audit_log`
+	var where []string
 	args := []any{}
-	if beforeID > 0 {
-		q += ` WHERE id < ?`
-		args = append(args, beforeID)
+	if f.BeforeID > 0 {
+		where = append(where, `id < ?`)
+		args = append(args, f.BeforeID)
+	}
+	if f.ActorType != "" {
+		where = append(where, `actor_type = ?`)
+		args = append(args, f.ActorType)
+	}
+	if f.ActorID != "" {
+		where = append(where, `actor_id = ?`)
+		args = append(args, f.ActorID)
+	}
+	if f.ProjectID != "" {
+		where = append(where, `project_id = ?`)
+		args = append(args, f.ProjectID)
+	}
+	if f.ProjectIDs != nil {
+		if len(f.ProjectIDs) == 0 {
+			return []*AuditEntry{}, nil
+		}
+		where = append(where, `project_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(f.ProjectIDs)), ",")+`)`)
+		for _, id := range f.ProjectIDs {
+			args = append(args, id)
+		}
+	}
+	if len(where) > 0 {
+		q += ` WHERE ` + strings.Join(where, ` AND `)
+	}
+	if f.Limit <= 0 {
+		f.Limit = 50
 	}
 	q += ` ORDER BY id DESC LIMIT ?`
-	args = append(args, limit)
+	args = append(args, f.Limit)
 	rows, err := s.r.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, mapErr(err)

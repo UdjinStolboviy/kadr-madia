@@ -55,6 +55,14 @@ Estimates assume one full-time engineer working with AI agents.
 - Litestream + `restore-drill`; `/metrics`, built-in alerts (Telegram/email).
 - WebAuthn passkeys for the admin console (`KADR_WEBAUTHN_RP_ID` / `KADR_WEBAUTHN_ORIGINS`).
 
+## M4.5 — AI agents (done)
+
+- MCP endpoint `/mcp` (Streamable HTTP) and `kadr mcp-bridge` for stdio clients; ~50 tools, guide resource, prompts.
+- Agent tokens with levels read / edit / full, owner-granted sensitive permissions, project scope, IP allowlist, expiry, rotation.
+- One permission table for every Admin API route; approvals (human in the loop) with encrypted held requests; deletion budget, rate limits, kill switch; reason + tool in the audit log.
+- Moderation decisions (`asset_moderation`, `asset.moderated` webhook) and image previews for vision models.
+- Next: OAuth 2.1 for one-click MCP connectors; per-agent activity analytics; scheduled agent runs (nightly moderation / health reports).
+
 ## M5 — Scale & SaaS-ready (as needed)
 
 - `kadr worker` on separate nodes (internal lease API, mTLS); GPU node with NVENC/QSV.
@@ -62,7 +70,7 @@ Estimates assume one full-time engineer working with AI agents.
 - On-demand renditions (lazy, cached in R2) — or imgproxy behind a Worker.
 - Postgres driver for `Store` (multi-instance control plane).
 - Billing: metering from `usage_daily` → Stripe; plans.
-- Content moderation (NSFW classifier as a separate pool), document checks.
+- Built-in NSFW classifier as a separate pool (moderation decisions and the webhook exist; see AGENTS.md), document checks.
 - Self-hosted package: `.deb`, Proxmox installer (helper script), customer documentation.
 
 ## Risks

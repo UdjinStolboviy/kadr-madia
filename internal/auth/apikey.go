@@ -114,3 +114,35 @@ func isBase62(s string) bool {
 	}
 	return true
 }
+
+// Agent tokens (docs/AGENTS.md): kd_agent_<8-char prefix>_<32 base62 chars>.
+const agentMarker = "agent"
+
+// GenerateAgentToken creates a token for an AI agent.
+func GenerateAgentToken(pepper []byte) (GeneratedKey, error) {
+	p, err := randomBase62(keyPrefixChars)
+	if err != nil {
+		return GeneratedKey{}, err
+	}
+	s, err := randomBase62(keySecretChars)
+	if err != nil {
+		return GeneratedKey{}, err
+	}
+	prefix := apiKeyMarker + "_" + agentMarker + "_" + p
+	secret := prefix + "_" + s
+	return GeneratedKey{Secret: secret, Prefix: prefix, Hash: HashAPIKey(secret, pepper)}, nil
+}
+
+// IsAgentToken reports whether s looks like an agent token (shape only).
+func IsAgentToken(s string) bool { return strings.HasPrefix(s, apiKeyMarker+"_"+agentMarker+"_") }
+
+// ParseAgentToken validates the shape of an agent token and returns its prefix.
+func ParseAgentToken(secret string) (prefix string, err error) {
+	parts := strings.Split(secret, "_")
+	if len(parts) != 4 || parts[0] != apiKeyMarker || parts[1] != agentMarker ||
+		len(parts[2]) != keyPrefixChars || len(parts[3]) != keySecretChars ||
+		!isBase62(parts[2]) || !isBase62(parts[3]) {
+		return "", ErrMalformedKey
+	}
+	return strings.Join(parts[:3], "_"), nil
+}

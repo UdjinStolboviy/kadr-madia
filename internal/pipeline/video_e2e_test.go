@@ -55,6 +55,9 @@ func TestVideoUploadEndToEnd(t *testing.T) {
 			if rv["width"].(float64) != 854 {
 				t.Fatalf("width %v", rv["width"])
 			}
+			if enc := rv["encoder"]; enc != "libx264" && enc != "h264_vaapi" {
+				t.Fatalf("encoder not recorded: %v", enc)
+			}
 		case rv["name"] == "poster":
 			poster++
 		}

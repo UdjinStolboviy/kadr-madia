@@ -11,6 +11,8 @@ Internal contract between the Kadr backend and the embedded admin console (`web/
 - Session: cookie `__Host-kadr_session` (`HttpOnly; Secure; SameSite=Strict; Path=/`). In dev mode (`KADR_DEV=1`) the cookie is `kadr_session` without `Secure`.
 - CSRF: every POST/PUT/PATCH/DELETE request (except `POST /auth/login`) carries an `X-CSRF-Token` header whose value comes from the `login` or `me` response.
 - Unauthenticated request → `401 { code: "unauthenticated" }`. CSRF failure → `403 { code: "csrf_failed" }`.
+- AI agents authenticate with `Authorization: Bearer kd_agent_…` instead of the cookie (no CSRF); state-changing agent requests need `X-Kadr-Agent-Reason`. Permissions per route, approvals and the MCP endpoint: [AGENTS.md](AGENTS.md).
+- Roles: `owner` and `admin` may do everything except that only owners grant sensitive agent permissions; `viewer` is read-only (`403 forbidden`).
 
 ## Auth
 
@@ -203,3 +205,22 @@ Kadr meters usage per project and day (`usage_daily`) and computes an **invoice 
 | GET | `/admin/api/projects/{id}/billing?month=YYYY-MM[&format=csv]` | — | `200 { project_id, month, currency, lines: [{ item, quantity, unit, unit_price, amount }], subtotal, total, usage, days }`; `format=csv` downloads the per-day metering rows |
 
 Storage is billed on the project's current footprint (`used_bytes`); ingest, video minutes and uploads on the month's metered usage; `total = max(subtotal, minimum_monthly_fee)`.
+
+## AI agents and approvals
+
+See [AGENTS.md](AGENTS.md#rest-endpoints-admin-api) for `/agents`, `/agents/settings`, `/agent-approvals` and the agent's own `/agent/me`, `/agent/approvals`. The MCP endpoint is `POST /mcp` on the admin listener.
+
+## Moderation
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| GET | `/admin/api/projects/{id}/moderation?status=unreviewed\|approved\|flagged\|rejected\|all&kind=&cursor=&limit=` | — | `200 { items: [{ asset_id, kind, namespace, visibility, created_at, moderation }], next_cursor }` |
+| GET | `/admin/api/projects/{id}/assets/{asset_id}/moderation` | — | `200 moderation` |
+| PUT | `/admin/api/projects/{id}/assets/{asset_id}/moderation` | `{ status: approved\|flagged\|rejected, labels?, note? }` | `200 moderation`, emits `asset.moderated` |
+| GET | `/admin/api/projects/{id}/assets/{asset_id}/preview?width=1024` | — | image bytes (`image/webp`, `image/jpeg`, …); AVIF converted to WebP when libvips is available |
+
+`moderation`: `{ asset_id, status: unreviewed|approved|flagged|rejected, labels, note, actor_type, actor_id, updated_at }`.
+
+## Audit filters
+
+`GET /admin/api/audit?actor_type=admin|api_key|system|agent&actor_id=&project_id=&limit=&cursor=`. Agent entries carry `details.reason`, `details.tool` and, for approved requests, `details.approval_id`; refused agent requests are logged as `agent.denied`.

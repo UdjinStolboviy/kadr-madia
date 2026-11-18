@@ -56,6 +56,7 @@ describe("generated contract", () => {
       | "asset.failed"
       | "asset.updated"
       | "asset.deleted"
+      | "asset.moderated"
       | "upload.expired"
       | "quota.warning"
       | "quota.exceeded"

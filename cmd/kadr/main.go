@@ -37,6 +37,8 @@ Commands:
   doctor                      check external tools, directories, database and keys
   restore-drill [--config F | --replica URL] [--keep]
                               restore the newest Litestream replica to a scratch dir and verify it
+  mcp-bridge --url URL        relay MCP between stdio and Kadr's /mcp endpoint for local MCP
+                              clients (token from KADR_AGENT_TOKEN; see docs/AGENTS.md)
   version                     print version information
 
 Configuration is read from KADR_* environment variables (see docs/OPERATIONS.md).
@@ -74,6 +76,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 	case "restore-drill":
 		err = cmdRestoreDrill(ctx, args[1:], stdout)
+	case "mcp-bridge":
+		err = cmdMCPBridge(ctx, args[1:], stdin, stdout, stderr)
 	case "version", "--version", "-v":
 		fmt.Fprintf(stdout, "kadr %s (commit %s, %s, %s/%s)\n", version, commit, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 	case "help", "--help", "-h":

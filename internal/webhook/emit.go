@@ -16,6 +16,7 @@ const (
 	EventAssetFailed     = "asset.failed"
 	EventAssetUpdated    = "asset.updated"
 	EventAssetDeleted    = "asset.deleted"
+	EventAssetModerated  = "asset.moderated"
 	EventUploadExpired   = "upload.expired"
 	EventQuotaWarning    = "quota.warning"
 	EventQuotaExceeded   = "quota.exceeded"
@@ -78,7 +79,7 @@ func ValidFilter(f string) bool {
 	if f == "*" {
 		return true
 	}
-	for _, t := range []string{EventAssetReady, EventAssetFailed, EventAssetUpdated, EventAssetDeleted, EventUploadExpired,
+	for _, t := range []string{EventAssetReady, EventAssetFailed, EventAssetUpdated, EventAssetDeleted, EventAssetModerated, EventUploadExpired,
 		EventQuotaWarning, EventQuotaExceeded, EventNamespacePurged} {
 		if f == t {
 			return true

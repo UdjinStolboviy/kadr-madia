@@ -8,6 +8,7 @@ import (
 
 	"github.com/UdjinStolboviy/kadr-madia/internal/api/httpx"
 	"github.com/UdjinStolboviy/kadr-madia/internal/capabilities"
+	"github.com/UdjinStolboviy/kadr-madia/internal/db"
 )
 
 type systemDTO struct {
@@ -87,11 +88,19 @@ func (s *Server) handleListAudit(w http.ResponseWriter, r *http.Request) {
 			before = n
 		}
 	}
+	f := db.AuditFilter{Limit: limit, BeforeID: before, ActorType: q.Get("actor_type"), ActorID: q.Get("actor_id"), ProjectID: q.Get("project_id")}
+	if f.ActorType != "" && !containsStr([]string{db.ActorAdmin, db.ActorAPIKey, db.ActorSystem, db.ActorAgent}, f.ActorType) {
+		errs["actor_type"] = "must be admin, api_key, system or agent"
+	}
 	if len(errs) > 0 {
 		validationFailed(w, errs)
 		return
 	}
-	entries, err := s.store.ListAudit(r.Context(), limit, before)
+	// A project-bound agent sees only the entries of its projects.
+	if t := agentFrom(r.Context()); t != nil && !t.AllProjects() {
+		f.ProjectIDs = t.ProjectIDs
+	}
+	entries, err := s.store.ListAuditFiltered(r.Context(), f)
 	if err != nil {
 		s.internalError(w, r, err)
 		return

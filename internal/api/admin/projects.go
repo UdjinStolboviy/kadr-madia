@@ -35,7 +35,11 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := make([]projectDTO, 0, len(ps))
+	t := agentFrom(r.Context())
 	for _, p := range ps {
+		if t != nil && !t.CoversProject(p.ID) {
+			continue
+		}
 		out = append(out, toProjectDTO(p))
 	}
 	httpx.WriteJSON(w, http.StatusOK, itemsResponse[projectDTO]{Items: out})
@@ -96,7 +100,7 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	p := &db.Project{ID: db.NewID(db.PrefixProject), Slug: req.Slug, Name: name, Environment: req.Environment,
 		StorageProfileID: req.StorageProfileID, AllowedOrigins: origins, QuotaBytes: req.QuotaBytes,
 		CreatedAt: now, UpdatedAt: now}
-	adminID := adminFrom(ctx).ID
+	adminID := actorID(ctx)
 	err := s.store.InTx(ctx, func(tx *db.Store) error {
 		if err := tx.CreateProject(ctx, p); err != nil {
 			return err

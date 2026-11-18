@@ -3,6 +3,7 @@ import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-route
 import {
   Activity,
   BarChart3,
+  Bot,
   Boxes,
   FlaskConical,
   FolderKanban,
@@ -15,6 +16,7 @@ import {
   Monitor,
   Moon,
   ScrollText,
+  ShieldAlert,
   ShieldCheck,
   Sun,
   type LucideIcon,
@@ -38,12 +40,23 @@ import { LanguageSwitcher } from "@/components/language-switcher";
 import { useT } from "@/i18n/react";
 import type { MessageKey } from "@/i18n/dictionaries";
 import { api } from "@/lib/api";
-import { meQuery, systemQuery } from "@/lib/queries";
+import { agentSettingsQuery, meQuery, systemQuery } from "@/lib/queries";
 import { useTheme, type ThemePref } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
 interface NavItem {
-  to: "/" | "/projects" | "/assets" | "/jobs" | "/analytics" | "/playground" | "/storage" | "/system" | "/audit";
+  to:
+    | "/"
+    | "/projects"
+    | "/assets"
+    | "/moderation"
+    | "/jobs"
+    | "/analytics"
+    | "/playground"
+    | "/storage"
+    | "/agents"
+    | "/system"
+    | "/audit";
   label: MessageKey;
   icon: LucideIcon;
   exact?: boolean;
@@ -53,10 +66,12 @@ const NAV: NavItem[] = [
   { to: "/", label: "shell.nav.overview", icon: LayoutDashboard, exact: true },
   { to: "/projects", label: "shell.nav.projects", icon: FolderKanban },
   { to: "/assets", label: "shell.nav.assets", icon: Images },
+  { to: "/moderation", label: "shell.nav.moderation", icon: ShieldAlert },
   { to: "/jobs", label: "shell.nav.jobs", icon: ListChecks },
   { to: "/analytics", label: "shell.nav.analytics", icon: BarChart3 },
   { to: "/playground", label: "shell.nav.playground", icon: FlaskConical },
   { to: "/storage", label: "shell.nav.storage", icon: HardDrive },
+  { to: "/agents", label: "shell.nav.agents", icon: Bot },
   { to: "/system", label: "shell.nav.system", icon: Activity },
   { to: "/audit", label: "shell.nav.audit", icon: ScrollText },
 ];
@@ -74,6 +89,8 @@ export function Logo({ className }: { className?: string }) {
 
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   const t = useT();
+  const settings = useQuery({ ...agentSettingsQuery, retry: false });
+  const pending = settings.data?.pending_approvals ?? 0;
   return (
     <nav className="flex flex-1 flex-col gap-6 overflow-y-auto px-3 py-4" aria-label={t("shell.mainNav")}>
       <ul className="grid gap-0.5">
@@ -87,6 +104,15 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
             >
               <item.icon className="size-4 text-muted-foreground group-data-[status=active]:text-foreground" />
               {t(item.label)}
+              {item.to === "/agents" && pending > 0 && (
+                <span
+                  className="ml-auto rounded-full bg-warning px-1.5 text-[11px] font-semibold text-white tabular-nums"
+                  title={t("shell.pendingApprovals", { count: pending })}
+                  aria-label={t("shell.pendingApprovals", { count: pending })}
+                >
+                  {pending}
+                </span>
+              )}
             </Link>
           </li>
         ))}

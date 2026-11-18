@@ -68,26 +68,14 @@ func isUnsafe(method string) bool {
 // requireCSRF checks X-CSRF-Token on state-changing requests.
 func (s *Server) requireCSRF(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if isUnsafe(r.Method) {
+		// Bearer tokens are not ambient credentials: CSRF does not apply.
+		if isUnsafe(r.Method) && agentFrom(r.Context()) == nil {
 			sess := sessionFrom(r.Context())
 			tok := r.Header.Get("X-CSRF-Token")
 			if sess == nil || tok == "" || !auth.EqualConstantTime(tok, sess.CSRFToken) {
 				httpx.WriteProblem(w, http.StatusForbidden, "csrf_failed", "missing or invalid X-CSRF-Token")
 				return
 			}
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// requireWriteRole blocks mutations for the read-only "viewer" role, except
-// for the admin's own auth endpoints (logout, TOTP).
-func (s *Server) requireWriteRole(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		a := adminFrom(r.Context())
-		if a != nil && a.Role == "viewer" && isUnsafe(r.Method) && !strings.Contains(r.URL.Path, "/auth/") {
-			httpx.WriteProblem(w, http.StatusForbidden, "forbidden", "viewer role is read-only")
-			return
 		}
 		next.ServeHTTP(w, r)
 	})

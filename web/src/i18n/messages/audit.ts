@@ -17,6 +17,9 @@ export const en = {
   "audit.count": "{count, plural, one {# event} other {# events}}",
   "audit.loadMore": "Load more",
   "audit.end": "End of log",
+  "audit.reason": "Reason",
+  "audit.tool": "Tool",
+  "audit.agentUnknown": "Unknown agent",
 };
 
 export const uk: Messages<typeof en> = {
@@ -35,6 +38,9 @@ export const uk: Messages<typeof en> = {
   "audit.count": "{count, plural, one {# подія} few {# події} many {# подій} other {# події}}",
   "audit.loadMore": "Завантажити ще",
   "audit.end": "Кінець журналу",
+  "audit.reason": "Пояснення",
+  "audit.tool": "Інструмент",
+  "audit.agentUnknown": "Невідомий агент",
 };
 
 export const es: Messages<typeof en> = {
@@ -53,4 +59,7 @@ export const es: Messages<typeof en> = {
   "audit.count": "{count, plural, one {# evento} other {# eventos}}",
   "audit.loadMore": "Cargar más",
   "audit.end": "Fin del registro",
+  "audit.reason": "Motivo",
+  "audit.tool": "Herramienta",
+  "audit.agentUnknown": "Agente desconocido",
 };

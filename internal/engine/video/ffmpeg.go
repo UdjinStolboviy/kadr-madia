@@ -219,11 +219,12 @@ func (e *FFmpeg) Transcode(ctx context.Context, src SourceInfo, p preset.VideoPa
 
 	enc := "libx264"
 	err := error(nil)
+	var hwErr error
 	if useHW {
 		enc = "h264_vaapi"
 		err = e.run(tctx, src, p, outPath, true, progress)
 		if err != nil && ctx.Err() == nil && tctx.Err() == nil {
-			enc = "libx264" // hardware failed: retry in software
+			enc, hwErr = "libx264", err // hardware failed: retry in software
 			err = e.run(tctx, src, p, outPath, false, progress)
 		}
 	} else {
@@ -256,6 +257,7 @@ func (e *FFmpeg) Transcode(ctx context.Context, src SourceInfo, p preset.VideoPa
 	return &Output{
 		VideoPath: outPath, PosterPath: posterPath, Bytes: st.Size(), Width: res.Width, Height: res.Height,
 		DurationMs: int64(res.DurationSec * 1000), Encoder: enc, HasAudio: res.AudioCodec != "",
+		HWFallback: hwErr != nil, HWError: errString(hwErr),
 	}, nil
 }
 
@@ -388,4 +390,15 @@ func orDefault(s, d string) string {
 		return d
 	}
 	return s
+}
+
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	if len(msg) > 500 {
+		msg = msg[:500] + "…"
+	}
+	return msg
 }

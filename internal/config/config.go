@@ -41,6 +41,7 @@ type Config struct {
 	CFWorkerName    string   // KADR_CF_WORKER_NAME (default kadr-edge)
 	WebAuthnRPID    string   // KADR_WEBAUTHN_RP_ID (default localhost in dev; empty disables passkeys)
 	WebAuthnOrigins []string // KADR_WEBAUTHN_ORIGINS, comma separated
+	AdminPublicURL  string   // KADR_ADMIN_PUBLIC_URL — external admin URL (MCP endpoint, notification links)
 	LogLevel        slog.Level
 	Dev             bool
 }
@@ -97,6 +98,7 @@ func Load(getenv Getenv) (*Config, error) {
 		}
 	}
 	setStr(&c.EdgeBaseURL, strings.TrimRight(getenv("KADR_EDGE_BASE_URL"), "/"))
+	setStr(&c.AdminPublicURL, strings.TrimRight(getenv("KADR_ADMIN_PUBLIC_URL"), "/"))
 
 	if p := getenv("KADR_API_KEY_PEPPER"); p != "" {
 		c.APIKeyPepper = []byte(p)

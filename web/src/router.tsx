@@ -138,6 +138,30 @@ const playgroundRoute = createRoute({
   component: lazyRouteComponent(() => import("@/routes/playground")),
 });
 
+export type AgentsTab = "agents" | "approvals" | "activity";
+const AGENT_TABS: AgentsTab[] = ["agents", "approvals", "activity"];
+
+const agentsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/agents",
+  validateSearch: (s: Record<string, unknown>): { tab?: AgentsTab } =>
+    AGENT_TABS.includes(s.tab as AgentsTab) ? { tab: s.tab as AgentsTab } : {},
+  component: lazyRouteComponent(() => import("@/routes/agents")),
+});
+
+export type ModerationFilter = "unreviewed" | "flagged" | "approved" | "rejected" | "all";
+const MODERATION_FILTERS: ModerationFilter[] = ["unreviewed", "flagged", "approved", "rejected", "all"];
+
+const moderationRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/moderation",
+  validateSearch: (s: Record<string, unknown>): { project?: string; status?: ModerationFilter } => ({
+    ...projectSearch(s),
+    ...(MODERATION_FILTERS.includes(s.status as ModerationFilter) ? { status: s.status as ModerationFilter } : {}),
+  }),
+  component: lazyRouteComponent(() => import("@/routes/moderation")),
+});
+
 const routeTree = rootRoute.addChildren([
   loginRoute,
   appRoute.addChildren([
@@ -151,6 +175,8 @@ const routeTree = rootRoute.addChildren([
     storageRoute,
     systemRoute,
     auditRoute,
+    agentsRoute,
+    moderationRoute,
   ]),
 ]);
 

@@ -18,6 +18,8 @@ import * as presets from "./messages/presets";
 import * as settings from "./messages/settings";
 import * as signing from "./messages/signing";
 import * as webhooks from "./messages/webhooks";
+import * as agents from "./messages/agents";
+import * as moderation from "./messages/moderation";
 
 /** Per-feature message modules; keys in each must start with "<name>.". */
 export const namespaces = {
@@ -41,4 +43,6 @@ export const namespaces = {
   settings: { en: settings.en, uk: settings.uk, es: settings.es },
   signing: { en: signing.en, uk: signing.uk, es: signing.es },
   webhooks: { en: webhooks.en, uk: webhooks.uk, es: webhooks.es },
+  agents: { en: agents.en, uk: agents.uk, es: agents.es },
+  moderation: { en: moderation.en, uk: moderation.uk, es: moderation.es },
 };

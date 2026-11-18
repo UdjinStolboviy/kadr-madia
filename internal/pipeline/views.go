@@ -53,6 +53,8 @@ type RenditionView struct {
 	Height *int64 `json:"height"`
 	URL    string `json:"url,omitempty"`
 	Key    string `json:"key,omitempty"`
+	// Encoder is the video encoder that produced the rendition (h264_vaapi | libx264).
+	Encoder string `json:"encoder,omitempty"`
 }
 
 // PlaceholderView carries the base64 ThumbHash and the dominant color.
@@ -145,6 +147,9 @@ func (s *Service) assetView(ctx context.Context, store *db.Store, a *db.Asset) (
 	}
 	for _, r := range rs {
 		rv := RenditionView{Name: r.Name, Format: r.Format, Bytes: r.Bytes, Width: r.Width, Height: r.Height}
+		if r.Encoder != nil {
+			rv.Encoder = *r.Encoder
+		}
 		if tgt != nil {
 			rv.URL = tgt.publicURL(r.StorageKey)
 		} else {

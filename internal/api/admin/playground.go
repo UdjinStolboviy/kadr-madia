@@ -281,10 +281,7 @@ func (s *Server) handleSavePresetVersion(w http.ResponseWriter, r *http.Request)
 
 // savePresetVersion creates the preset or appends a version, and replies with the preset.
 func (s *Server) savePresetVersion(w http.ResponseWriter, r *http.Request, p *db.Project, existing *db.Preset, slug, kind, desc string, raw json.RawMessage) {
-	adminID := ""
-	if a := adminFrom(r.Context()); a != nil {
-		adminID = a.ID
-	}
+	adminID := actorID(r.Context())
 	var version int
 	err := s.store.InTx(r.Context(), func(tx *db.Store) error {
 		if existing == nil {

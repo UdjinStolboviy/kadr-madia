@@ -333,7 +333,7 @@ app.post("/internal/kadr/webhook", express.raw({ type: "application/json" }), (r
 - On failure a `WebhookVerificationError` is thrown.
 
 The result is a `WebhookEvent` discriminated union on `type`
-(`asset.ready`, `asset.failed`, `asset.updated`, `asset.deleted`,
+(`asset.ready`, `asset.failed`, `asset.updated`, `asset.deleted`, `asset.moderated`,
 `upload.expired`, `quota.warning`, `quota.exceeded`, and `webhook.test` from
 the admin console's "Send test"), camelCased like API responses, with `id` set
 to the `webhook-id` header. Payloads (all typed from `api/openapi.yaml`):
@@ -343,6 +343,7 @@ to the `webhook-id` header. Payloads (all typed from `api/openapi.yaml`):
 | `asset.ready`, `asset.deleted` | `{ asset, metadata }` (`asset.status` is `deleted` in `asset.deleted`) |
 | `asset.failed` | `{ asset, metadata, error: { code, detail? } }` |
 | `asset.updated` | `{ asset, metadata, changes: ["metadata"] }` |
+| `asset.moderated` | `{ assetId, namespace, status, previousStatus, labels, note, actorType }` — enforce it (hide/remove) in your product |
 | `upload.expired` | `{ uploadId, namespace, preset, visibility, filename, expiresAt, metadata }` |
 | `quota.warning`, `quota.exceeded` | `{ namespace, usedBytes, quotaBytes, ratio }` (namespace byte quota) |
 | `webhook.test` | `{ endpointId, message }` |

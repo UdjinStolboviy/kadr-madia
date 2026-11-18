@@ -1,6 +1,15 @@
 import { t } from "@/i18n/store";
 
 import type {
+  Agent,
+  AgentApproval,
+  AgentInput,
+  AgentSecretResponse,
+  AgentSettings,
+  AuditFilters,
+  Moderation,
+  ModerationPage,
+  SetModerationRequest,
   Analytics,
   ApiErrorCode,
   ApiKey,
@@ -338,7 +347,37 @@ export const api = {
   },
 
   audit: {
-    list: (params: { limit?: number; cursor?: string | null }) =>
-      request<AuditPage>("/audit", { query: { limit: params.limit ?? 50, cursor: params.cursor } }),
+    list: (params: { limit?: number; cursor?: string | null } & AuditFilters) =>
+      request<AuditPage>("/audit", { query: { ...params, limit: params.limit ?? 50, cursor: params.cursor } }),
+  },
+
+  agents: {
+    list: () => request<ItemsResponse<Agent>>("/agents"),
+    get: (id: string) => request<Agent>(`/agents/${enc(id)}`),
+    create: (body: AgentInput) => request<AgentSecretResponse>("/agents", { method: "POST", body }),
+    update: (id: string, body: AgentInput) => request<Agent>(`/agents/${enc(id)}`, { method: "PATCH", body }),
+    rotate: (id: string) => request<AgentSecretResponse>(`/agents/${enc(id)}/rotate`, { method: "POST" }),
+    revoke: (id: string) => request<void>(`/agents/${enc(id)}`, { method: "DELETE" }),
+    settings: () => request<AgentSettings>("/agents/settings"),
+    setEnabled: (enabled: boolean) => request<AgentSettings>("/agents/settings", { method: "PUT", body: { enabled } }),
+  },
+
+  approvals: {
+    list: (p: { status?: string; agent_id?: string; limit?: number } = {}) =>
+      request<ItemsResponse<AgentApproval>>("/agent-approvals", { query: { ...p } }),
+    get: (id: string) => request<AgentApproval>(`/agent-approvals/${enc(id)}`),
+    approve: (id: string, note?: string) =>
+      request<AgentApproval>(`/agent-approvals/${enc(id)}/approve`, { method: "POST", body: { note: note ?? "" } }),
+    reject: (id: string, note?: string) =>
+      request<AgentApproval>(`/agent-approvals/${enc(id)}/reject`, { method: "POST", body: { note: note ?? "" } }),
+  },
+
+  moderation: {
+    queue: (projectId: string, p: { status?: string; kind?: string; cursor?: string | null; limit?: number }) =>
+      request<ModerationPage>(`/projects/${enc(projectId)}/moderation`, { query: { ...p } }),
+    set: (projectId: string, assetId: string, body: SetModerationRequest) =>
+      request<Moderation>(`/projects/${enc(projectId)}/assets/${enc(assetId)}/moderation`, { method: "PUT", body }),
+    previewUrl: (projectId: string, assetId: string, width = 480) =>
+      `${API_BASE}/projects/${enc(projectId)}/assets/${enc(assetId)}/preview?width=${width}`,
   },
 };

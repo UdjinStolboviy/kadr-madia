@@ -630,6 +630,17 @@ webhooks:
           application/json:
             schema: { $ref: "#/components/schemas/AssetDeletedEvent" }
       responses: *webhookResponses
+  asset.moderated:
+    post:
+      summary: A human or AI agent recorded a moderation decision in the admin
+      operationId: onAssetModerated
+      parameters: *webhookHeaders
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AssetModeratedEvent" }
+      responses: *webhookResponses
   upload.expired:
     post:
       summary: A ticket expired without a file
@@ -972,6 +983,10 @@ components:
         key:
           type: string
           examples: [acme/blb_01jd8x3k2m4n5p6q7r8s9t0v1w/main.avif]
+        encoder:
+          type: string
+          description: "Video renditions: the encoder that produced the file. `libx264` on a VAAPI host means the hardware encode fell back to software."
+          enum: [h264_vaapi, libx264]
 
     Placeholder:
       type: object
@@ -1087,6 +1102,26 @@ components:
               description: The asset as it was, with `status` set to `deleted`.
               $ref: "#/components/schemas/Asset"
             metadata: { $ref: "#/components/schemas/Metadata" }
+    AssetModeratedEvent:
+      type: object
+      required: [type, timestamp, data]
+      properties:
+        type: { type: string, const: asset.moderated }
+        timestamp: { type: string, format: date-time }
+        data:
+          type: object
+          description: |
+            Kadr does not block delivery itself: hide or remove the asset in the
+            product (or call DELETE /v1/assets/{id}) according to `status`.
+          required: [asset_id, namespace, status, previous_status, labels, note, actor_type]
+          properties:
+            asset_id: { type: string }
+            namespace: { type: string }
+            status: { type: string, enum: [approved, flagged, rejected] }
+            previous_status: { type: string, enum: [unreviewed, approved, flagged, rejected] }
+            labels: { type: array, items: { type: string }, examples: [[nsfw]] }
+            note: { type: [string, "null"] }
+            actor_type: { type: string, enum: [admin, agent] }
     UploadExpiredEvent:
       type: object
       required: [type, timestamp, data]

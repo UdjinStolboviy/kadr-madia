@@ -73,6 +73,10 @@ type Output struct {
 	Height     int
 	DurationMs int64
 	Encoder    string // libx264 | h264_vaapi
+	// HWFallback is set when VAAPI was tried and failed, and libx264 produced
+	// the output instead; HWError holds the hardware failure.
+	HWFallback bool
+	HWError    string
 	HasAudio   bool
 	CPUMillis  int64
 }

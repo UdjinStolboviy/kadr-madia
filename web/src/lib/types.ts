@@ -576,3 +576,138 @@ export interface WebAuthnCeremony {
   /** JSON-serialized PublicKeyCredential{Creation,Request}Options ({ publicKey: … }). */
   options: { publicKey: Record<string, unknown> };
 }
+
+// ---- AI agents (docs/AGENTS.md) ---------------------------------------------
+
+export const AGENT_LEVELS = ["read", "edit", "full"] as const;
+export type AgentLevel = (typeof AGENT_LEVELS)[number];
+
+export const AGENT_APPROVAL_MODES = ["none", "destructive", "writes"] as const;
+export type AgentApprovalMode = (typeof AGENT_APPROVAL_MODES)[number];
+
+export const AGENT_SENSITIVE_SCOPES = ["keys:issue", "storage:manage", "edge:publish", "billing:manage", "cloud:connect"] as const;
+export type AgentSensitiveScope = (typeof AGENT_SENSITIVE_SCOPES)[number];
+
+export type AgentStatus = "active" | "expired" | "revoked";
+
+export interface Agent {
+  id: string;
+  name: string;
+  description: string;
+  prefix: string;
+  level: AgentLevel;
+  extra_scopes: string[];
+  permissions: string[];
+  /** null = all projects. */
+  project_ids: string[] | null;
+  approval_mode: AgentApprovalMode;
+  allowed_ips: string[];
+  max_deletes_per_hour: number;
+  status: AgentStatus;
+  created_by: string;
+  last_used_at: ISODateTime | null;
+  last_used_ip: string | null;
+  expires_at: ISODateTime | null;
+  revoked_at: ISODateTime | null;
+  created_at: ISODateTime;
+  updated_at: ISODateTime;
+}
+
+export interface AgentInput {
+  name?: string;
+  description?: string;
+  level?: AgentLevel;
+  extra_scopes?: string[];
+  project_ids?: string[] | null;
+  approval_mode?: AgentApprovalMode;
+  allowed_ips?: string[];
+  max_deletes_per_hour?: number;
+  /** 0 = never. */
+  expires_in_days?: number;
+}
+
+export interface McpSetup {
+  url: string;
+  claude_code_command: string;
+  json_config: string;
+}
+
+export interface AgentSecretResponse {
+  agent: Agent;
+  token: string;
+  mcp: McpSetup;
+}
+
+export interface AgentSettings {
+  enabled: boolean;
+  pending_approvals: number;
+  mcp_url: string;
+  levels: Record<AgentLevel, string[]>;
+  sensitive_scopes: string[];
+}
+
+export const APPROVAL_STATUSES = ["pending", "executed", "failed", "rejected", "expired"] as const;
+export type ApprovalStatus = (typeof APPROVAL_STATUSES)[number];
+
+export interface AgentApproval {
+  id: string;
+  agent_id: string;
+  agent_name?: string;
+  project_id: string | null;
+  action: string;
+  tool: string | null;
+  method: string;
+  path: string;
+  body: unknown;
+  reason: string;
+  status: ApprovalStatus;
+  result_status: number | null;
+  result: unknown;
+  decided_by: string | null;
+  decision_note: string | null;
+  created_at: ISODateTime;
+  expires_at: ISODateTime;
+  decided_at: ISODateTime | null;
+}
+
+export interface AuditFilters {
+  actor_type?: string;
+  actor_id?: string;
+  project_id?: string;
+}
+
+// ---- Moderation ---------------------------------------------------------------
+
+export const MODERATION_STATUSES = ["unreviewed", "approved", "flagged", "rejected"] as const;
+export type ModerationStatus = (typeof MODERATION_STATUSES)[number];
+export type ModerationDecision = Exclude<ModerationStatus, "unreviewed">;
+
+export interface Moderation {
+  asset_id: string;
+  status: ModerationStatus;
+  labels: string[];
+  note: string | null;
+  actor_type: string | null;
+  actor_id: string | null;
+  updated_at: ISODateTime | null;
+}
+
+export interface ModerationItem {
+  asset_id: string;
+  kind: string;
+  namespace: string;
+  visibility: string;
+  created_at: ISODateTime;
+  moderation: Moderation;
+}
+
+export interface ModerationPage {
+  items: ModerationItem[];
+  next_cursor: string | null;
+}
+
+export interface SetModerationRequest {
+  status: ModerationDecision;
+  labels?: string[];
+  note?: string;
+}

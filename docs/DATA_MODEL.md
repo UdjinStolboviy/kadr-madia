@@ -21,7 +21,11 @@ erDiagram
   events ||--o{ webhook_deliveries : "fan-out"
   webhook_endpoints ||--o{ webhook_deliveries : receives
   projects ||--o{ cloud_connections : has
+  agent_tokens ||--o{ agent_approvals : requests
+  assets ||--o| asset_moderation : "moderated by"
 ```
+
+Later migrations: `0005_files.sql` (documents), `0006_agents.sql` (`agent_tokens`, `agent_approvals`, `asset_moderation`; see [AGENTS.md](AGENTS.md)), `0007_audit_agent_actor.sql` (`audit_log.actor_type = 'agent'`), `0008_rendition_encoder.sql` (`renditions.encoder`).
 
 ## Key decisions
 
@@ -34,7 +38,7 @@ erDiagram
 | **Outbox (`events` + `webhook_deliveries`)** | The event is written in the same transaction as the state change — no lost or "phantom" webhooks. |
 | **`jobs` with `lease_until`** | A crashed worker never loses a job: an expired lease puts it back in the queue. |
 | **Secrets only as `*_enc`** | AES-256-GCM, envelope encryption with the master key (see SECURITY.md). |
-| **API keys as hashes** | The database holds no usable API secret. |
+| **API keys as hashes** | The database holds no usable API secret. Agent tokens likewise; held agent requests and their results are AES-GCM envelopes (they may contain credentials or issued keys). |
 | **Unix milliseconds, ULIDs** | Time-sortable, no timezone issues; prefixed ULIDs are readable in logs. |
 
 ## R2 object keys

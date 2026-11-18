@@ -43,6 +43,7 @@ Every product reinvents uploads, compression, previews, private links and garbag
 | [docs/PRODUCT.md](docs/PRODUCT.md) | Product, positioning, competitors, business model, metrics |
 | [docs/API.md](docs/API.md) | Public API, webhooks, signed URLs |
 | [docs/ADMIN_API.md](docs/ADMIN_API.md) | Internal admin API contract |
+| [docs/AGENTS.md](docs/AGENTS.md) | AI agents: MCP endpoint, permissions, approvals, moderation |
 | [docs/DATA_MODEL.md](docs/DATA_MODEL.md) | Data model and SQLite schema |
 | [docs/PIPELINES.md](docs/PIPELINES.md) | Photo and video processing pipelines, presets |
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat model, keys, encryption, isolation |

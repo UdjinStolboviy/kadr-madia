@@ -136,9 +136,12 @@ func cmdServe(ctx context.Context, args []string, stderr io.Writer) error {
 	if err := svc.CleanStaleWorkDirs(ctx); err != nil {
 		log.Warn("clean stale work dirs", "err", err)
 	}
+	var notifier admin.Notifier
 	if cfg.TelegramToken != "" && cfg.TelegramChatID != "" {
 		host, _ := os.Hostname()
-		mon := alerts.New(store, &alerts.Telegram{Token: cfg.TelegramToken, ChatID: cfg.TelegramChatID}, alerts.Thresholds{
+		tg := &alerts.Telegram{Token: cfg.TelegramToken, ChatID: cfg.TelegramChatID}
+		notifier = tg
+		mon := alerts.New(store, tg, alerts.Thresholds{
 			DiskFree: func() (uint64, error) { return capabilities.DiskFree(cfg.TmpDir) },
 		}, host, log)
 		go mon.Run(ctx)
@@ -159,6 +162,7 @@ func cmdServe(ctx context.Context, args []string, stderr io.Writer) error {
 		Build: admin.BuildInfo{Version: version, Commit: commit, StartedAt: started},
 		Caps:  caps, TmpDir: cfg.TmpDir, Pipeline: svc, Wake: q.Notify, Edge: &edgepublish.Publisher{AccountID: cfg.CFAccountID, APIToken: cfg.CFAPIToken, WorkerName: cfg.CFWorkerName}, Playground: playground, UI: ui, FallbackHTML: web.FallbackHTML(), Webhooks: dispatcher,
 		WebAuthnRPID: cfg.WebAuthnRPID, WebAuthnOrigins: cfg.WebAuthnOrigins,
+		Notifier: notifier, PublicURL: cfg.AdminPublicURL,
 	})
 	publicHandler := public.Handler(public.Config{
 		Store: store, Logger: log, Metrics: set, Pipeline: svc, TmpDir: cfg.TmpDir,

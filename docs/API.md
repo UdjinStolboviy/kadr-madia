@@ -160,6 +160,7 @@ The fetch is SSRF-safe: http/https only, no credentials in the URL, ports 80/443
 }
 ```
 
+- `renditions[].encoder` (video renditions): the encoder that produced the file, `h264_vaapi` or `libx264` — `libx264` on a VAAPI host means the hardware encode failed and fell back to software.
 - `status`: `processing` → `ready` | `failed`. `deleted` appears only in `asset.deleted` webhook payloads.
 - `kind`: `image` or `video` (only image presets are processed in this version).
 - `original.filename`, `original.content_type`, `width`, `height`, `placeholder` (and its fields), `duration_sec`, `poster`, `savings_ratio` and `ready_at` may be `null`. `content_type` is the declared type until processing detects the real one.
@@ -237,6 +238,7 @@ Body: `{ "type": "…", "timestamp": "…", "data": { … } }`.
 | `asset.failed` | Processing failed | `{ asset, metadata, error: { code, detail? } }` |
 | `asset.updated` | Metadata changed (later also visibility) | `{ asset, metadata, changes: ["metadata"] }` |
 | `asset.deleted` | Deleted | `{ asset, metadata }`, `asset.status` is `deleted` |
+| `asset.moderated` | A human or AI agent recorded a moderation decision in the admin ([AGENTS.md](AGENTS.md#moderation)) | `{ asset_id, namespace, status: approved\|flagged\|rejected, previous_status, labels, note, actor_type }` |
 | `upload.expired` | Ticket expired without a file | `{ upload_id, namespace, preset, visibility, filename, expires_at, metadata }` |
 | `quota.warning` | Namespace byte usage crossed 80 % of its `quota_bytes` | `{ namespace, used_bytes, quota_bytes, ratio }` |
 | `quota.exceeded` | Namespace byte usage reached 100 % | same as `quota.warning` |

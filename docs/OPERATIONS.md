@@ -68,6 +68,7 @@ KADR_TELEGRAM_BOT_TOKEN=…                # built-in alerts (optional)
 KADR_TELEGRAM_CHAT_ID=…
 KADR_CF_ACCOUNT_ID=…                     # to publish keys to kadr-edge
 KADR_CF_API_TOKEN=…                      # scope: Workers Scripts:Edit (this Worker only)
+KADR_ADMIN_PUBLIC_URL=https://admin.example.com # external admin URL: MCP setup snippets, approval notification links
 KADR_LOG_LEVEL=info
 ```
 
@@ -125,13 +126,15 @@ Migrations are forward-only and backward compatible with the previous version (e
 ## 9. Monitoring
 
 - `/healthz` (alive), `/readyz` (DB + R2 + vips/ffmpeg available).
-- `/metrics` (Prometheus format, LAN only): `kadr_jobs_queued{pool}`, `kadr_job_duration_seconds{kind}`, `kadr_job_failures_total{kind,code}`, `kadr_bytes_in_total`, `kadr_bytes_stored_total`, `kadr_r2_requests_total{op,status}`, `kadr_webhook_deliveries_total{status}`, `kadr_tmp_disk_free_bytes`, `kadr_db_wal_bytes`.
+- `/metrics` (Prometheus format, LAN only): `kadr_jobs_queued{pool}`, `kadr_job_duration_seconds{kind}`, `kadr_job_failures_total{kind,code}`, `kadr_bytes_in_total`, `kadr_bytes_stored_total`, `kadr_r2_requests_total{op,status}`, `kadr_webhook_deliveries_total{status}`, `kadr_tmp_disk_free_bytes`, `kadr_db_wal_bytes`, `kadr_video_transcodes_total{encoder}`, `kadr_video_hw_fallbacks_total`, `kadr_video_transcode_media_seconds_total{encoder}` / `kadr_video_transcode_wall_seconds_total{encoder}` (their ratio is the encode speed × realtime).
+- Video encoder: every transcode logs `video transcoded` with `encoder`, `hw_requested`, `hw_fallback`, `speed_x`, `elapsed_ms`, `cpu_ms`; a VAAPI → libx264 fallback is a `WARN` with `hw_error`. The encoder is also stored per rendition (`renditions.encoder`) and returned in the asset JSON. Check: `journalctl -u kadr -o cat | jq 'select(.msg=="video transcoded") | {asset_id, encoder, hw_fallback, speed_x}'`. Alert on `increase(kadr_video_hw_fallbacks_total[1h]) > 0`.
 - Built-in alerts (Telegram when `KADR_TELEGRAM_BOT_TOKEN`/`KADR_TELEGRAM_CHAT_ID` are set; checked every minute, 30 min cooldown, "recovered" message): video queue > 10, oldest queued job > 15 min, ≥ 3 dead jobs in 15 min, tmp disk < 2 GiB. Further rules via Grafana:
   - video queue > 10 jobs or oldest > 15 min;
   - failed share > 5% over 15 min;
   - tmp free space < 5 GB;
   - Litestream lag > 60 s;
   - dead webhooks > 0.
+- AI agents: a pending approval sends a Telegram message (same bot); agent actions are in the audit log (`actor_type=agent`). Emergency stop: admin → AI agents → turn off agent access.
 - Logs: JSON in journald (`journalctl -u kadr -o cat | jq`), `request_id`/`job_id`/`asset_id` on every record.
 
 ## 10. Capacity planning
