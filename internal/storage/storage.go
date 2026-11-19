@@ -39,6 +39,8 @@ type ObjectInfo struct {
 	ContentType  string
 	ETag         string
 	LastModified time.Time
+	// ContentDisposition is the stored Content-Disposition (Head and Get only).
+	ContentDisposition string
 }
 
 // PutOptions are optional object attributes for Put.
@@ -82,6 +84,9 @@ type Driver interface {
 	Put(ctx context.Context, bucket, key string, body io.ReadSeeker, size int64, opts PutOptions) error
 	Head(ctx context.Context, bucket, key string) (ObjectInfo, error)
 	Get(ctx context.Context, bucket, key string) (io.ReadCloser, ObjectInfo, error)
+	// GetRange streams length bytes from offset; ObjectInfo.Size is the size
+	// of the whole object.
+	GetRange(ctx context.Context, bucket, key string, offset, length int64) (io.ReadCloser, ObjectInfo, error)
 	Delete(ctx context.Context, bucket, key string) error
 	// List returns every object whose key starts with prefix (all pages).
 	List(ctx context.Context, bucket, prefix string) ([]ObjectInfo, error)

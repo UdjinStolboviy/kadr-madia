@@ -41,11 +41,13 @@
 
 ```
 Internet ──► Cloudflare ──► Tunnel ──► kadr:8081 (/admin) — only via Cloudflare Access (email + MFA)
+Internet ──► Cloudflare ──► Tunnel ──► kadr:8082 (delivery, optional) — HMAC-signed URLs only
 Private network ──► kadr:8080 (/v1) — host firewall: allow only the product backends' IPs
 kadr ──► R2 / webhooks / imports — outbound connections
 ```
 
 - `/v1` is not published through the tunnel at all.
+- The optional delivery listener (`KADR_DELIVERY_ADDR`) serves only GET/HEAD of objects whose URL carries a valid, unexpired HMAC signature of an active or verify-only key; the key's project must own the object (`{project_slug}/` prefix), retained originals are never served, and failures answer a bare `403` without the reason. It has no other routes besides `/healthz`. Do not let a Cache Rule ignore the query string on its hostname (OPERATIONS §7.1).
 - Admin console: Cloudflare Access + own login (argon2id) + TOTP. Optional WebAuthn passkeys (discoverable, user-verified; counts as MFA; sign-count regression rejected; see ADMIN_API.md).
 - Additionally, when `KADR_CF_ACCESS_TEAM_DOMAIN` and `KADR_CF_ACCESS_AUD` are set, the admin server verifies the `Cf-Access-Jwt-Assertion` header (RS256 against the team's published keys, issuer, audience, expiry) and refuses requests without it (`403 access_required`), except the exempt paths published with a Bypass policy (`KADR_CF_ACCESS_EXEMPT`). Without these variables the check is off — set them in production.
 - MCP (`/mcp`) on the admin listener accepts only agent tokens; it rejects foreign browser `Origin`s (DNS rebinding). Behind Cloudflare Access use a service token or a path bypass restricted by IP plus the token's IP allowlist.

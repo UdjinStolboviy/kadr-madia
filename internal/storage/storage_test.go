@@ -163,3 +163,29 @@ func TestS3List(t *testing.T) {
 		t.Fatalf("empty list: %v %v", got, err)
 	}
 }
+
+func TestGetRange(t *testing.T) {
+	ctx := context.Background()
+	_, d := newFake(t, "priv")
+	body := []byte("0123456789")
+	if err := d.Put(ctx, "priv", "r.bin", bytes.NewReader(body), int64(len(body)),
+		PutOptions{ContentType: "application/pdf", ContentDisposition: `attachment; filename="a.pdf"`}); err != nil {
+		t.Fatal(err)
+	}
+	rc, info, err := d.GetRange(ctx, "priv", "r.bin", 3, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := io.ReadAll(rc)
+	rc.Close()
+	if string(got) != "3456" || info.Size != 10 {
+		t.Fatalf("range: %q size %d", got, info.Size)
+	}
+	h, err := d.Head(ctx, "priv", "r.bin")
+	if err != nil || h.ContentDisposition != `attachment; filename="a.pdf"` {
+		t.Fatalf("head disposition: %q %v", h.ContentDisposition, err)
+	}
+	if _, _, err := d.GetRange(ctx, "priv", "missing", 0, 1); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing: %v", err)
+	}
+}

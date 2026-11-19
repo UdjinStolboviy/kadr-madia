@@ -185,7 +185,7 @@ const url = kadr.signUrl(asset.renditions[0].key, { ttl: 3600, download: "receip
 // https://media.example.com/acme/image/2026/11/blb_…/main-800x600.avif?exp=1763330400&kid=k3&sig=Base64Url(HMAC-SHA256(secret, "GET\n/acme/image/2026/11/blb_…/main-800x600.avif\n1763330400\nreceipt.avif"))
 ```
 
-The canonical form is specified in `sdk/node/README.md`. The `kadr-edge` Worker (`edge/kadr-edge`) verifies these URLs. Signing keys are created and rotated per project in the admin console (Signing keys tab) and published to the Worker with `POST /admin/api/signing-keys/publish` (or copied into the `SIGNING_KEYS` Worker secret).
+The canonical form is specified in `sdk/node/README.md`. The `kadr-edge` Worker (`edge/kadr-edge`) or Kadr's own delivery listener (`KADR_DELIVERY_ADDR`, published through a tunnel; OPERATIONS §7.1) verifies these URLs; the URL format is the same for both. Signing keys are created and rotated per project in the admin console (Signing keys tab) and published to the Worker with `POST /admin/api/signing-keys/publish` (or copied into the `SIGNING_KEYS` Worker secret).
 
 ### Via the API (scope `urls:sign`)
 

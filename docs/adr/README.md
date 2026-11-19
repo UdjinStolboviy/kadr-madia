@@ -20,3 +20,4 @@ Format: Context → Decision → Consequences → Alternatives considered. Statu
 | [0014](0014-agent-access-mcp.md) | AI agent access through MCP on top of the Admin API | Accepted |
 | [0015](0015-ai-operations.md) | AI operations: Claude moderation and scheduled agent runs | Accepted |
 | [0016](0016-storage-key-layout.md) | Descriptive, partitioned storage keys | Accepted |
+| [0017](0017-origin-delivery.md) | Private delivery from Kadr through a tunnel (no Worker) | Accepted |

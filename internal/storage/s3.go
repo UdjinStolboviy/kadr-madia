@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -91,6 +92,7 @@ func (d *S3) Head(ctx context.Context, bucket, key string) (ObjectInfo, error) {
 	return ObjectInfo{
 		Key: key, Size: aws.ToInt64(out.ContentLength), ContentType: aws.ToString(out.ContentType),
 		ETag: strings.Trim(aws.ToString(out.ETag), `"`), LastModified: aws.ToTime(out.LastModified),
+		ContentDisposition: aws.ToString(out.ContentDisposition),
 	}, nil
 }
 
@@ -100,10 +102,36 @@ func (d *S3) Get(ctx context.Context, bucket, key string) (io.ReadCloser, Object
 	if err != nil {
 		return nil, ObjectInfo{}, fmt.Errorf("storage: get %s/%s: %w", bucket, key, mapErr(err))
 	}
-	return out.Body, ObjectInfo{
-		Key: key, Size: aws.ToInt64(out.ContentLength), ContentType: aws.ToString(out.ContentType),
+	return out.Body, objectInfo(key, out, aws.ToInt64(out.ContentLength)), nil
+}
+
+// GetRange streams bytes [offset, offset+length) of an object.
+func (d *S3) GetRange(ctx context.Context, bucket, key string, offset, length int64) (io.ReadCloser, ObjectInfo, error) {
+	if offset < 0 || length <= 0 {
+		return nil, ObjectInfo{}, fmt.Errorf("storage: get range %s/%s: invalid range %d+%d", bucket, key, offset, length)
+	}
+	rng := fmt.Sprintf("bytes=%d-%d", offset, offset+length-1)
+	out, err := d.client.GetObject(ctx, &s3.GetObjectInput{Bucket: &bucket, Key: &key, Range: &rng})
+	if err != nil {
+		return nil, ObjectInfo{}, fmt.Errorf("storage: get range %s/%s: %w", bucket, key, mapErr(err))
+	}
+	size := aws.ToInt64(out.ContentLength)
+	if cr := aws.ToString(out.ContentRange); cr != "" { // bytes a-b/total
+		if i := strings.LastIndexByte(cr, '/'); i >= 0 {
+			if n, err := strconv.ParseInt(cr[i+1:], 10, 64); err == nil {
+				size = n
+			}
+		}
+	}
+	return out.Body, objectInfo(key, out, size), nil
+}
+
+func objectInfo(key string, out *s3.GetObjectOutput, size int64) ObjectInfo {
+	return ObjectInfo{
+		Key: key, Size: size, ContentType: aws.ToString(out.ContentType),
 		ETag: strings.Trim(aws.ToString(out.ETag), `"`), LastModified: aws.ToTime(out.LastModified),
-	}, nil
+		ContentDisposition: aws.ToString(out.ContentDisposition),
+	}
 }
 
 // Delete removes an object. Deleting a missing object is not an error (S3 semantics).

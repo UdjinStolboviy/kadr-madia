@@ -26,6 +26,7 @@ import (
 	"github.com/UdjinStolboviy/kadr-madia/internal/config"
 	"github.com/UdjinStolboviy/kadr-madia/internal/crypto"
 	"github.com/UdjinStolboviy/kadr-madia/internal/db"
+	"github.com/UdjinStolboviy/kadr-madia/internal/delivery"
 	"github.com/UdjinStolboviy/kadr-madia/internal/devstorage"
 	"github.com/UdjinStolboviy/kadr-madia/internal/edgepublish"
 	"github.com/UdjinStolboviy/kadr-madia/internal/pipeline"
@@ -192,7 +193,18 @@ func cmdServe(ctx context.Context, args []string, stderr io.Writer) error {
 		{name: "admin", addr: cfg.AdminAddr, srv: newHTTPServer(adminSrv.Handler(), log)},
 		{name: "public", addr: cfg.PublicAddr, srv: newHTTPServer(publicHandler, log)},
 	}
-	// Bind both listeners before reporting readiness so port conflicts fail fast.
+	if cfg.DeliveryAddr != "" {
+		// Signed private delivery from Kadr itself (published through a tunnel),
+		// the alternative to the kadr-edge Worker. Long video responses extend
+		// their write deadline per chunk, so the server has no WriteTimeout.
+		dsrv := newHTTPServer(delivery.New(delivery.Config{
+			Resolver: svc, Logger: log, Metrics: set, MaxStreams: cfg.DeliveryStreams,
+			CDNMaxAge: time.Duration(cfg.DeliveryCDNTTL) * time.Second,
+		}), log)
+		dsrv.WriteTimeout, dsrv.ReadTimeout = 0, 30*time.Second
+		servers = append(servers, &namedServer{name: "delivery", addr: cfg.DeliveryAddr, srv: dsrv})
+	}
+	// Bind every listener before reporting readiness so port conflicts fail fast.
 	for _, s := range servers {
 		ln, err := net.Listen("tcp", s.addr)
 		if err != nil {

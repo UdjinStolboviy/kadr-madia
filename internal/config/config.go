@@ -25,6 +25,9 @@ const MinPepperLen = 32
 type Config struct {
 	PublicAddr      string // /v1, /metrics — LAN only
 	AdminAddr       string // /admin + embedded UI
+	DeliveryAddr    string // KADR_DELIVERY_ADDR — signed private delivery (origin mode); empty disables it
+	DeliveryStreams int    // KADR_DELIVERY_MAX_STREAMS — concurrent delivery responses (default 64)
+	DeliveryCDNTTL  int    // KADR_DELIVERY_CDN_MAX_AGE — seconds Cloudflare may cache a signed response (0 = off)
 	DBPath          string
 	TmpDir          string
 	MasterKeyFile   string
@@ -83,6 +86,7 @@ func Load(getenv Getenv) (*Config, error) {
 
 	setStr(&c.PublicAddr, getenv("KADR_PUBLIC_ADDR"))
 	setStr(&c.AdminAddr, getenv("KADR_ADMIN_ADDR"))
+	setStr(&c.DeliveryAddr, strings.TrimSpace(getenv("KADR_DELIVERY_ADDR")))
 	setStr(&c.DBPath, getenv("KADR_DB_PATH"))
 	setStr(&c.TmpDir, getenv("KADR_TMP_DIR"))
 	setStr(&c.MasterKeyFile, getenv("KADR_MASTER_KEY_FILE"))
@@ -131,6 +135,18 @@ func Load(getenv Getenv) (*Config, error) {
 		return nil, err
 	}
 	if c.PoolFile, err = intEnv(getenv, "KADR_POOL_FILE", 1); err != nil {
+		return nil, err
+	}
+	if c.DeliveryStreams, err = intEnv(getenv, "KADR_DELIVERY_MAX_STREAMS", 64); err != nil || c.DeliveryStreams < 1 || c.DeliveryStreams > 10000 {
+		if err == nil {
+			err = fmt.Errorf("KADR_DELIVERY_MAX_STREAMS must be 1–10000")
+		}
+		return nil, err
+	}
+	if c.DeliveryCDNTTL, err = intEnv(getenv, "KADR_DELIVERY_CDN_MAX_AGE", 0); err != nil || c.DeliveryCDNTTL < 0 || c.DeliveryCDNTTL > 7*24*3600 {
+		if err == nil {
+			err = fmt.Errorf("KADR_DELIVERY_CDN_MAX_AGE must be 0–604800 seconds")
+		}
 		return nil, err
 	}
 	if c.VideoAV1LP, err = intEnv(getenv, "KADR_VIDEO_AV1_LP", 0); err != nil || c.VideoAV1LP < 0 || c.VideoAV1LP > 64 {

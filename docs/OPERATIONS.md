@@ -62,7 +62,10 @@ KADR_POOL_VIDEO=1
 KADR_POOL_FILE=1                         # document jobs (PDF optimisation)
 KADR_VIDEO_HW=auto                       # auto | vaapi | off
 KADR_VIDEO_AV1_LP=0                      # SVT-AV1 parallelism for AV1 presets; 2 on hosts with ≤ 2 GB RAM
-KADR_EDGE_BASE_URL=https://media.example.com   # private delivery host (kadr-edge) for POST /v1/signed-urls
+KADR_EDGE_BASE_URL=https://media.example.com   # private delivery host (kadr-edge or the delivery listener) for POST /v1/signed-urls
+KADR_DELIVERY_ADDR=0.0.0.0:8082          # signed private delivery from Kadr itself (origin mode, §7.1); empty = off
+KADR_DELIVERY_MAX_STREAMS=64             # concurrent delivery responses; beyond it 503 + Retry-After
+KADR_DELIVERY_CDN_MAX_AGE=0              # seconds Cloudflare may cache a signed response (see §7.1 before enabling)
 KADR_WEBAUTHN_RP_ID=admin.example.com           # passkeys: relying party id (host of the admin UI)
 KADR_WEBAUTHN_ORIGINS=https://admin.example.com # passkeys: allowed origins, comma separated
 KADR_TELEGRAM_BOT_TOKEN=…                # built-in alerts (optional)
@@ -116,8 +119,25 @@ Migrations are forward-only and backward compatible with the previous version (e
    Lifecycle: delete `tmp/` after 1 day; abort incomplete multipart after 1 day.
 4. `kadr-system` → lifecycle: delete noncurrent versions after 30 days.
 5. API tokens: `kadr-rw` (Object R/W on public + private), `kadr-backup` (Object R/W on system only).
-6. Worker `kadr-edge` on `media.<domain>` with an R2 binding `PRIVATE` (read) and signing-key secrets.
+6. Private delivery, one of:
+   - Worker `kadr-edge` on `media.<domain>` with an R2 binding `PRIVATE` (read) and signing-key secrets; or
+   - the delivery listener of Kadr published through the tunnel (§7.1) — no Worker.
 7. Billing alert at $5.
+
+### 7.1 Private delivery without a Worker (origin mode)
+
+Kadr can verify signed URLs and stream private objects itself (ADR 0017). One listener serves every project: the `kid` names the project, the project's storage profile names the bucket, and only keys under `{project_slug}/` are served.
+
+1. `/etc/kadr/env`: `KADR_DELIVERY_ADDR=0.0.0.0:8082` (or the LAN address the tunnel connector reaches), restart Kadr; `curl http://<host>:8082/healthz` → `ok`.
+2. Cloudflare Zero Trust → Networks → Tunnels → the tunnel → Public hostname: `media.<domain>` → `http://<kadr-host>:8082`. **No Cloudflare Access application** on this hostname: the HMAC signature is the authorization. The zone must belong to the tunnel's account; remove a Worker custom domain on the same hostname first.
+3. Admin → Storage → the project's profile → `private_base_url` = `https://media.<domain>` (or `KADR_EDGE_BASE_URL`). Signing keys need no publishing: rotations and retirements apply within 30 s.
+4. Check: `POST /v1/signed-urls` → open the URL (200), change one character of `sig` (403), `curl -H 'Range: bytes=0-99'` (206).
+
+Behaviour matches kadr-edge: `Range`/`If-Range`, `If-None-Match` → 304, `download` → `Content-Disposition`, the stored disposition of documents, `nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: private, max-age ≤ 1 h` (capped by the URL's validity), HLS directory signatures with playlist rewriting. Metrics: `kadr_delivery_requests_total{status}`, `kadr_delivery_bytes_total`.
+
+**Trade-offs.** Every byte goes R2 → Kadr → tunnel → visitor, so the host's uplink and availability now limit private media (a Kadr restart interrupts playback; the Worker keeps serving while Kadr is down). `KADR_DELIVERY_MAX_STREAMS` keeps delivery from starving the media workers.
+
+**Edge caching (`KADR_DELIVERY_CDN_MAX_AGE`).** When set, responses carry `Cloudflare-CDN-Cache-Control: max-age=…` so Cloudflare can cache them. This is safe only while the cache key contains the **full query string** (the default): a Cache Rule that ignores the query string would serve a cached private object to anyone who knows its path, without a signature. Caching only pays off when clients reuse the same URL — round `exp` up (e.g. to the hour) when signing so one object keeps one URL within that window.
 
 ## 8. Backup and restore
 
