@@ -59,6 +59,6 @@ func newVideoEngine(log *slog.Logger, av1LP int) video.Engine {
 // Ghostscript/qpdf documents are validated and stored as uploaded.
 func newFileEngine(log *slog.Logger) file.Engine {
 	e := file.New(file.Config{Nice: true})
-	log.Info("document engine ready", "ghostscript", e.HasGhostscript(), "qpdf", e.HasQPDF())
+	log.Info("document engine ready", "ghostscript", e.HasGhostscript(), "qpdf", e.HasQPDF(), "pdftotext", e.HasPDFToText())
 	return e
 }

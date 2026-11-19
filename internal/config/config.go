@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // DevPepper is the API key pepper used when KADR_DEV=1 and no pepper is set.
@@ -50,10 +51,13 @@ type Config struct {
 	CFAccessAUD     []string // KADR_CF_ACCESS_AUD — Application Audience tag(s), comma separated
 	CFAccessExempt  []string // KADR_CF_ACCESS_EXEMPT — path prefixes served without an Access token
 	AnthropicAPIKey string   // ANTHROPIC_API_KEY — enables AI moderation and scheduled agent runs
-	AIModel         string   // KADR_AI_MODEL (default claude-opus-5-5)
-	AIClassifierURL string   // KADR_AI_CLASSIFIER_URL — external moderation classifier (instead of Claude)
-	LogLevel        slog.Level
-	Dev             bool
+	AIModel                 string   // KADR_AI_MODEL (default claude-opus-5-5)
+	AIClassifierURL         string   // KADR_AI_CLASSIFIER_URL — external moderation classifier (instead of Claude)
+	MultipartThresholdBytes int64         // KADR_MULTIPART_THRESHOLD_MB (default 16 MiB, range 5–5120)
+	MultipartPartSizeBytes  int64         // KADR_MULTIPART_PART_SIZE_MB (default 8 MiB, range 5–512)
+	MultipartSessionTTL     time.Duration // KADR_MULTIPART_SESSION_HOURS (default 24h, range 1–168)
+	LogLevel                slog.Level
+	Dev                     bool
 }
 
 // Getenv abstracts os.Getenv for tests.
@@ -155,6 +159,21 @@ func Load(getenv Getenv) (*Config, error) {
 		}
 		return nil, err
 	}
+	mpThreshMB, err := intEnvRange(getenv, "KADR_MULTIPART_THRESHOLD_MB", 16, 5, 5120)
+	if err != nil {
+		return nil, err
+	}
+	c.MultipartThresholdBytes = int64(mpThreshMB) << 20
+	mpPartMB, err := intEnvRange(getenv, "KADR_MULTIPART_PART_SIZE_MB", 8, 5, 512)
+	if err != nil {
+		return nil, err
+	}
+	c.MultipartPartSizeBytes = int64(mpPartMB) << 20
+	mpHours, err := intEnvRange(getenv, "KADR_MULTIPART_SESSION_HOURS", 24, 1, 168)
+	if err != nil {
+		return nil, err
+	}
+	c.MultipartSessionTTL = time.Duration(mpHours) * time.Hour
 
 	c.VideoHW = strings.ToLower(strings.TrimSpace(getenv("KADR_VIDEO_HW")))
 	if c.VideoHW == "" {
@@ -243,6 +262,18 @@ func intEnv(getenv Getenv, name string, def int) (int, error) {
 	n, err := strconv.Atoi(v)
 	if err != nil || n < 1 {
 		return 0, fmt.Errorf("config: %s must be a positive integer, got %q", name, v)
+	}
+	return n, nil
+}
+
+func intEnvRange(getenv Getenv, name string, def, minVal, maxVal int) (int, error) {
+	v := strings.TrimSpace(getenv(name))
+	if v == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < minVal || n > maxVal {
+		return 0, fmt.Errorf("config: %s must be %d–%d, got %q", name, minVal, maxVal, v)
 	}
 	return n, nil
 }

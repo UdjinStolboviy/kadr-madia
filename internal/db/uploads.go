@@ -50,6 +50,7 @@ type Upload struct {
 	Method         string
 	TmpKey         *string
 	MultipartID    *string // S3 multipart upload id (method MULTIPART)
+	PartSize       int64   // byte size per part (method MULTIPART; 0 if unset)
 	Filename       *string
 	ContentType    *string
 	DeclaredBytes  int64
@@ -72,21 +73,22 @@ func (u *Upload) Active() bool {
 	return false
 }
 
-const uploadCols = `id, project_id, ns, preset_id, preset_version, visibility, method, tmp_key, multipart_id, filename, content_type,
+const uploadCols = `id, project_id, ns, preset_id, preset_version, visibility, method, tmp_key, multipart_id, part_size, filename, content_type,
 	declared_bytes, declared_sha256, source_ref, metadata_json, status, asset_id, expires_at, created_at, updated_at`
 
 func scanUpload(row interface{ Scan(...any) error }) (*Upload, error) {
 	var u Upload
 	var tmpKey, mpID, filename, ctype, sourceRef, assetID sql.NullString
-	var declared sql.NullInt64
+	var partSize, declared sql.NullInt64
 	var meta string
 	var expires, created, updated int64
-	if err := row.Scan(&u.ID, &u.ProjectID, &u.NS, &u.PresetID, &u.PresetVersion, &u.Visibility, &u.Method, &tmpKey, &mpID,
+	if err := row.Scan(&u.ID, &u.ProjectID, &u.NS, &u.PresetID, &u.PresetVersion, &u.Visibility, &u.Method, &tmpKey, &mpID, &partSize,
 		&filename, &ctype, &declared, &u.DeclaredSHA256, &sourceRef, &meta, &u.Status, &assetID, &expires, &created, &updated); err != nil {
 		return nil, mapErr(err)
 	}
 	u.TmpKey, u.Filename, u.ContentType = fromNullStr(tmpKey), fromNullStr(filename), fromNullStr(ctype)
 	u.MultipartID = fromNullStr(mpID)
+	u.PartSize = partSize.Int64
 	u.SourceRef, u.AssetID = fromNullStr(sourceRef), fromNullStr(assetID)
 	u.DeclaredBytes = declared.Int64
 	u.Metadata = json.RawMessage(meta)
@@ -100,11 +102,12 @@ func (s *Store) CreateUpload(ctx context.Context, u *Upload) error {
 	if meta == "" {
 		meta = "{}"
 	}
+	partSize := sql.NullInt64{Int64: u.PartSize, Valid: u.PartSize > 0}
 	_, err := s.w.ExecContext(ctx,
-		`INSERT INTO uploads (id, project_id, ns, preset_id, preset_version, visibility, method, tmp_key, multipart_id, filename,
+		`INSERT INTO uploads (id, project_id, ns, preset_id, preset_version, visibility, method, tmp_key, multipart_id, part_size, filename,
 		  content_type, declared_bytes, declared_sha256, source_ref, metadata_json, status, asset_id, expires_at, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		u.ID, u.ProjectID, u.NS, u.PresetID, u.PresetVersion, u.Visibility, u.Method, nullStr(u.TmpKey), nullStr(u.MultipartID), nullStr(u.Filename),
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		u.ID, u.ProjectID, u.NS, u.PresetID, u.PresetVersion, u.Visibility, u.Method, nullStr(u.TmpKey), nullStr(u.MultipartID), partSize, nullStr(u.Filename),
 		nullStr(u.ContentType), u.DeclaredBytes, u.DeclaredSHA256, nullStr(u.SourceRef), meta, u.Status, nullStr(u.AssetID),
 		ms(u.ExpiresAt), ms(u.CreatedAt), ms(u.UpdatedAt))
 	if err != nil {

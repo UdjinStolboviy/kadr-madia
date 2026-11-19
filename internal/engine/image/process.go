@@ -304,6 +304,13 @@ func (p *proc) prepare(in string, src SourceInfo, params preset.ImageParams) (ra
 		}
 		cur = next
 	}
+	if wm := params.Watermark; wm != nil && (strings.TrimSpace(wm.Text) != "" || strings.TrimSpace(wm.Image) != "") {
+		next, err := p.applyWatermark(cur, wm)
+		if err != nil {
+			return raster{}, err
+		}
+		cur = next
+	}
 	r, err := readVHeader(cur)
 	if err != nil {
 		return raster{}, engineErr("read header", err)

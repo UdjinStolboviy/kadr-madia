@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Kadr, canonicalString, signUrl, verifySignedUrl, type SigningConfig } from "../src/index.js";
+import { Kadr, canonicalPrefixString, canonicalString, signUrl, verifySignedUrl, type SigningConfig } from "../src/index.js";
 
 const signing: SigningConfig = {
   kid: "k3",
@@ -137,6 +137,60 @@ describe("verifySignedUrl", () => {
     expect(verifySignedUrl(prefixed, { secrets: { k3: signing.secret }, now: NOW, pathPrefix: "/files" })).toMatchObject({
       ok: true,
       key: KEY,
+    });
+  });
+
+  it("supports directory-scoped prefix=1 signatures for HLS", () => {
+    const masterKey = "acme/video/2026/11/blb_1/hls/master.m3u8";
+    expect(canonicalPrefixString("acme/video/2026/11/blb_1/hls/", 1763330400)).toBe(
+      "GETP\n/acme/video/2026/11/blb_1/hls/\n1763330400\n",
+    );
+
+    const signed = signUrl(signing, masterKey, {
+      ttl: 3600,
+      prefix: true,
+      download: "ignored.mp4",
+      now: NOW,
+    });
+    const parsed = new URL(signed);
+    expect(parsed.searchParams.get("prefix")).toBe("1");
+    expect(parsed.searchParams.get("download")).toBeNull();
+
+    const secrets = { k3: signing.secret };
+    expect(verifySignedUrl(signed, { secrets, now: NOW })).toEqual({
+      ok: true,
+      key: masterKey,
+      exp: 1763330400,
+      kid: "k3",
+      prefix: true,
+    });
+
+    // Sibling segment inside the same hls/ directory verifies with the same signature.
+    const segmentUrl = signed.replace("master.m3u8", "seg_720p_00001.m4s");
+    expect(verifySignedUrl(segmentUrl, { secrets, now: NOW })).toEqual({
+      ok: true,
+      key: "acme/video/2026/11/blb_1/hls/seg_720p_00001.m4s",
+      exp: 1763330400,
+      kid: "k3",
+      prefix: true,
+    });
+
+    // Key in a different directory is rejected.
+    const otherDirUrl = signed.replace("/blb_1/hls/master.m3u8", "/blb_1/other/seg.m4s");
+    expect(verifySignedUrl(otherDirUrl, { secrets, now: NOW })).toEqual({
+      ok: false,
+      reason: "bad_signature",
+    });
+
+    // Removing prefix=1 or adding prefix=1 to a per-object signature fails verification.
+    expect(verifySignedUrl(signed.replace("&prefix=1", ""), { secrets, now: NOW })).toEqual({
+      ok: false,
+      reason: "bad_signature",
+    });
+    const perObj = signUrl(signing, masterKey, { ttl: 3600, now: NOW });
+    expect(verifySignedUrl(`${perObj}&prefix=1`, { secrets, now: NOW })).toEqual({
+      ok: false,
+      reason: "bad_signature",
     });
   });
 });

@@ -195,6 +195,85 @@ describe("uploads", () => {
     expect(calls[2]!.init.method).toBe("DELETE");
     expect(calls[2]!.url).toBe("http://kadr.internal:8080/v1/uploads/upl_1");
   });
+
+  it("gets upload status, refreshes multipart parts, and supports multipart: true", async () => {
+    const { fetch, calls } = mockFetch(
+      json(
+        {
+          upload_id: "upl_m",
+          method: "MULTIPART",
+          part_size: 8388608,
+          parts: [
+            { part_number: 1, url: "https://s/1" },
+            { part_number: 2, url: "https://s/2" },
+          ],
+          expires_at: "2026-11-16T22:00:00Z",
+          session_expires_at: "2026-11-17T21:00:00Z",
+        },
+        201,
+      ),
+      json({
+        upload_id: "upl_m",
+        status: "pending",
+        method: "MULTIPART",
+        namespace: "org_8f2c",
+        preset: "video-balanced",
+        visibility: "private",
+        filename: "clip.mp4",
+        content_type: "video/mp4",
+        size: 10_000_000,
+        part_size: 8388608,
+        total_parts: 2,
+        uploaded_parts: [{ part_number: 1, etag: '"e1"', size: 8388608 }],
+        expires_at: "2026-11-17T21:00:00Z",
+        asset_id: null,
+        created_at: "2026-11-16T21:00:00Z",
+      }),
+      json({
+        upload_id: "upl_m",
+        part_size: 8388608,
+        parts: [{ part_number: 2, url: "https://s/2-new" }],
+        uploaded_parts: [{ part_number: 1, etag: '"e1"', size: 8388608 }],
+        expires_at: "2026-11-16T23:00:00Z",
+        session_expires_at: "2026-11-17T21:00:00Z",
+      }),
+      json({
+        upload_id: "upl_m",
+        part_size: 8388608,
+        parts: [{ part_number: 2, url: "https://s/2-explicit" }],
+        uploaded_parts: [{ part_number: 1, etag: '"e1"', size: 8388608 }],
+        expires_at: "2026-11-16T23:05:00Z",
+        session_expires_at: "2026-11-17T21:00:00Z",
+      }),
+    );
+
+    const kadr = client(fetch);
+    const created = await kadr.uploads.create({
+      preset: "video-balanced",
+      namespace: "org_8f2c",
+      visibility: "private",
+      contentType: "video/mp4",
+      size: 10_000_000,
+      multipart: true,
+    });
+    expect(JSON.parse(calls[0]!.init.body as string)).toMatchObject({ multipart: true });
+    expect(created.kind === "upload" && created.sessionExpiresAt).toBe("2026-11-17T21:00:00Z");
+
+    const status = await kadr.uploads.get("upl_m");
+    expect(calls[1]!.init.method).toBe("GET");
+    expect(calls[1]!.url).toBe("http://kadr.internal:8080/v1/uploads/upl_m");
+    expect(status.totalParts).toBe(2);
+    expect(status.uploadedParts).toEqual([{ partNumber: 1, etag: '"e1"', size: 8388608 }]);
+
+    const autoRef = await kadr.uploads.refreshParts("upl_m");
+    expect(calls[2]!.url).toBe("http://kadr.internal:8080/v1/uploads/upl_m/parts");
+    expect(calls[2]!.init.body).toBeUndefined();
+    expect(autoRef.parts).toEqual([{ partNumber: 2, url: "https://s/2-new" }]);
+
+    const expRef = await kadr.uploads.refreshParts("upl_m", { partNumbers: [2], idempotencyKey: "ref-2" });
+    expect(JSON.parse(calls[3]!.init.body as string)).toEqual({ part_numbers: [2] });
+    expect(expRef.parts).toEqual([{ partNumber: 2, url: "https://s/2-explicit" }]);
+  });
 });
 
 describe("pagination", () => {

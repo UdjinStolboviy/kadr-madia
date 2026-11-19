@@ -79,6 +79,9 @@ func TestMultipartRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if initial, err := d.ListParts(ctx, u); err != nil || len(initial) != 0 {
+		t.Fatalf("initial ListParts = %+v, err=%v", initial, err)
+	}
 	sizes := []int{5 << 20, 5 << 20, 1 << 20}
 	var parts []CompletedPart
 	total := 0
@@ -95,6 +98,17 @@ func TestMultipartRoundTrip(t *testing.T) {
 		resp.Body.Close()
 		parts = append(parts, CompletedPart{Number: int32(i + 1), ETag: resp.Header.Get("ETag")})
 		total += n
+		if i == 1 {
+			listed, err := d.ListParts(ctx, u)
+			if err != nil || len(listed) != 2 {
+				t.Fatalf("ListParts mid-upload = %+v, err=%v", listed, err)
+			}
+			for j := range listed {
+				if listed[j].Number != int32(j+1) || listed[j].Size != int64(sizes[j]) || listed[j].ETag == "" {
+					t.Fatalf("unexpected listed part %d: %+v", j, listed[j])
+				}
+			}
+		}
 	}
 	if err := d.CompleteMultipart(ctx, u, parts); err != nil {
 		t.Fatal(err)
@@ -106,6 +120,9 @@ func TestMultipartRoundTrip(t *testing.T) {
 	u2, _ := d.CreateMultipart(ctx, "priv", "gone.bin", "")
 	if err := d.AbortMultipart(ctx, u2); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := d.ListParts(ctx, u2); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("ListParts after abort = %v, want ErrNotFound", err)
 	}
 }
 

@@ -28,6 +28,7 @@ Default presets store **one AVIF file per rendition** (posters and document thum
   "resize": { "maxWidth": 800, "maxHeight": 800, "fit": "inside", "crop": null /* "attention" | "centre" */, "aspect": null },
   "color": { "grayscale": false, "normalise": false },
   "sharpen": { "sigma": 0.6, "m1": 0.5, "m2": 1.5 },   // null = disabled
+  "watermark": null, // { "text": "…", "image": "data:image/png;base64,…", "position": "bottom-right|bottom-left|top-right|top-left|center|tile", "opacity": 0.35, "scale": 0.25, "margin": 0.04, "color": "#FFFFFF", "font": "Sans Bold" }
   "outputs": [
     { "name": "main", "format": "avif", "effort": 4, "chroma": "4:2:0" },
     { "name": "main", "format": "webp", "smartSubsample": true }
@@ -70,6 +71,8 @@ flowchart LR
 ```
 
 **One file or two per image:** every `outputs` entry is one stored file of the same rendition. The default presets have a single AVIF output, so an image is stored once (`main-800x600.avif`). Add a `webp` output for clients without AVIF (Safari/iOS < 16, some in-app browsers, e-mail clients): Kadr then also stores `main-800x600.webp`, which is not a duplicate but a second encoding, byte-budgeted like the first, and the SDK serves both with `<picture>`. A WebP-only preset is valid as well. Video posters and document thumbnails are chosen with `poster.formats` / `thumbnail.formats`: `["avif"]` (the defaults), `["webp"]`, `["avif","webp"]`; a preset that does not list them (presets created before this setting) stores both. The asset's `poster` field is the poster rendition (AVIF when present).
+
+**Watermarks (`watermark`):** optional preset-level overlay applied after resize and sharpen on the intermediate `.v` raster before encoding. Specify either `text` (rendered via `vips text` with drop-shadow in `color` and Pango `font`) or inline base64/data-URI `image` (PNG, WebP or JPEG, ≤ 512 KiB decoded; never both), positioned at `bottom-right`, `bottom-left`, `top-right`, `top-left`, `center` or `-30°` staggered `tile`. Previewed live in Admin → Playground.
 
 **Why an intermediate `.v`:** decoding and resizing (the expensive part) happen once; encoding at different qualities works on an already small raster and takes tens of milliseconds.
 
@@ -177,7 +180,7 @@ A video preset with `"hls": true` additionally produces an adaptive package next
 - One rendition row is recorded: name `hls`, format `m3u8`, `storage_key` = the master playlist, `bytes` = size of the whole package (also counted in the blob's total/quota). Segments have no rows: blob GC and visibility change enumerate the `hls/` prefix with `Driver.List`, so a package can never leak objects.
 - Job progress: 0-50 % MP4, 50-100 % ladder. A failing ladder fails the asset (the preset asked for it).
 
-**Private assets.** A per-object signature cannot work for HLS (a player requests dozens of segment URLs it derives from the playlist, without the query string). For a rendition of format `m3u8`, `POST /v1/sign-urls` therefore returns a directory-scoped URL: `...master.m3u8?exp=&kid=&sig=&prefix=1`, where `sig` signs the canonical string `GETP\n/{dir}/\n{exp}\n` (distinct from the per-object `GET\n/{key}\n{exp}\n{download}` form, which is unchanged). kadr-edge authorizes any object directly inside `{dir}/` for such a request and rewrites relative URIs in playlists to carry the same `exp/kid/sig/prefix`, so unmodified players (hls.js, Safari) work. Consequences: one URL grants the whole package until `exp`; `download` is ignored; the playlist is rewritten per request and not cached at the edge; the Node SDK has no helper for the prefix form yet (use `sign-urls`).
+**Private assets.** A per-object signature cannot work for HLS (a player requests dozens of segment URLs it derives from the playlist, without the query string). For a rendition of format `m3u8`, `POST /v1/signed-urls` (and `kadr.signUrl(key, { ttl, prefix: true })` in `@kadr/node`) therefore returns a directory-scoped URL: `...master.m3u8?exp=&kid=&sig=&prefix=1`, where `sig` signs the canonical string `GETP\n/{dir}/\n{exp}\n` (distinct from the per-object `GET\n/{key}\n{exp}\n{download}` form, which is unchanged). kadr-edge authorizes any object directly inside `{dir}/` for such a request and rewrites relative URIs in playlists to carry the same `exp/kid/sig/prefix`, so unmodified players (hls.js, Safari) work. Consequences: one URL grants the whole package until `exp`; `download` is ignored; the playlist is rewritten per request and not cached at the edge.
 
 ### AV1 (`"codec": "av1"`, opt-in)
 
@@ -225,5 +228,7 @@ DOCX/XLSX/PPTX/ODF are ZIP containers already; they are stored unchanged (rewrit
 
 **Thumbnail:** page 1 of the PDF is rendered by Ghostscript and compressed by the image budget search (formats from `thumbnail.formats`, AVIF in the default presets; rendition name `thumb`, ThumbHash and dominant colour included).
 
-**Storage and delivery:** the document is the rendition `main` with `format` = `pdf`/`docx`/…; it is stored with its real `Content-Type` and `Content-Disposition: attachment; filename="…"; filename*=UTF-8''…`, so a document is downloaded, never rendered inline from the CDN origin (add a Transform Rule with `X-Content-Type-Options: nosniff` on `cdn.<domain>`; `kadr-edge` already sets it and honours the stored disposition, or `download` per URL). Dedup by SHA-256, quotas, public/private, visibility change, signed URLs and imports work like for media. Limits: 100 MB default (`limits.maxInputBytes`, max 5 GB); files over 64 MB use multipart tickets like videos; ClamAV scanning is not built in.
+**Text extraction (`text.json`):** when `text: { "enabled": true, "maxBytes": 2097152 }` is set on a `file` preset (off on built-in defaults; `maxBytes` range 1 KB–10 MB, default 2 MB), Kadr extracts text on a best-effort basis into a `text.json` rendition (`{ "format", "pages": [{ "number", "text" }], "text", "truncated" }`) for **PDF** (via `pdftotext`, optional `poppler-utils`), **DOCX**, **ODT**, **TXT**, and **CSV**. Missing `pdftotext` or unreadable text never fails the upload — the main document rendition still succeeds.
+
+**Storage and delivery:** the document is the rendition `main` with `format` = `pdf`/`docx`/…; it is stored with its real `Content-Type` and `Content-Disposition: attachment; filename="…"; filename*=UTF-8''…`, so a document is downloaded, never rendered inline from the CDN origin (add a Transform Rule with `X-Content-Type-Options: nosniff` on `cdn.<domain>`; `kadr-edge` already sets it and honours the stored disposition, or `download` per URL). Dedup by SHA-256, quotas, public/private, visibility change, signed URLs and imports work like for media. Limits: 100 MB default (`limits.maxInputBytes`, max 5 GB); files over 16 MB (`KADR_MULTIPART_THRESHOLD_MB`) use multipart tickets like videos; ClamAV scanning is not built in.
 

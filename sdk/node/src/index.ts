@@ -10,7 +10,7 @@ export {
 export type { KadrErrorInit } from "./errors.js";
 export { SDK_VERSION } from "./http.js";
 export type { RequestOptions, IdempotentRequestOptions, FetchLike } from "./http.js";
-export { signUrl, verifySignedUrl, canonicalString, normalizeKey } from "./signing.js";
+export { signUrl, verifySignedUrl, canonicalString, canonicalPrefixString, normalizeKey } from "./signing.js";
 export type {
   SigningConfig,
   SignUrlOptions,

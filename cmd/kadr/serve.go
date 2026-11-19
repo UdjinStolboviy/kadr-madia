@@ -131,6 +131,7 @@ func cmdServe(ctx context.Context, args []string, stderr io.Writer) error {
 	svc := pipeline.New(pipeline.Config{
 		Store: store, Queue: q, Engine: imgEngine, Video: newVideoEngine(log, cfg.VideoAV1LP), File: newFileEngine(log), EdgeBaseURL: cfg.EdgeBaseURL, Keyring: keyring,
 		Logger: log, Metrics: set, TmpDir: cfg.TmpDir, Webhooks: dispatcher,
+		MultipartThreshold: cfg.MultipartThresholdBytes, PartSize: cfg.MultipartPartSizeBytes, MultipartSessionTTL: cfg.MultipartSessionTTL,
 	})
 	if n, err := svc.EnsureModePresets(ctx); err != nil {
 		log.Warn("ensure compression mode presets", "err", err)

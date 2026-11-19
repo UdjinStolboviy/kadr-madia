@@ -66,14 +66,29 @@ function todayPlus(days: number) {
   return d.toISOString().slice(0, 10);
 }
 
+const NS_RE = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/;
+
+function parseNamespaces(raw: string): { list: string[]; valid: boolean } {
+  const tokens = raw.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+  if (tokens.length > 100) return { list: [], valid: false };
+  for (const ns of tokens) {
+    if (!NS_RE.test(ns)) return { list: [], valid: false };
+  }
+  return { list: [...new Set(tokens)], valid: true };
+}
+
 const makeSchema = (t: (k: MessageKey) => string) => z
   .object({
     name: z.string().trim().min(1, t("apikeys.errName")).max(100),
     scopes: z.array(z.enum(API_KEY_SCOPES)).min(1, t("apikeys.errScopes")),
+    namespacesText: z.string(),
     expiry: z.enum(["never", "30", "90", "365", "custom"]),
     expires_on: z.string(),
   })
   .superRefine((v, ctx) => {
+    if (!parseNamespaces(v.namespacesText).valid) {
+      ctx.addIssue({ code: "custom", path: ["namespacesText"], message: t("apikeys.errNamespaces") });
+    }
     if (v.expiry !== "custom") return;
     if (!v.expires_on) ctx.addIssue({ code: "custom", path: ["expires_on"], message: t("apikeys.errDate") });
     else if (v.expires_on <= new Date().toISOString().slice(0, 10))
@@ -127,6 +142,18 @@ function SecretPanel({ result, onDone }: { result: CreateApiKeyResponse; onDone:
           </span>
         ))}
       </div>
+      <div className="flex flex-wrap items-center gap-1 text-xs">
+        <span className="text-muted-foreground">{t("apikeys.namespaces")}:</span>
+        {result.api_key.namespaces.length ? (
+          result.api_key.namespaces.map((ns) => (
+            <span key={ns} className="rounded border px-1.5 py-0.5 font-mono text-[11px]">
+              {ns}
+            </span>
+          ))
+        ) : (
+          <span className="text-muted-foreground">{t("apikeys.namespacesAll")}</span>
+        )}
+      </div>
       <DialogFooter>
         <Button onClick={onDone} variant={copied ? "default" : "outline"}>
           {copied ? t("apikeys.done") : t("apikeys.savedKey")}
@@ -143,7 +170,7 @@ function CreateKeyDialog({ project, open, onOpenChange }: { project: Project; op
   const [result, setResult] = useState<CreateApiKeyResponse | null>(null);
   const form = useForm<Values>({
     resolver: zodResolver(schema),
-    defaultValues: { name: "", scopes: DEFAULT_SCOPES, expiry: "never", expires_on: todayPlus(90) },
+    defaultValues: { name: "", scopes: DEFAULT_SCOPES, namespacesText: "", expiry: "never", expires_on: todayPlus(90) },
   });
   const { errors } = form.formState;
   const expiry = useWatch({ control: form.control, name: "expiry" });
@@ -159,12 +186,19 @@ function CreateKeyDialog({ project, open, onOpenChange }: { project: Project; op
   async function onSubmit(v: Values) {
     try {
       const at = expiresAt(v);
-      const res = await create.mutateAsync({ name: v.name, scopes: v.scopes, ...(at ? { expires_at: at } : {}) });
+      const namespaces = parseNamespaces(v.namespacesText).list;
+      const res = await create.mutateAsync({
+        name: v.name,
+        scopes: v.scopes,
+        ...(namespaces.length ? { namespaces } : {}),
+        ...(at ? { expires_at: at } : {}),
+      });
       setResult(res);
     } catch (e) {
       if (isApiError(e, "validation_failed") && Object.keys(e.fieldErrors).length) {
         for (const [k, msg] of Object.entries(e.fieldErrors)) {
-          form.setError((k === "expires_at" ? "expires_on" : k) as keyof Values, { message: msg });
+          const field = k === "expires_at" ? "expires_on" : k === "namespaces" ? "namespacesText" : k;
+          form.setError(field as keyof Values, { message: msg });
         }
       } else {
         toast.error(t("apikeys.createFailed"), { description: errorMessage(e) });
@@ -253,6 +287,20 @@ function CreateKeyDialog({ project, open, onOpenChange }: { project: Project; op
                   </p>
                 )}
               </fieldset>
+              <Field
+                label={t("apikeys.namespaces")}
+                htmlFor="key-namespaces"
+                hint={t("apikeys.namespacesHint")}
+                error={errors.namespacesText?.message}
+              >
+                <Input
+                  id="key-namespaces"
+                  placeholder={t("apikeys.namespacesPlaceholder")}
+                  className="font-mono text-xs"
+                  aria-invalid={!!errors.namespacesText}
+                  {...form.register("namespacesText")}
+                />
+              </Field>
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label={t("apikeys.expires")} htmlFor="key-expiry">
                   <Controller
@@ -373,6 +421,16 @@ export function ApiKeysTab({ project }: { project: Project }) {
                           </span>
                         ))}
                       </div>
+                      {k.namespaces.length > 0 && (
+                        <div className="mt-1 flex flex-wrap items-center gap-1">
+                          <span className="text-[11px] text-muted-foreground">{t("apikeys.namespaces")}:</span>
+                          {k.namespaces.map((ns) => (
+                            <span key={ns} className="rounded border px-1.5 py-0.5 font-mono text-[11px] whitespace-nowrap">
+                              {ns}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell className="hidden text-sm sm:table-cell">
                       <RelativeTime value={k.last_used_at} />

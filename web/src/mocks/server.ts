@@ -393,6 +393,24 @@ on("POST", "/projects/:id/api-keys", ({ params, body }) => {
   if (!b.name?.trim()) errors.name = "Required";
   if (!Array.isArray(b.scopes) || !b.scopes.length) errors.scopes = "At least one scope is required";
   else if (b.scopes.some((s) => !API_KEY_SCOPES.includes(s as ApiKeyScope))) errors.scopes = "Unknown scope";
+  const namespaces: string[] = [];
+  if (Array.isArray(b.namespaces) && b.namespaces.length) {
+    if (b.namespaces.length > 100) errors.namespaces = "At most 100 namespaces are allowed";
+    else {
+      const seen = new Set<string>();
+      for (const raw of b.namespaces) {
+        const ns = typeof raw === "string" ? raw.trim() : "";
+        if (!/^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/.test(ns)) {
+          errors.namespaces = `Invalid namespace "${String(raw)}"`;
+          break;
+        }
+        if (!seen.has(ns)) {
+          seen.add(ns);
+          namespaces.push(ns);
+        }
+      }
+    }
+  }
   if (b.expires_at && new Date(b.expires_at).getTime() <= Date.now()) errors.expires_at = "Must be in the future";
   if (Object.keys(errors).length) throw validationError(errors);
   const short = randomBase62(8);
@@ -403,13 +421,18 @@ on("POST", "/projects/:id/api-keys", ({ params, body }) => {
     name: b.name.trim(),
     prefix,
     scopes: b.scopes,
+    namespaces,
     last_used_at: null,
     expires_at: b.expires_at ?? null,
     revoked_at: null,
     created_at: nowIso(),
   };
   db.apiKeys.push(key);
-  audit("api_key.create", key.id, p.id, { name: key.name, scopes: key.scopes });
+  audit("api_key.create", key.id, p.id, {
+    name: key.name,
+    scopes: key.scopes,
+    ...(namespaces.length ? { namespaces } : {}),
+  });
   persist();
   return json(201, { api_key: key, secret: `${prefix}_${randomBase62(32)}` });
 });
@@ -537,6 +560,7 @@ on("GET", "/system", () => {
       vaapi: { ok: false, detail: "/dev/dri/renderD128 not present" },
       ghostscript: { ok: true, version: "10.05.1" },
       qpdf: { ok: true, version: "12.2.0" },
+      pdftotext: { ok: true, version: "26.11.0" },
     },
   };
   return json(200, sys);

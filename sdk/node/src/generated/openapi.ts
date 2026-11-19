@@ -41,7 +41,8 @@ export interface paths {
          *     and preset version, a new ready asset referencing it is created and
          *     returned with `200` — no upload is needed.
          *
-         *     Scope: `uploads:write`. Video files over 64 MB get a `MULTIPART` ticket:
+         *     Scope: `uploads:write`. Video and document files over 16 MB (or any file
+         *     over 5 MB when `multipart: true` is sent) get a `MULTIPART` ticket:
          *     upload each part (`part_size` bytes, the last may be smaller) with PUT
          *     to its URL, collect the `ETag` response headers and send them to
          *     `complete`. Image presets are limited to 64 MB.
@@ -86,7 +87,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Inspect upload status and uploaded parts
+         * @description Returns the status of an upload ticket. For pending `MULTIPART` uploads,
+         *     lists parts already stored in object storage (`uploaded_parts`) so
+         *     resumed uploads only transfer missing parts. Scope `uploads:write`.
+         */
+        get: operations["getUpload"];
         put?: never;
         post?: never;
         /**
@@ -94,6 +101,28 @@ export interface paths {
          * @description Deletes the temporary object and releases the quota reservation. Cancelling twice is a no-op. Scope `uploads:write`.
          */
         delete: operations["abortUpload"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/uploads/{upload_id}/parts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Re-sign part URLs for a pending multipart upload
+         * @description Returns the parts already stored (`uploaded_parts`) and fresh presigned
+         *     PUT URLs for the requested `part_numbers`, or for all missing parts when
+         *     `part_numbers` is omitted or empty. Scope `uploads:write`.
+         */
+        post: operations["refreshUploadParts"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -548,6 +577,8 @@ export interface components {
             /** @description Optional hex SHA-256 of the file. Enables dedup and is verified after download. */
             sha256?: string;
             metadata?: components["schemas"]["Metadata"];
+            /** @description Request a `MULTIPART` ticket whenever `size` exceeds the 5 MiB S3 part minimum. */
+            multipart?: boolean;
         };
         UploadTicket: {
             /** @example upl_01jd8x3k2m4n5p6q7r8s9t0v1w */
@@ -565,11 +596,7 @@ export interface components {
              */
             part_size?: number;
             /** @description `MULTIPART` tickets: presigned PUT URL of every part. */
-            parts?: {
-                part_number: number;
-                /** Format: uri */
-                url: string;
-            }[];
+            parts?: components["schemas"]["PartTicket"][];
             /**
              * @description Headers the client must send with the PUT (at least Content-Type and Content-Length).
              * @example {
@@ -582,6 +609,60 @@ export interface components {
             };
             /** Format: date-time */
             expires_at: string;
+            /**
+             * Format: date-time
+             * @description `MULTIPART` tickets: when the multipart session itself expires (after which parts cannot be refreshed).
+             */
+            session_expires_at?: string;
+        };
+        PartTicket: {
+            part_number: number;
+            /** Format: uri */
+            url: string;
+        };
+        UploadedPart: {
+            part_number: number;
+            etag: string;
+            /** Format: int64 */
+            size: number;
+        };
+        UploadStatus: {
+            upload_id: string;
+            /** @enum {string} */
+            status: "pending" | "uploaded" | "processing" | "done" | "expired" | "aborted" | "failed";
+            /** @enum {string} */
+            method: "PUT" | "MULTIPART" | "SERVER" | "URL" | "CLOUD";
+            namespace: components["schemas"]["Namespace"];
+            preset: string;
+            visibility: components["schemas"]["Visibility"];
+            filename: string | null;
+            content_type: string | null;
+            /** Format: int64 */
+            size: number;
+            /** Format: int64 */
+            part_size?: number;
+            total_parts?: number;
+            uploaded_parts?: components["schemas"]["UploadedPart"][];
+            /** Format: date-time */
+            expires_at: string;
+            asset_id: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        RefreshPartsRequest: {
+            /** @description Part numbers to re-sign; omit or send empty to sign all missing parts. */
+            part_numbers?: number[];
+        };
+        RefreshedUploadParts: {
+            upload_id: string;
+            /** Format: int64 */
+            part_size: number;
+            parts: components["schemas"]["PartTicket"][];
+            uploaded_parts: components["schemas"]["UploadedPart"][];
+            /** Format: date-time */
+            expires_at: string;
+            /** Format: date-time */
+            session_expires_at: string;
         };
         Asset: {
             /** @example ast_01jd8x3k2m4n5p6q7r8s9t0v1w */
@@ -968,6 +1049,8 @@ export interface operations {
                         environment: "live" | "test";
                         key_id: string;
                         scopes: components["schemas"]["Scope"][];
+                        /** @description Present when the API key is restricted to specific namespaces. */
+                        namespaces?: components["schemas"]["Namespace"][];
                     };
                 };
             };
@@ -1099,6 +1182,40 @@ export interface operations {
             };
         };
     };
+    getUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                upload_id: components["parameters"]["UploadId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current upload status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadStatus"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description `storage_error` — storage could not list uploaded parts. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     abortUpload: {
         parameters: {
             query?: never;
@@ -1122,6 +1239,67 @@ export interface operations {
             404: components["responses"]["NotFound"];
             /** @description `upload_not_pending` — complete was already called. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    refreshUploadParts: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description 1–255 printable ASCII characters, unique per logical request. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                upload_id: components["parameters"]["UploadId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RefreshPartsRequest"];
+            };
+        };
+        responses: {
+            /** @description Refreshed part URLs and uploaded parts list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RefreshedUploadParts"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description `upload_not_multipart`, `upload_aborted`, `upload_not_pending`, or `idempotency_in_progress`. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description `upload_expired` — the multipart upload session has expired. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            422: components["responses"]["ValidationFailed"];
+            /** @description `storage_error` — storage could not list uploaded parts. */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };

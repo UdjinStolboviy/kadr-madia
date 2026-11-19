@@ -59,6 +59,14 @@ func Handler(cfg Config) http.Handler {
 
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(auth.APIKeyMiddleware(cfg.Verifier, log))
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if p, ok := auth.PrincipalFrom(r.Context()); ok && len(p.Namespaces) > 0 {
+					r = r.WithContext(pipeline.WithAllowedNamespaces(r.Context(), p.Namespaces))
+				}
+				next.ServeHTTP(w, r)
+			})
+		})
 		r.Get("/ping", handlePing)
 		if cfg.Pipeline != nil {
 			h := &handlers{svc: cfg.Pipeline, log: log}
@@ -79,14 +87,18 @@ func Handler(cfg Config) http.Handler {
 
 func handlePing(w http.ResponseWriter, r *http.Request) {
 	p, _ := auth.PrincipalFrom(r.Context())
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+	body := map[string]any{
 		"ok":          true,
 		"project":     p.ProjectSlug,
 		"project_id":  p.ProjectID,
 		"environment": p.Environment,
 		"key_id":      p.KeyID,
 		"scopes":      p.Scopes,
-	})
+	}
+	if len(p.Namespaces) > 0 {
+		body["namespaces"] = p.Namespaces
+	}
+	httpx.WriteJSON(w, http.StatusOK, body)
 }
 
 func notImplemented(w http.ResponseWriter, _ *http.Request) {

@@ -162,7 +162,7 @@ usage after the change.
 import { signUrl, verifySignedUrl, verifyWebhook, signWebhook } from "@kadr/node";
 ```
 
-- `signUrl(signingConfig, key, { ttl, download?, now? }): string` — HMAC URL for kadr-edge / the delivery listener
+- `signUrl(signingConfig, key, { ttl, download?, prefix?, now? }): string` — HMAC URL for kadr-edge / the delivery listener (pass `prefix: true` for private HLS `master.m3u8` packages; `download` is ignored when `prefix: true`)
 - `presignGet({ endpoint, bucket, accessKeyId, secretAccessKey, region? }, key, { ttl?, download?, stableWindow?, now? }): string` — S3 SigV4 presigned GET: the browser reads the private object **directly from the bucket** (R2 or any S3 provider), no Worker, no request to Kadr. Synchronous. Use an R2 token with *Object Read only* on the private bucket (rotating it revokes the URLs). URLs are identical within `stableWindow` (default `min(ttl, 3600)` s) so browser caches hit; validity is `ttl + window` from the window start. Byte-identical to Kadr's own presigning.
 - `verifySignedUrl(url, { secrets, now?, pathPrefix? })`
 - `verifyWebhook(rawBody, headers, secret, { now?, toleranceSeconds? }): WebhookEvent`

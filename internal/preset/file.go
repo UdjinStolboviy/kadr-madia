@@ -9,7 +9,15 @@ type FileParams struct {
 	Limits       FileLimits   `json:"limits"`
 	Optimize     FileOptimize `json:"optimize"`
 	Thumbnail    FileThumb    `json:"thumbnail"`
+	Text         FileText     `json:"text,omitempty"`
 	RetainOrigin bool         `json:"retainOriginal"`
+}
+
+// FileText controls best-effort UTF-8 text extraction into a "text.json" rendition
+// (PDF via pdftotext, DOCX/ODT via XML, and plain TXT/CSV).
+type FileText struct {
+	Enabled  bool `json:"enabled"`
+	MaxBytes int  `json:"maxBytes,omitempty"` // default 2 MiB (range 1 KB – 10 MB)
 }
 
 // FileLimits guard input size and formats.

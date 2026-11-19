@@ -42,6 +42,7 @@ type CreateUploadInput struct {
 	Size        int64           `json:"size"`
 	SHA256      string          `json:"sha256"`
 	Metadata    json.RawMessage `json:"metadata"`
+	Multipart   bool            `json:"multipart,omitempty"`
 }
 
 // CreateUploadResult is either a ticket (201) or a deduplicated ready asset (200).
@@ -67,6 +68,8 @@ func (s *Service) validateCommon(ctx context.Context, projectID, presetSlug, mod
 	c := &common{ns: strings.TrimSpace(ns), vis: strings.TrimSpace(vis)}
 	if !ValidNamespace(c.ns) {
 		errs["namespace"] = "required; 1–128 characters of [A-Za-z0-9._:@-], starting with a letter or digit"
+	} else if err := checkNamespace(ctx, c.ns); err != nil {
+		return nil, err
 	}
 	if c.vis != "public" && c.vis != "private" {
 		errs["visibility"] = `must be "public" or "private"`
@@ -216,7 +219,7 @@ func (s *Service) CreateUpload(ctx context.Context, projectID string, in CreateU
 	}
 	key := "tmp/" + project.Slug + "/" + u.ID
 	u.TmpKey = &key
-	if c.kind != "image" && in.Size > s.mpThreshold {
+	if (in.Multipart && in.Size > MinMultipartPartBytes) || (c.kind != "image" && in.Size > s.mpThreshold) {
 		return s.createMultipartTicket(ctx, tgt, u, c, key, ct, in.Size)
 	}
 	pr, err := tgt.driver.PresignPut(ctx, tgt.profile.PrivateBucket, key, storage.PresignPutOptions{
@@ -300,7 +303,13 @@ func (s *Service) loadUpload(ctx context.Context, projectID, id string) (*db.Upl
 	if errors.Is(err, db.ErrNotFound) || (err == nil && u.ProjectID != projectID) {
 		return nil, apiErr(http.StatusNotFound, CodeNotFound, "upload %s not found", id)
 	}
-	return u, err
+	if err != nil {
+		return nil, err
+	}
+	if err := checkNamespace(ctx, u.NS); err != nil {
+		return nil, err
+	}
+	return u, nil
 }
 
 // CompleteUpload verifies the uploaded object, starts processing and waits
@@ -726,22 +735,23 @@ const maxParts = 10000
 
 // createMultipartTicket starts an S3 multipart upload and presigns every part.
 func (s *Service) createMultipartTicket(ctx context.Context, tgt *target, u *db.Upload, c *common, key, ct string, size int64) (*CreateUploadResult, error) {
-	partSize := s.partSize
-	if min := (size + maxParts - 1) / maxParts; min > partSize {
-		partSize = (min + (1 << 20) - 1) &^ ((1 << 20) - 1) // round up to MB
-	}
+	partSize := s.multipartPartSizeForBytes(size)
 	n := int((size + partSize - 1) / partSize)
 	mp, err := tgt.driver.CreateMultipart(ctx, tgt.profile.PrivateBucket, key, ct)
 	if err != nil {
 		return nil, apiErr(http.StatusBadGateway, CodeStorageError, "could not start a multipart upload: %v", err)
 	}
-	u.Method, u.MultipartID = db.UploadMethodMultipart, &mp.UploadID
-	// Multipart uploads of large files get a longer ticket.
-	u.ExpiresAt = u.CreatedAt.Add(max(s.uploadTTL, time.Hour))
-	ttl := u.ExpiresAt.Sub(s.now())
+	u.Method, u.MultipartID, u.PartSize = db.UploadMethodMultipart, &mp.UploadID, partSize
+	// Multipart sessions live longer so paused/resumed uploads can refresh part URLs.
+	u.ExpiresAt = u.CreatedAt.Add(max(s.uploadTTL, s.mpSessionTTL))
+	remaining := u.ExpiresAt.Sub(s.now())
+	urlTTL := min(s.mpPartTTL, remaining)
+	if urlTTL < time.Second {
+		urlTTL = remaining
+	}
 	parts := make([]PartTicket, n)
 	for i := range parts {
-		pr, err := tgt.driver.PresignUploadPart(ctx, mp, int32(i+1), ttl)
+		pr, err := tgt.driver.PresignUploadPart(ctx, mp, int32(i+1), urlTTL)
 		if err != nil {
 			_ = tgt.driver.AbortMultipart(context.WithoutCancel(ctx), mp)
 			return nil, fmt.Errorf("presign part: %w", err)
@@ -759,8 +769,170 @@ func (s *Service) createMultipartTicket(ctx context.Context, tgt *target, u *db.
 		return nil, err
 	}
 	return &CreateUploadResult{Ticket: &UploadTicket{
-		UploadID: u.ID, Method: db.UploadMethodMultipart, ExpiresAt: rfc3339(u.ExpiresAt), PartSize: partSize, Parts: parts,
+		UploadID: u.ID, Method: db.UploadMethodMultipart,
+		ExpiresAt: rfc3339(s.now().Add(urlTTL)), SessionExpiresAt: rfc3339(u.ExpiresAt),
+		PartSize: partSize, Parts: parts,
 	}}, nil
+}
+
+func (s *Service) multipartPartSizeForBytes(size int64) int64 {
+	partSize := max(s.partSize, MinMultipartPartBytes)
+	if minSize := (size + maxParts - 1) / maxParts; minSize > partSize {
+		partSize = (minSize + (1 << 20) - 1) &^ ((1 << 20) - 1) // round up to MB
+	}
+	return partSize
+}
+
+func (s *Service) resolveMultipartPartSize(u *db.Upload) int64 {
+	if u.PartSize > 0 {
+		return u.PartSize
+	}
+	return s.multipartPartSizeForBytes(u.DeclaredBytes)
+}
+
+// GetUpload returns the current state of an upload ticket. For pending
+// MULTIPART uploads, it queries storage for parts uploaded so far so a client
+// can resume without re-uploading completed parts.
+func (s *Service) GetUpload(ctx context.Context, projectID, uploadID string) (*UploadStatusView, error) {
+	u, err := s.loadUpload(ctx, projectID, uploadID)
+	if err != nil {
+		return nil, err
+	}
+	presetSlug := ""
+	if pv, err := s.store.GetPresetVersion(ctx, u.PresetID, u.PresetVersion); err == nil {
+		presetSlug = pv.Slug
+	} else if !errors.Is(err, db.ErrNotFound) {
+		return nil, err
+	}
+	out := &UploadStatusView{
+		UploadID: u.ID, Status: u.Status, Method: u.Method, Namespace: u.NS, Preset: presetSlug,
+		Visibility: u.Visibility, Filename: u.Filename, ContentType: u.ContentType,
+		Size: u.DeclaredBytes, ExpiresAt: rfc3339(u.ExpiresAt), AssetID: u.AssetID, CreatedAt: rfc3339(u.CreatedAt),
+	}
+	if u.Method == db.UploadMethodMultipart {
+		partSize := s.resolveMultipartPartSize(u)
+		out.PartSize = partSize
+		out.TotalParts = int((u.DeclaredBytes + partSize - 1) / partSize)
+		if u.Status == db.UploadPending && u.MultipartID != nil {
+			out.UploadedParts = []UploadedPartView{}
+			project, err := s.store.GetProject(ctx, u.ProjectID)
+			if err != nil {
+				return nil, err
+			}
+			tgt, err := s.storageFor(ctx, project)
+			if err != nil {
+				return nil, err
+			}
+			mp := storage.MultipartUpload{Bucket: tgt.profile.PrivateBucket, Key: deref(u.TmpKey), UploadID: *u.MultipartID}
+			listed, err := tgt.driver.ListParts(ctx, mp)
+			if err != nil && !errors.Is(err, storage.ErrNotFound) {
+				return nil, apiErr(http.StatusBadGateway, CodeStorageError, "could not list uploaded parts: %v", err)
+			}
+			for _, p := range listed {
+				out.UploadedParts = append(out.UploadedParts, UploadedPartView{PartNumber: int(p.Number), ETag: p.ETag, Size: p.Size})
+			}
+		}
+	}
+	return out, nil
+}
+
+// RefreshUploadParts re-signs presigned PUT URLs for a pending MULTIPART
+// upload whose session has not expired. When partNumbers is empty, all parts
+// not yet reported by storage ListParts are signed.
+func (s *Service) RefreshUploadParts(ctx context.Context, projectID, uploadID string, partNumbers []int) (*RefreshPartsView, error) {
+	u, err := s.loadUpload(ctx, projectID, uploadID)
+	if err != nil {
+		return nil, err
+	}
+	if u.Method != db.UploadMethodMultipart {
+		return nil, apiErr(http.StatusConflict, CodeUploadNotMultipart, "upload %s is %s, not MULTIPART", u.ID, u.Method)
+	}
+	switch u.Status {
+	case db.UploadPending:
+	case db.UploadExpired:
+		return nil, apiErr(http.StatusGone, CodeUploadExpired, "upload %s expired", u.ID)
+	case db.UploadAborted:
+		return nil, apiErr(http.StatusConflict, CodeUploadAborted, "upload %s was cancelled", u.ID)
+	default:
+		return nil, apiErr(http.StatusConflict, CodeUploadNotPending, "upload %s is %s", u.ID, u.Status)
+	}
+	now := s.now()
+	remaining := u.ExpiresAt.Sub(now)
+	if remaining < time.Second || u.MultipartID == nil {
+		return nil, apiErr(http.StatusGone, CodeUploadExpired, "upload %s session has expired", u.ID)
+	}
+
+	partSize := s.resolveMultipartPartSize(u)
+	totalParts := int((u.DeclaredBytes + partSize - 1) / partSize)
+	if len(partNumbers) > 0 {
+		seen := map[int]bool{}
+		filtered := make([]int, 0, len(partNumbers))
+		for _, n := range partNumbers {
+			if n < 1 || n > totalParts {
+				return nil, validationErr(map[string]string{
+					"part_numbers": fmt.Sprintf("part numbers must be between 1 and %d", totalParts),
+				})
+			}
+			if !seen[n] {
+				seen[n] = true
+				filtered = append(filtered, n)
+			}
+		}
+		slices.Sort(filtered)
+		partNumbers = filtered
+	}
+
+	project, err := s.store.GetProject(ctx, u.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	tgt, err := s.storageFor(ctx, project)
+	if err != nil {
+		return nil, err
+	}
+	mp := storage.MultipartUpload{Bucket: tgt.profile.PrivateBucket, Key: deref(u.TmpKey), UploadID: *u.MultipartID}
+	listed, err := tgt.driver.ListParts(ctx, mp)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return nil, apiErr(http.StatusGone, CodeUploadExpired, "multipart upload %s no longer exists in storage", u.ID)
+		}
+		return nil, apiErr(http.StatusBadGateway, CodeStorageError, "could not list uploaded parts: %v", err)
+	}
+
+	uploaded := make([]UploadedPartView, 0, len(listed))
+	done := map[int]bool{}
+	for _, p := range listed {
+		n := int(p.Number)
+		done[n] = true
+		uploaded = append(uploaded, UploadedPartView{PartNumber: n, ETag: p.ETag, Size: p.Size})
+	}
+
+	if len(partNumbers) == 0 {
+		partNumbers = make([]int, 0, totalParts)
+		for n := 1; n <= totalParts; n++ {
+			if !done[n] {
+				partNumbers = append(partNumbers, n)
+			}
+		}
+	}
+
+	urlTTL := min(s.mpPartTTL, remaining)
+	signed := make([]PartTicket, 0, len(partNumbers))
+	for _, n := range partNumbers {
+		pr, err := tgt.driver.PresignUploadPart(ctx, mp, int32(n), urlTTL)
+		if err != nil {
+			return nil, fmt.Errorf("presign part %d: %w", n, err)
+		}
+		signed = append(signed, PartTicket{PartNumber: n, URL: pr.URL})
+	}
+	return &RefreshPartsView{
+		UploadID:         u.ID,
+		PartSize:         partSize,
+		Parts:            signed,
+		UploadedParts:    uploaded,
+		ExpiresAt:        rfc3339(now.Add(urlTTL)),
+		SessionExpiresAt: rfc3339(u.ExpiresAt),
+	}, nil
 }
 
 // finishMultipart assembles the parts of a pending multipart upload. When the

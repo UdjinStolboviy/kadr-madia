@@ -30,6 +30,7 @@ export interface MultipartUploadTicket {
   part_size: number;
   parts: MultipartPart[];
   expires_at?: string;
+  session_expires_at?: string;
 }
 
 export type UploadTicket = PutUploadTicket | MultipartUploadTicket;
@@ -87,10 +88,16 @@ export interface UploadOptions extends RetryOptions {
   concurrency?: number;
   /** Per-attempt timeout in ms; 0 or unset disables it. */
   timeoutMs?: number;
+  /** Already-uploaded parts for resuming a MULTIPART upload (e.g. from `GET /v1/uploads/{id}`). */
+  completedParts?: CompletedPart[] | undefined;
+  /** Called as each individual part of a MULTIPART upload completes (useful for persistence). */
+  onPartComplete?: ((part: CompletedPart) => void) | undefined;
+  /** Called when a part PUT fails with HTTP 403 (expired presigned URL) to obtain fresh part URLs. */
+  refreshParts?: ((uploadId: string, partNumbers: number[]) => Promise<MultipartPart[]>) | undefined;
   /** Replace the XHR constructor (tests, polyfills). */
-  createXhr?: () => XMLHttpRequest;
+  createXhr?: (() => XMLHttpRequest) | undefined;
   /** Replace the backoff sleep (tests). */
-  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+  sleep?: ((ms: number, signal?: AbortSignal) => Promise<void>) | undefined;
 }
 
 export interface UploadFileOptions<TAsset> extends UploadOptions {

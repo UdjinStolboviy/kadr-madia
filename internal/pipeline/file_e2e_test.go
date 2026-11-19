@@ -3,14 +3,19 @@ package pipeline_test
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/UdjinStolboviy/kadr-madia/internal/db"
 	"github.com/UdjinStolboviy/kadr-madia/internal/engine/file"
 	"github.com/UdjinStolboviy/kadr-madia/internal/engine/image"
 	"github.com/UdjinStolboviy/kadr-madia/internal/pipeline"
+	"github.com/UdjinStolboviy/kadr-madia/internal/preset"
 )
 
 const (
@@ -166,6 +171,133 @@ func TestDocumentPipelineWithRealEngines(t *testing.T) {
 	if q["status"] != "ready" || q["preset"] != "file-quality" {
 		t.Fatalf("quality: %v", q)
 	}
+}
+
+func TestDocumentTextExtractionE2E(t *testing.T) {
+	e := newEnv(t)
+
+	// Create a preset with text extraction enabled.
+	fp, _ := json.Marshal(preset.FileParams{
+		Kind:      "file",
+		Limits:    preset.FileLimits{MaxInputBytes: 50 << 20, Accept: preset.DefaultFileFormats},
+		Optimize:  preset.FileOptimize{Strategy: preset.FileStrategyNone},
+		Thumbnail: preset.FileThumb{Enabled: false},
+		Text:      preset.FileText{Enabled: true, MaxBytes: 1 << 20},
+	})
+	must(t, e.store.CreatePreset(e.ctx, &db.Preset{
+		ID: db.NewID(db.PrefixPreset), ProjectID: e.project.ID, Slug: "file-diff",
+		Kind: "file", Description: "Text extraction", CurrentVersion: 1, Params: fp, CreatedAt: e.clock.Now(),
+	}, "test"))
+
+	docx := makeDocx(`<w:body><w:p><w:r><w:t>Contract clause one</w:t></w:r></w:p></w:body>`)
+	a := e.uploadDoc(docx, docxType, "contract.docx", map[string]any{"preset": "file-diff"})
+	if a["status"] != "ready" {
+		t.Fatalf("docx not ready: %v", a)
+	}
+	var textKey string
+	for _, x := range a["renditions"].([]any) {
+		r := x.(map[string]any)
+		if r["name"] == "text" && r["format"] == "json" {
+			textKey = r["key"].(string)
+		}
+	}
+	if textKey == "" {
+		t.Fatalf("missing text.json rendition: %v", a["renditions"])
+	}
+	opts, _ := e.driver.opts(privateBucket, textKey)
+	if opts.ContentType != "application/json; charset=utf-8" {
+		t.Fatalf("text.json content type: %q", opts.ContentType)
+	}
+	rc, _, err := e.driver.Get(e.ctx, privateBucket, textKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawJSON, _ := io.ReadAll(rc)
+	rc.Close()
+	var et file.ExtractedText
+	if err := json.Unmarshal(rawJSON, &et); err != nil {
+		t.Fatal(err)
+	}
+	if et.Format != "docx" || et.Text != "Contract clause one" {
+		t.Fatalf("unexpected extracted text: %+v", et)
+	}
+
+	// Private text.json rendition can be signed via POST /v1/signed-urls.
+	enc, err := e.kr.Encrypt([]byte("s3cret"), pipeline.SigningKeySecretAAD("doc-k1"))
+	must(t, err)
+	must(t, e.store.RotateSigningKey(e.ctx, &db.SigningKey{ID: "doc-k1", ProjectID: e.project.ID, SecretEnc: enc, CreatedAt: e.clock.Now()}))
+	sres := e.call("POST", "/v1/signed-urls", map[string]any{
+		"items": []map[string]any{{"asset_id": a["id"], "rendition": "text.json", "ttl": 300}},
+	}, nil)
+	expect(t, sres, 200, "")
+	if len(sres.obj(t)["items"].([]any)) != 1 {
+		t.Fatalf("signed-urls: %s", sres.body)
+	}
+
+	// Visibility change copies text.json to public bucket and preserves access.
+	pres := e.call("PATCH", "/v1/assets/"+a["id"].(string), map[string]any{"visibility": "public"}, nil)
+	expect(t, pres, 200, "")
+	pubAsset := pres.obj(t)
+	var pubTextURL string
+	for _, x := range pubAsset["renditions"].([]any) {
+		r := x.(map[string]any)
+		if r["name"] == "text" && r["format"] == "json" {
+			pubTextURL, _ = r["url"].(string)
+		}
+	}
+	if pubTextURL == "" {
+		t.Fatalf("missing public text.json URL after PATCH visibility: %v", pubAsset["renditions"])
+	}
+	pubKey := strings.TrimPrefix(pubTextURL, cdnBase+"/")
+	if !e.objectExists(publicBucket, pubKey) {
+		t.Fatalf("public text.json missing at %s", pubKey)
+	}
+
+	// Delete & GC cleans up text.json.
+	expect(t, e.call("DELETE", "/v1/assets/"+a["id"].(string), nil, nil), 204, "")
+	if _, err := e.svc.CollectGarbage(e.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if e.objectExists(publicBucket, pubKey) {
+		t.Fatalf("public text.json still exists after GC")
+	}
+
+	// Verify PDF extraction if pdftotext is installed on host.
+	if file.New(file.Config{}).HasPDFToText() {
+		pdfDoc := []byte("%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n" +
+			"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>\nendobj\n" +
+			"4 0 obj\n<< /Length 41 >>\nstream\nBT /F1 12 Tf 20 200 Td (PDF Clause 1) Tj ET\nendstream\nendobj\n" +
+			"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n" +
+			"trailer\n<< /Size 6 /Root 1 0 R >>\n%%EOF\n")
+		pAsset := e.uploadDoc(pdfDoc, pdfType, "clause.pdf", map[string]any{"preset": "file-diff"})
+		if pAsset["status"] != "ready" {
+			t.Fatalf("pdf status: %v", pAsset)
+		}
+		var pdfTextKey string
+		for _, x := range pAsset["renditions"].([]any) {
+			r := x.(map[string]any)
+			if r["name"] == "text" && r["format"] == "json" {
+				pdfTextKey = r["key"].(string)
+			}
+		}
+		if pdfTextKey == "" {
+			t.Fatalf("expected text.json for PDF: %v", pAsset["renditions"])
+		}
+		prc, _, err := e.driver.Get(e.ctx, privateBucket, pdfTextKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pb, _ := io.ReadAll(prc)
+		prc.Close()
+		var pet file.ExtractedText
+		if err := json.Unmarshal(pb, &pet); err != nil {
+			t.Fatal(err)
+		}
+		if pet.Format != "pdf" || !strings.Contains(pet.Text, "PDF Clause 1") {
+			t.Fatalf("unexpected PDF extracted text: %+v", pet)
+		}
+	}
+	_ = http.StatusOK
 }
 
 // scanPDF builds a PDF with one large uncompressed RGB image per page.

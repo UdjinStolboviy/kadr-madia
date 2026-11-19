@@ -16,24 +16,31 @@ type APIKey struct {
 	Prefix     string
 	SecretHash []byte
 	Scopes     []string
+	Namespaces []string
 	LastUsedAt *time.Time
 	ExpiresAt  *time.Time
 	RevokedAt  *time.Time
 	CreatedAt  time.Time
 }
 
-const apiKeyCols = `id, project_id, name, prefix, secret_hash, scopes, last_used_at, expires_at, revoked_at, created_at`
+const apiKeyCols = `id, project_id, name, prefix, secret_hash, scopes, namespaces_json, last_used_at, expires_at, revoked_at, created_at`
 
 func scanAPIKey(row interface{ Scan(...any) error }) (*APIKey, error) {
 	var k APIKey
 	var scopes string
+	var nsJSON sql.NullString
 	var last, exp, rev sql.NullInt64
 	var created int64
-	if err := row.Scan(&k.ID, &k.ProjectID, &k.Name, &k.Prefix, &k.SecretHash, &scopes, &last, &exp, &rev, &created); err != nil {
+	if err := row.Scan(&k.ID, &k.ProjectID, &k.Name, &k.Prefix, &k.SecretHash, &scopes, &nsJSON, &last, &exp, &rev, &created); err != nil {
 		return nil, mapErr(err)
 	}
 	if err := json.Unmarshal([]byte(scopes), &k.Scopes); err != nil {
 		return nil, fmt.Errorf("api key %s: scopes: %w", k.ID, err)
+	}
+	if nsJSON.Valid && nsJSON.String != "" {
+		if err := json.Unmarshal([]byte(nsJSON.String), &k.Namespaces); err != nil {
+			return nil, fmt.Errorf("api key %s: namespaces: %w", k.ID, err)
+		}
 	}
 	k.LastUsedAt, k.ExpiresAt, k.RevokedAt = fromNullMs(last), fromNullMs(exp), fromNullMs(rev)
 	k.CreatedAt = fromMs(created)
@@ -46,10 +53,18 @@ func (s *Store) CreateAPIKey(ctx context.Context, k *APIKey) error {
 	if err != nil {
 		return err
 	}
+	var nsJSON any
+	if len(k.Namespaces) > 0 {
+		b, err := json.Marshal(k.Namespaces)
+		if err != nil {
+			return err
+		}
+		nsJSON = string(b)
+	}
 	_, err = s.w.ExecContext(ctx,
-		`INSERT INTO api_keys (id, project_id, name, prefix, secret_hash, scopes, expires_at, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		k.ID, k.ProjectID, k.Name, k.Prefix, k.SecretHash, string(scopes), nullMs(k.ExpiresAt), ms(k.CreatedAt))
+		`INSERT INTO api_keys (id, project_id, name, prefix, secret_hash, scopes, namespaces_json, expires_at, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		k.ID, k.ProjectID, k.Name, k.Prefix, k.SecretHash, string(scopes), nsJSON, nullMs(k.ExpiresAt), ms(k.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("create api key: %w", mapErr(err))
 	}

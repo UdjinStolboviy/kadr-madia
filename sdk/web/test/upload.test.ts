@@ -154,6 +154,82 @@ describe("multipart", () => {
       status: 403,
     });
   });
+
+  it("resumes with completedParts, reports resumed progress, and notifies onPartComplete", async () => {
+    const xhr = fakeXhrFactory((r) => ({ etag: `"e-${r.url.slice(-1)}"` }));
+    const progress: number[] = [];
+    const newlyDone: CompletedPart[] = [];
+    const partialTicket: MultipartUploadTicket = {
+      upload_id: "upl_m",
+      method: "MULTIPART",
+      part_size: 4,
+      parts: [2, 3].map((n) => ({ part_number: n, url: `https://s/p${n}` })),
+    };
+    const merged = await putMultipart(new Blob(["aaaabbbbcc"]), partialTicket, {
+      createXhr: xhr.create,
+      completedParts: [{ part_number: 1, etag: '"e-1"' }],
+      onProgress: (p) => progress.push(p.loaded),
+      onPartComplete: (part) => newlyDone.push(part),
+    });
+
+    expect(xhr.requests.map((r) => r.url)).toEqual(["https://s/p2", "https://s/p3"]);
+    expect(progress[0]).toBe(4);
+    expect(progress.at(-1)).toBe(10);
+    expect(newlyDone).toEqual([
+      { part_number: 2, etag: '"e-2"' },
+      { part_number: 3, etag: '"e-3"' },
+    ]);
+    expect(merged).toEqual([
+      { part_number: 1, etag: '"e-1"' },
+      { part_number: 2, etag: '"e-2"' },
+      { part_number: 3, etag: '"e-3"' },
+    ]);
+  });
+
+  it("coalesces refreshParts on concurrent 403s and retries cleanly", async () => {
+    const xhr = fakeXhrFactory((r) => {
+      if (r.url.startsWith("https://s/old-")) return { status: 403 };
+      return { etag: `"fresh-${r.url.slice(-1)}"` };
+    });
+    const staleTicket: MultipartUploadTicket = {
+      upload_id: "upl_ref",
+      method: "MULTIPART",
+      part_size: 4,
+      parts: [1, 2, 3].map((n) => ({ part_number: n, url: `https://s/old-${n}` })),
+    };
+    const refreshParts = vi.fn(async (_id: string, nums: number[]) =>
+      nums.map((n) => ({ part_number: n, url: `https://s/new-${n}` })),
+    );
+
+    const parts = await putMultipart(new Blob(["aaaabbbbcc"]), staleTicket, {
+      createXhr: xhr.create,
+      concurrency: 3,
+      refreshParts,
+    });
+
+    expect(refreshParts).toHaveBeenCalledTimes(1);
+    expect(refreshParts).toHaveBeenCalledWith("upl_ref", [1, 2, 3]);
+    expect(parts).toEqual([
+      { part_number: 1, etag: '"fresh-1"' },
+      { part_number: 2, etag: '"fresh-2"' },
+      { part_number: 3, etag: '"fresh-3"' },
+    ]);
+  });
+
+  it("stops after refresh limit if 403 persists", async () => {
+    const xhr = fakeXhrFactory(() => ({ status: 403 }));
+    const refreshParts = vi.fn(async (_id: string, nums: number[]) =>
+      nums.map((n) => ({ part_number: n, url: `https://s/retry-${n}` })),
+    );
+    await expect(
+      putMultipart(new Blob(["aaaabbbbcc"]), ticket, {
+        createXhr: xhr.create,
+        concurrency: 1,
+        refreshParts,
+      }),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(refreshParts).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("helpers", () => {

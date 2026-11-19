@@ -60,6 +60,9 @@ KADR_API_KEY_PEPPER=…
 KADR_POOL_IMAGE=2
 KADR_POOL_VIDEO=1
 KADR_POOL_FILE=1                         # document jobs (PDF optimisation)
+KADR_MULTIPART_THRESHOLD_MB=16           # non-image files ≥ threshold use MULTIPART (range 5–5120)
+KADR_MULTIPART_PART_SIZE_MB=8            # multipart part size (range 5–512)
+KADR_MULTIPART_SESSION_HOURS=24          # multipart resume session TTL (range 1–168)
 KADR_VIDEO_HW=auto                       # auto | vaapi | off
 KADR_VIDEO_AV1_LP=0                      # SVT-AV1 parallelism for AV1 presets; 2 on hosts with ≤ 2 GB RAM
 KADR_EDGE_BASE_URL=https://media.example.com   # private delivery host (kadr-edge or the delivery listener) for POST /v1/signed-urls
@@ -208,4 +211,4 @@ The password is shown only there (it is hashed with argon2id and not stored or l
 
 ## Documents: packages
 
-Document upload works without extra packages (validation + storage). For PDF optimisation and thumbnails install `ghostscript` and `qpdf` (`apt-get install ghostscript qpdf`; `deploy/lxc/provision.sh` does it). System → capabilities and `kadr doctor` list them as optional. Ghostscript has a history of security issues: keep it updated (`unattended-upgrades`); Kadr runs it with `-dSAFER`, a minimal environment, `nice` and per-command timeouts, inside the systemd sandbox.
+Document upload works without extra packages (validation + storage). For PDF optimisation and thumbnails install `ghostscript` and `qpdf`; for PDF text extraction (`text.json` when enabled on a file preset) install `poppler-utils` (`pdftotext`) (`apt-get install ghostscript qpdf poppler-utils`; `deploy/lxc/provision.sh` does it). System → capabilities and `kadr doctor` list them as optional. Ghostscript has a history of security issues: keep it updated (`unattended-upgrades`); Kadr runs it with `-dSAFER`, a minimal environment, `nice` and per-command timeouts, inside the systemd sandbox.

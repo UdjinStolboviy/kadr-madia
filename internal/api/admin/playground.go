@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"mime"
 	"net/http"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 
@@ -112,7 +114,7 @@ func (s *Server) handlePlayground(w http.ResponseWriter, r *http.Request) {
 			}
 			haveFile = true
 		case "params":
-			b, _ := io.ReadAll(io.LimitReader(part, 64<<10))
+			b, _ := io.ReadAll(io.LimitReader(part, 1<<20))
 			if err := json.Unmarshal(b, &params); err != nil {
 				validationFailed(w, map[string]string{"params": "must be valid image preset parameters JSON"})
 				return
@@ -228,6 +230,90 @@ func validateImageParams(p *preset.ImageParams) string {
 	case "ssim", "fixed":
 	default:
 		return "quality.mode must be budget, ssim or fixed"
+	}
+	if msg := validateWatermark(p); msg != "" {
+		return msg
+	}
+	return ""
+}
+
+var hexColorRe = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+func validateWatermark(p *preset.ImageParams) string {
+	w := p.Watermark
+	if w == nil {
+		return ""
+	}
+	w.Text = strings.TrimSpace(w.Text)
+	w.Image = strings.TrimSpace(w.Image)
+	w.Position = strings.TrimSpace(w.Position)
+	w.Color = strings.TrimSpace(w.Color)
+	w.Font = strings.TrimSpace(w.Font)
+	if w.Text == "" && w.Image == "" {
+		p.Watermark = nil
+		return ""
+	}
+	if w.Text != "" && w.Image != "" {
+		return "watermark: set either text or image, not both"
+	}
+	if w.Text != "" {
+		if utf8.RuneCountInString(w.Text) > 200 {
+			return "watermark.text must be at most 200 characters"
+		}
+		for _, r := range w.Text {
+			if r < 0x20 && r != '\n' {
+				return "watermark.text contains control characters"
+			}
+		}
+		if w.Color == "" {
+			w.Color = "#FFFFFF"
+		} else if !hexColorRe.MatchString(w.Color) {
+			return "watermark.color must be #RRGGBB"
+		}
+		if w.Font == "" {
+			w.Font = "Sans Bold"
+		} else {
+			if len(w.Font) > 80 || strings.HasPrefix(w.Font, "-") {
+				return "watermark.font is invalid"
+			}
+			for i := 0; i < len(w.Font); i++ {
+				if w.Font[i] < 0x20 || w.Font[i] > 0x7e {
+					return "watermark.font must be printable ASCII"
+				}
+			}
+		}
+	} else {
+		w.Color = ""
+		w.Font = ""
+		if _, _, err := preset.DecodeWatermarkImage(w.Image); err != nil {
+			return "watermark.image: " + err.Error()
+		}
+	}
+	if w.Position == "" {
+		w.Position = "bottom-right"
+	}
+	switch w.Position {
+	case "bottom-right", "bottom-left", "top-right", "top-left", "center", "tile":
+	default:
+		return "watermark.position must be bottom-right, bottom-left, top-right, top-left, center or tile"
+	}
+	if math.IsNaN(w.Opacity) || math.IsInf(w.Opacity, 0) || w.Opacity < 0 || w.Opacity > 1 {
+		return "watermark.opacity must be between 0 and 1"
+	}
+	if w.Opacity == 0 {
+		w.Opacity = 0.35
+	}
+	if math.IsNaN(w.Scale) || math.IsInf(w.Scale, 0) || (w.Scale != 0 && (w.Scale < 0.05 || w.Scale > 1.0)) {
+		return "watermark.scale must be 0.05–1.0"
+	}
+	if w.Scale == 0 {
+		w.Scale = 0.25
+	}
+	if math.IsNaN(w.Margin) || math.IsInf(w.Margin, 0) || w.Margin < 0 || w.Margin > 0.25 {
+		return "watermark.margin must be 0–0.25"
+	}
+	if w.Margin == 0 {
+		w.Margin = 0.04
 	}
 	return ""
 }
@@ -471,6 +557,14 @@ func validateFileParams(f *preset.FileParams) string {
 		}
 		if f.Thumbnail.MaxBytes < 1024 || f.Thumbnail.MaxBytes > 1<<20 {
 			return "thumbnail.maxBytes must be 1 KB–1 MB"
+		}
+	}
+	if f.Text.Enabled {
+		if f.Text.MaxBytes <= 0 {
+			f.Text.MaxBytes = 2 << 20
+		}
+		if f.Text.MaxBytes < 1024 || f.Text.MaxBytes > 10<<20 {
+			return "text.maxBytes must be 1 KB–10 MB"
 		}
 	}
 	return ""

@@ -220,8 +220,9 @@ type UploadTicket struct {
 	Headers   map[string]string `json:"headers,omitempty"`
 	ExpiresAt string            `json:"expires_at"`
 	// Multipart tickets: upload each part with PUT, then complete with the ETags.
-	PartSize int64        `json:"part_size,omitempty"`
-	Parts    []PartTicket `json:"parts,omitempty"`
+	SessionExpiresAt string       `json:"session_expires_at,omitempty"`
+	PartSize         int64        `json:"part_size,omitempty"`
+	Parts            []PartTicket `json:"parts,omitempty"`
 }
 
 // PartTicket is the presigned URL of one multipart part.
@@ -234,4 +235,40 @@ type PartTicket struct {
 type CompletedPartInput struct {
 	PartNumber int    `json:"part_number"`
 	ETag       string `json:"etag"`
+}
+
+// UploadedPartView describes a part already stored in S3/R2 for a pending multipart upload.
+type UploadedPartView struct {
+	PartNumber int    `json:"part_number"`
+	ETag       string `json:"etag"`
+	Size       int64  `json:"size"`
+}
+
+// UploadStatusView is the body of GET /v1/uploads/{id}.
+type UploadStatusView struct {
+	UploadID      string             `json:"upload_id"`
+	Status        string             `json:"status"`
+	Method        string             `json:"method"`
+	Namespace     string             `json:"namespace"`
+	Preset        string             `json:"preset"`
+	Visibility    string             `json:"visibility"`
+	Filename      *string            `json:"filename"`
+	ContentType   *string            `json:"content_type"`
+	Size          int64              `json:"size"`
+	PartSize      int64              `json:"part_size,omitempty"`
+	TotalParts    int                `json:"total_parts,omitempty"`
+	UploadedParts []UploadedPartView `json:"uploaded_parts,omitempty"`
+	ExpiresAt     string             `json:"expires_at"`
+	AssetID       *string            `json:"asset_id"`
+	CreatedAt     string             `json:"created_at"`
+}
+
+// RefreshPartsView is the body of POST /v1/uploads/{id}/parts.
+type RefreshPartsView struct {
+	UploadID         string             `json:"upload_id"`
+	PartSize         int64              `json:"part_size"`
+	Parts            []PartTicket       `json:"parts"`
+	UploadedParts    []UploadedPartView `json:"uploaded_parts"`
+	ExpiresAt        string             `json:"expires_at"`
+	SessionExpiresAt string             `json:"session_expires_at"`
 }

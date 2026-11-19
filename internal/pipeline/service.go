@@ -51,13 +51,18 @@ const (
 
 // Limits of the M1 API.
 const (
-	MaxPutBytes          = 64 << 20 // image PUT uploads
-	MaxVideoPutBytes     = 5 << 30
-	MaxFilePutBytes      = 5 << 30  // single presigned PUT limit of S3/R2; video goes straight to R2
-	MaxServerUploadBytes = 25 << 20 // POST /v1/assets
-	MaxMetadataBytes     = 16 << 10
-	MaxWait              = 30 * time.Second
-	DefaultUploadTTL     = 15 * time.Minute
+	MaxPutBytes               = 64 << 20 // image PUT uploads
+	MaxVideoPutBytes          = 5 << 30
+	MaxFilePutBytes           = 5 << 30 // single presigned PUT limit of S3/R2; video goes straight to R2
+	MaxServerUploadBytes      = 25 << 20 // POST /v1/assets
+	MaxMetadataBytes          = 16 << 10
+	MinMultipartPartBytes     = 5 << 20  // S3/R2 minimum multipart part size
+	DefaultMultipartThreshold = 16 << 20 // non-image uploads larger than this use S3 multipart
+	DefaultPartSize           = 8 << 20
+	MaxWait                   = 30 * time.Second
+	DefaultUploadTTL          = 15 * time.Minute
+	DefaultMultipartPartTTL   = time.Hour
+	DefaultMultipartSessionTTL = 24 * time.Hour
 	// DefaultSweepGrace delays the sweeper after ticket expiry so a PUT
 	// started just before expiry can finish.
 	DefaultSweepGrace = 5 * time.Minute
@@ -94,9 +99,11 @@ type Config struct {
 	UploadTTL  time.Duration
 	SweepGrace time.Duration
 	Now        func() time.Time
-	// MultipartThreshold: video uploads larger than this use S3 multipart
-	// (default 64 MB). PartSize is the minimum part size (default 16 MB).
-	MultipartThreshold int64
+	// MultipartThreshold: non-image uploads larger than this use S3 multipart
+	// (default 16 MB). PartSize is the minimum part size (default 8 MB, min 5 MB).
+	MultipartThreshold  int64
+	MultipartPartTTL    time.Duration
+	MultipartSessionTTL time.Duration
 	// EdgeBaseURL is the private delivery host used by SignURLs.
 	EdgeBaseURL string
 	// Fetcher downloads URL imports; Rclone cloud imports (nil → defaults).
@@ -107,24 +114,25 @@ type Config struct {
 
 // Service is the pipeline.
 type Service struct {
-	store                 *db.Store
-	queue                 *queue.Queue
-	engine                image.Engine
-	video                 video.Engine
-	file                  file.Engine
-	keyring               *crypto.Keyring
-	log                   *slog.Logger
-	metrics               *metrics.Set
-	tmpDir                string
-	webhooks              Notifier
-	newDriver             func(storage.Config) (storage.Driver, error)
-	uploadTTL             time.Duration
-	grace                 time.Duration
-	mpThreshold, partSize int64
-	edgeBaseURL           string
-	fetcher               *importer.Fetcher
-	rclone                *importer.Rclone
-	now                   func() time.Time
+	store                   *db.Store
+	queue                   *queue.Queue
+	engine                  image.Engine
+	video                   video.Engine
+	file                    file.Engine
+	keyring                 *crypto.Keyring
+	log                     *slog.Logger
+	metrics                 *metrics.Set
+	tmpDir                  string
+	webhooks                Notifier
+	newDriver               func(storage.Config) (storage.Driver, error)
+	uploadTTL               time.Duration
+	mpPartTTL, mpSessionTTL time.Duration
+	grace                   time.Duration
+	mpThreshold, partSize   int64
+	edgeBaseURL             string
+	fetcher                 *importer.Fetcher
+	rclone                  *importer.Rclone
+	now                     func() time.Time
 
 	drivers  drivers
 	notifier *notifier
@@ -150,10 +158,19 @@ func New(cfg Config) *Service {
 		cfg.SweepGrace = DefaultSweepGrace
 	}
 	if cfg.MultipartThreshold <= 0 {
-		cfg.MultipartThreshold = MaxPutBytes
+		cfg.MultipartThreshold = DefaultMultipartThreshold
 	}
 	if cfg.PartSize <= 0 {
-		cfg.PartSize = 16 << 20
+		cfg.PartSize = DefaultPartSize
+	}
+	if cfg.PartSize < MinMultipartPartBytes {
+		cfg.PartSize = MinMultipartPartBytes
+	}
+	if cfg.MultipartPartTTL <= 0 {
+		cfg.MultipartPartTTL = DefaultMultipartPartTTL
+	}
+	if cfg.MultipartSessionTTL <= 0 {
+		cfg.MultipartSessionTTL = DefaultMultipartSessionTTL
 	}
 	if cfg.Fetcher == nil {
 		cfg.Fetcher = &importer.Fetcher{}
@@ -167,7 +184,8 @@ func New(cfg Config) *Service {
 	return &Service{
 		store: cfg.Store, queue: cfg.Queue, engine: cfg.Engine, video: cfg.Video, file: cfg.File, keyring: cfg.Keyring, log: cfg.Logger,
 		metrics: cfg.Metrics, tmpDir: cfg.TmpDir, webhooks: cfg.Webhooks, newDriver: cfg.NewDriver,
-		uploadTTL: cfg.UploadTTL, grace: cfg.SweepGrace, mpThreshold: cfg.MultipartThreshold, edgeBaseURL: cfg.EdgeBaseURL, fetcher: cfg.Fetcher, rclone: cfg.Rclone, partSize: cfg.PartSize, now: cfg.Now,
+		uploadTTL: cfg.UploadTTL, mpPartTTL: cfg.MultipartPartTTL, mpSessionTTL: cfg.MultipartSessionTTL,
+		grace: cfg.SweepGrace, mpThreshold: cfg.MultipartThreshold, edgeBaseURL: cfg.EdgeBaseURL, fetcher: cfg.Fetcher, rclone: cfg.Rclone, partSize: cfg.PartSize, now: cfg.Now,
 		drivers:     drivers{cache: map[string]cachedDriver{}},
 		notifier:    newNotifier(),
 		bytesIn:     cfg.Metrics.GetOrCreateCounter("kadr_bytes_in_total"),
@@ -339,6 +357,8 @@ func renditionContentType(format string) string {
 		return "video/mp4"
 	case "m3u8":
 		return "application/vnd.apple.mpegurl"
+	case "json":
+		return "application/json; charset=utf-8"
 	}
 	if ct := file.ContentTypes[format]; ct != "" {
 		return ct

@@ -28,8 +28,13 @@ export interface SigningConfig {
 export interface SignUrlOptions {
   /** Lifetime in seconds (positive integer). */
   ttl: number;
-  /** Ask the edge to serve the file as an attachment with this filename. */
+  /** Ask the edge to serve the file as an attachment with this filename. Ignored when `prefix: true`. */
   download?: string;
+  /**
+   * Directory-scoped signature (`prefix=1`, for HLS packages): authorizes any
+   * object directly inside the key's directory. `download` is ignored.
+   */
+  prefix?: boolean;
   /** Current time in milliseconds (for tests). Defaults to `Date.now()`. */
   now?: number;
 }
@@ -58,7 +63,7 @@ export type VerifySignedUrlFailure =
   | "expired";
 
 export type VerifySignedUrlResult =
-  | { ok: true; key: string; exp: number; kid: string; download?: string }
+  | { ok: true; key: string; exp: number; kid: string; download?: string; prefix?: boolean }
   | { ok: false; reason: VerifySignedUrlFailure };
 
 /** Strips leading slashes from a storage key. */
@@ -69,6 +74,14 @@ export function normalizeKey(key: string): string {
 /** Builds the canonical string to sign. `key` must already be normalized. */
 export function canonicalString(key: string, exp: number, download?: string): string {
   return `GET\n/${key}\n${exp}\n${download ?? ""}`;
+}
+
+/**
+ * Builds the canonical string of a directory-scoped signature (`prefix=1`, HLS packages):
+ * `GETP\n/{dir}\n{exp}\n`. `dir` is the directory prefix with a trailing slash (or `""`).
+ */
+export function canonicalPrefixString(dir: string, exp: number): string {
+  return `GETP\n/${dir}\n${exp}\n`;
 }
 
 function hmacBase64Url(secret: string, message: string): string {
@@ -83,7 +96,7 @@ function encodeKeyPath(key: string): string {
 
 /**
  * Signs a private storage key and returns the full delivery URL:
- * `${baseUrl}/${key}?exp=…&kid=…&sig=…[&download=…]`.
+ * `${baseUrl}/${key}?exp=…&kid=…&sig=…[&download=…]` (or `&prefix=1` when `opts.prefix` is true).
  */
 export function signUrl(config: SigningConfig, key: string, opts: SignUrlOptions): string {
   if (!Number.isInteger(opts.ttl) || opts.ttl <= 0) {
@@ -94,12 +107,22 @@ export function signUrl(config: SigningConfig, key: string, opts: SignUrlOptions
   if (normalized.split("/").some((s) => s === "." || s === "..")) {
     throw new TypeError('signUrl: key must not contain "." or ".." path segments');
   }
-  const download = opts.download === "" ? undefined : opts.download;
   const now = opts.now ?? Date.now();
   const exp = Math.floor(now / 1000) + opts.ttl;
+  const base = config.baseUrl.replace(/\/+$/, "");
+
+  if (opts.prefix) {
+    const dir = normalized.slice(0, normalized.lastIndexOf("/") + 1);
+    const sig = hmacBase64Url(config.secret, canonicalPrefixString(dir, exp));
+    return (
+      `${base}/${encodeKeyPath(normalized)}` +
+      `?exp=${exp}&kid=${encodeURIComponent(config.kid)}&sig=${sig}&prefix=1`
+    );
+  }
+
+  const download = opts.download === "" ? undefined : opts.download;
   const sig = hmacBase64Url(config.secret, canonicalString(normalized, exp, download));
 
-  const base = config.baseUrl.replace(/\/+$/, "");
   let url =
     `${base}/${encodeKeyPath(normalized)}` +
     `?exp=${exp}&kid=${encodeURIComponent(config.kid)}&sig=${sig}`;
@@ -141,15 +164,16 @@ export function verifySignedUrl(
   if (expRaw === null || kid === null || sig === null) return { ok: false, reason: "missing_params" };
   if (!/^\d+$/.test(expRaw)) return { ok: false, reason: "malformed" };
   const exp = Number(expRaw);
+  const prefix = params.get("prefix") === "1";
   const downloadRaw = params.get("download");
-  const download = downloadRaw === null || downloadRaw === "" ? undefined : downloadRaw;
+  const download = prefix || downloadRaw === null || downloadRaw === "" ? undefined : downloadRaw;
 
   let path = parsed.pathname;
   if (opts.pathPrefix) {
-    const prefix = `/${opts.pathPrefix.replace(/^\/+|\/+$/g, "")}`;
-    if (prefix !== "/") {
-      if (!path.startsWith(`${prefix}/`)) return { ok: false, reason: "malformed" };
-      path = path.slice(prefix.length);
+    const pfx = `/${opts.pathPrefix.replace(/^\/+|\/+$/g, "")}`;
+    if (pfx !== "/") {
+      if (!path.startsWith(`${pfx}/`)) return { ok: false, reason: "malformed" };
+      path = path.slice(pfx.length);
     }
   }
   let key: string;
@@ -163,12 +187,16 @@ export function verifySignedUrl(
   const secret = resolveSecret(opts.secrets, kid);
   if (!secret) return { ok: false, reason: "unknown_kid" };
 
-  const expected = hmacBase64Url(secret, canonicalString(key, exp, download));
+  const msg = prefix
+    ? canonicalPrefixString(key.slice(0, key.lastIndexOf("/") + 1), exp)
+    : canonicalString(key, exp, download);
+  const expected = hmacBase64Url(secret, msg);
   if (!safeEqual(expected, sig)) return { ok: false, reason: "bad_signature" };
 
   const nowSec = Math.floor((opts.now ?? Date.now()) / 1000);
   // Valid up to and including the second `exp`.
   if (nowSec > exp) return { ok: false, reason: "expired" };
 
+  if (prefix) return { ok: true, key, exp, kid, prefix: true };
   return download === undefined ? { ok: true, key, exp, kid } : { ok: true, key, exp, kid, download };
 }

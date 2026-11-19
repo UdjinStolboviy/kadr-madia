@@ -107,6 +107,15 @@ function imageSummary(p: Obj): PresetSummary {
     facts.push({ label: t("common.preset.sharpen"), value: sh.slice(t("common.preset.sharpenWord").length).trim() || t("common.preset.sharpenOn") });
   }
 
+  const wm = obj(p.watermark);
+  if (wm && (str(wm.text) || str(wm.image))) {
+    const pos = str(wm.position) ?? "bottom-right";
+    const pct = num(wm.opacity) !== null ? `${Math.round(num(wm.opacity)! * 100)}%` : "35%";
+    const kindLabel = str(wm.text) ? `“${str(wm.text)}”` : t("common.preset.watermarkImage");
+    parts.push(t("common.preset.watermarkShort"));
+    facts.push({ label: t("common.preset.watermark"), value: `${kindLabel} · ${pos} · ${pct}` });
+  }
+
   const ph = obj(p.placeholder);
   if (ph) {
     const tags = [ph.thumbhash === true && "ThumbHash", ph.dominantColor === true && t("common.preset.dominantColor")].filter(
@@ -115,6 +124,12 @@ function imageSummary(p: Obj): PresetSummary {
     if (tags.length) facts.push({ label: t("common.preset.placeholder"), value: tags.join(" + ") });
   }
 
+  const tx = obj(p.text);
+  if (tx && tx.enabled === true) {
+    const mb = num(tx.maxBytes);
+    parts.push(t("common.preset.fileTextShort"));
+    facts.push({ label: t("common.preset.fileText"), value: mb ? `text.json ≤ ${formatBytes(mb)}` : "text.json" });
+  }
   const lim = obj(p.limits);
   if (lim) {
     const items: string[] = [];
@@ -186,6 +201,12 @@ function videoSummary(p: Obj): PresetSummary {
         .join(" · "),
     });
   }
+  const tx = obj(p.text);
+  if (tx && tx.enabled === true) {
+    const mb = num(tx.maxBytes);
+    parts.push(t("common.preset.fileTextShort"));
+    facts.push({ label: t("common.preset.fileText"), value: mb ? `text.json ≤ ${formatBytes(mb)}` : "text.json" });
+  }
   const lim = obj(p.limits);
   if (lim) {
     const items: string[] = [];
@@ -228,6 +249,12 @@ function fileSummary(p: Obj): PresetSummary {
       : t("common.preset.fileThumbOff");
     parts.push(on ? `${t("common.preset.fileThumbHeadline", { size: formatBytes(num(th.maxBytes)) })} ${tf}` : t("common.preset.fileThumbOff"));
     facts.push({ label: t("common.preset.fileThumb"), value });
+  }
+  const tx = obj(p.text);
+  if (tx && tx.enabled === true) {
+    const mb = num(tx.maxBytes);
+    parts.push(t("common.preset.fileTextShort"));
+    facts.push({ label: t("common.preset.fileText"), value: mb ? `text.json ≤ ${formatBytes(mb)}` : "text.json" });
   }
   const lim = obj(p.limits);
   if (lim) {

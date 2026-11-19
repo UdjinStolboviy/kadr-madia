@@ -155,6 +155,44 @@ function ImageForm({ draft, set, err }: { draft: Obj; set: (path: string[], v: u
     set(["resize", "maxWidth"], v);
     set(["resize", "maxHeight"], v);
   };
+  const wm = (getIn(draft, ["watermark"]) ?? null) as Obj | null;
+  const wmMode = wm ? (typeof wm.image === "string" && wm.image ? "image" : "text") : "off";
+  const setWatermarkMode = (nextMode: string) => {
+    if (nextMode === "off") {
+      set(["watermark"], undefined);
+      return;
+    }
+    const base = {
+      position: typeof wm?.position === "string" && wm.position ? wm.position : "bottom-right",
+      opacity: typeof wm?.opacity === "number" && wm.opacity > 0 ? wm.opacity : 0.35,
+      scale: typeof wm?.scale === "number" && wm.scale > 0 ? wm.scale : 0.25,
+      margin: typeof wm?.margin === "number" && wm.margin > 0 ? wm.margin : 0.04,
+    };
+    if (nextMode === "image") {
+      set(["watermark"], { ...base, image: typeof wm?.image === "string" ? wm.image : "" });
+    } else {
+      set(["watermark"], {
+        ...base,
+        text: typeof wm?.text === "string" ? wm.text : "",
+        color: typeof wm?.color === "string" && wm.color ? wm.color : "#FFFFFF",
+        font: typeof wm?.font === "string" && wm.font ? wm.font : "Sans Bold",
+      });
+    }
+  };
+  const onPickWatermarkFile = (file: File | undefined) => {
+    if (!file) return;
+    if (file.size > 512 * 1024) {
+      toast.error(t("presets.ed.watermarkTooLarge"));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        set(["watermark", "image"], reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
 
   return (
     <>
@@ -232,6 +270,123 @@ function ImageForm({ draft, set, err }: { draft: Obj; set: (path: string[], v: u
         <SwitchRow id="pe-th" label="ThumbHash" hint={t("presets.ed.thumbhashHint")} checked={getIn(draft, ["placeholder", "thumbhash"]) === true} onChange={(v) => set(["placeholder", "thumbhash"], v)} />
         <SwitchRow id="pe-dc" label={t("presets.ed.dominant")} checked={getIn(draft, ["placeholder", "dominantColor"]) === true} onChange={(v) => set(["placeholder", "dominantColor"], v)} />
         <SwitchRow id="pe-retain" label={t("presets.ed.retain")} hint={t("presets.ed.retainHint")} checked={draft.retainOriginal === true} onChange={(v) => set(["retainOriginal"], v)} />
+      </Section>
+
+      <Section title={t("presets.ed.watermark")}>
+        <Field label={t("presets.ed.watermarkMode")} htmlFor="pe-wmmode" error={err("watermark")}>
+          <SelectField
+            id="pe-wmmode"
+            value={wmMode}
+            onChange={setWatermarkMode}
+            options={[
+              { value: "off", label: t("presets.ed.watermarkOff") },
+              { value: "text", label: t("presets.ed.watermarkText") },
+              { value: "image", label: t("presets.ed.watermarkImage") },
+            ]}
+          />
+        </Field>
+        {wmMode === "text" && (
+          <>
+            <Field label={t("presets.ed.watermarkTextValue")} htmlFor="pe-wmtext">
+              <Input
+                id="pe-wmtext"
+                value={typeof wm?.text === "string" ? wm.text : ""}
+                placeholder="© Acme"
+                maxLength={200}
+                onChange={(e) => set(["watermark", "text"], e.target.value)}
+              />
+            </Field>
+            <div className="grid grid-cols-2 gap-3 [&>*]:min-w-0">
+              <Field label={t("presets.ed.watermarkColor")} htmlFor="pe-wmcolor">
+                <Input
+                  id="pe-wmcolor"
+                  value={typeof wm?.color === "string" ? wm.color : "#FFFFFF"}
+                  placeholder="#FFFFFF"
+                  className="font-mono"
+                  onChange={(e) => set(["watermark", "color"], e.target.value)}
+                />
+              </Field>
+              <Field label={t("presets.ed.watermarkFont")} htmlFor="pe-wmfont">
+                <Input
+                  id="pe-wmfont"
+                  value={typeof wm?.font === "string" ? wm.font : "Sans Bold"}
+                  placeholder="Sans Bold"
+                  maxLength={80}
+                  onChange={(e) => set(["watermark", "font"], e.target.value)}
+                />
+              </Field>
+            </div>
+          </>
+        )}
+        {wmMode === "image" && (
+          <Field label={t("presets.ed.watermarkLogo")} htmlFor="pe-wmimg" hint={t("presets.ed.watermarkLogoHint")}>
+            <div className="grid gap-2">
+              <Input
+                id="pe-wmimg"
+                type="file"
+                accept="image/png,image/webp,image/jpeg"
+                onChange={(e) => onPickWatermarkFile(e.target.files?.[0])}
+              />
+              {typeof wm?.image === "string" && wm.image && (
+                <div className="flex items-center gap-3 rounded-md border bg-muted/40 p-2">
+                  <img src={wm.image} alt="" className="h-10 max-w-28 object-contain" />
+                  <Button type="button" variant="ghost" size="sm" onClick={() => set(["watermark", "image"], "")}>
+                    {t("presets.ed.watermarkClear")}
+                  </Button>
+                </div>
+              )}
+            </div>
+          </Field>
+        )}
+        {wmMode !== "off" && (
+          <div className="grid grid-cols-2 gap-3 [&>*]:min-w-0">
+            <Field label={t("presets.ed.watermarkPos")} htmlFor="pe-wmpos">
+              <SelectField
+                id="pe-wmpos"
+                value={typeof wm?.position === "string" && wm.position ? wm.position : "bottom-right"}
+                onChange={(v) => set(["watermark", "position"], v)}
+                options={[
+                  { value: "bottom-right", label: t("presets.ed.wmPosBottomRight") },
+                  { value: "bottom-left", label: t("presets.ed.wmPosBottomLeft") },
+                  { value: "top-right", label: t("presets.ed.wmPosTopRight") },
+                  { value: "top-left", label: t("presets.ed.wmPosTopLeft") },
+                  { value: "center", label: t("presets.ed.wmPosCenter") },
+                  { value: "tile", label: t("presets.ed.wmPosTile") },
+                ]}
+              />
+            </Field>
+            <Field label={t("presets.ed.watermarkOpacity")} htmlFor="pe-wmop">
+              <NumberInput
+                id="pe-wmop"
+                value={typeof wm?.opacity === "number" ? Math.round(wm.opacity * 100) : 35}
+                onChange={(v) => set(["watermark", "opacity"], v === undefined ? undefined : Math.max(1, Math.min(100, v)) / 100)}
+                min={5}
+                max={100}
+                suffix="%"
+              />
+            </Field>
+            <Field label={t("presets.ed.watermarkScale")} htmlFor="pe-wmscale">
+              <NumberInput
+                id="pe-wmscale"
+                value={typeof wm?.scale === "number" ? Math.round(wm.scale * 100) : 25}
+                onChange={(v) => set(["watermark", "scale"], v === undefined ? undefined : Math.max(5, Math.min(100, v)) / 100)}
+                min={5}
+                max={100}
+                suffix="%"
+              />
+            </Field>
+            <Field label={t("presets.ed.watermarkMargin")} htmlFor="pe-wmmargin">
+              <NumberInput
+                id="pe-wmmargin"
+                value={typeof wm?.margin === "number" ? Math.round(wm.margin * 100) : 4}
+                onChange={(v) => set(["watermark", "margin"], v === undefined ? undefined : Math.max(0, Math.min(25, v)) / 100)}
+                min={0}
+                max={25}
+                suffix="%"
+              />
+            </Field>
+          </div>
+        )}
       </Section>
     </>
   );
@@ -347,6 +502,7 @@ function FileForm({ draft, set, err }: { draft: Obj; set: (path: string[], v: un
   const t = useT();
   const strategy = String(getIn(draft, ["optimize", "strategy"]) ?? "none");
   const thumbOn = getIn(draft, ["thumbnail", "enabled"]) === true;
+  const textOn = getIn(draft, ["text", "enabled"]) === true;
   const accept = Array.isArray(getIn(draft, ["limits", "accept"])) ? (getIn(draft, ["limits", "accept"]) as string[]) : [];
   const maxIn = getIn(draft, ["limits", "maxInputBytes"]);
   const toggleFormat = (f: string, on: boolean) => {
@@ -406,6 +562,33 @@ function FileForm({ draft, set, err }: { draft: Obj; set: (path: string[], v: un
             </Field>
             <DerivedFormatsField id="pe-tformats" path={["thumbnail", "formats"]} draft={draft} set={set} />
           </div>
+        )}
+      </Section>
+
+      <Section title={t("presets.ed.fileText")}>
+        <SwitchRow
+          id="pe-ftext"
+          label={t("presets.ed.fileTextEnabled")}
+          hint={t("presets.ed.fileTextEnabledHint")}
+          checked={textOn}
+          onChange={(v) => {
+            set(["text", "enabled"], v);
+            if (v && typeof getIn(draft, ["text", "maxBytes"]) !== "number") {
+              set(["text", "maxBytes"], 2 * 1024 * 1024);
+            }
+          }}
+        />
+        {textOn && (
+          <Field label={t("presets.ed.fileTextKb")} htmlFor="pe-ftextkb" hint={t("presets.ed.fileTextKbHint")} error={err("text.maxBytes")}>
+            <NumberInput
+              id="pe-ftextkb"
+              value={kb(["text", "maxBytes"])}
+              onChange={(v) => set(["text", "maxBytes"], v === undefined ? undefined : Math.round(v * 1024))}
+              min={1}
+              max={10240}
+              suffix="KB"
+            />
+          </Field>
         )}
       </Section>
 

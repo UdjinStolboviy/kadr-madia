@@ -32,7 +32,7 @@ The source of truth is `api/openapi.yaml` (OpenAPI 3.1), kept in sync with the i
 
 ### `GET /v1/ping`
 
-Verifies a key: `200 { "ok": true, "project": "acme", "project_id": "prj_…", "environment": "live" | "test", "key_id": "…", "scopes": [...] }`.
+Verifies a key: `200 { "ok": true, "project": "acme", "project_id": "prj_…", "environment": "live" | "test", "key_id": "…", "scopes": [...] }` (plus `"namespaces": [...]` when the key is restricted to specific namespaces).
 
 ## Uploads
 
@@ -67,15 +67,16 @@ Scope `uploads:write`.
 }
 ```
 
-Image files are limited to 64 MB. **Video files over 64 MB** get a multipart ticket (`"method": "MULTIPART"`) instead of `url`/`headers`:
+Image files are limited to 64 MB. **Video and document files over 16 MB** (`KADR_MULTIPART_THRESHOLD_MB`, default `16`, range `5–5120`), or non-image files ≥ 5 MB with `"multipart": true`, get a multipart ticket (`"method": "MULTIPART"`) instead of `url`/`headers` (default part size 8 MB via `KADR_MULTIPART_PART_SIZE_MB`):
 
 ```json
-{ "upload_id": "upl_…", "method": "MULTIPART", "part_size": 16777216,
+{ "upload_id": "upl_…", "method": "MULTIPART", "part_size": 8388608,
   "parts": [{ "part_number": 1, "url": "https://…" }, { "part_number": 2, "url": "https://…" }],
-  "expires_at": "2026-11-16T22:00:00Z" }
+  "expires_at": "2026-11-16T22:00:00Z",
+  "session_expires_at": "2026-11-17T21:00:00Z" }
 ```
 
-`PUT` bytes `[(n-1)*part_size, n*part_size)` of the file to each part URL (the last part may be smaller; parts can be uploaded in parallel and retried), collect the `ETag` response header of every part, then `POST /v1/uploads/{id}/complete` with `{ "parts": [{ "part_number": 1, "etag": "…" }, …] }`. Complete is idempotent. Multipart tickets live for 1 hour; abandoned ones are aborted by the sweeper. The bucket CORS rule must expose the `ETag` header for browser uploads (`@kadr/web` reports a clear error otherwise).
+`PUT` bytes `[(n-1)*part_size, n*part_size)` of the file to each part URL (the last part may be smaller; parts can be uploaded in parallel and retried), collect the `ETag` response header of every part, then `POST /v1/uploads/{id}/complete` with `{ "parts": [{ "part_number": 1, "etag": "…" }, …] }`. Complete is idempotent. Individual part URLs are valid for 1 hour (`expires_at`), while the multipart session stays resumable for `session_expires_at` (default 24 hours via `KADR_MULTIPART_SESSION_HOURS`); abandoned ones are aborted by the sweeper. The bucket CORS rule must expose the `ETag` header for browser uploads (`@kadr/web` reports a clear error otherwise).
 
 **200** — deduplicated: `sha256` matches a ready blob within the same project, visibility and preset version. A new ready asset referencing it is created (and `asset.ready` is emitted); no upload is needed:
 
@@ -83,7 +84,19 @@ Image files are limited to 64 MB. **Video files over 64 MB** get a multipart tic
 { "asset": { "id": "ast_…", "status": "ready", … } }
 ```
 
-**Errors:** `validation_failed` (422), `preset_not_found` (404), `unsupported_media` (415), `too_large` (413), `quota_exceeded` (402), `storage_not_configured` (409).
+**Errors:** `validation_failed` (422), `preset_not_found` (404), `namespace_forbidden` (403), `unsupported_media` (415), `too_large` (413), `quota_exceeded` (402), `storage_not_configured` (409).
+
+### `GET /v1/uploads/{id}` — upload status and uploaded parts
+
+Scope `uploads:write`. Returns the current state of an upload (`{ upload_id, status, method, namespace, preset, visibility, filename, content_type, size, part_size?, total_parts?, uploaded_parts?, expires_at, asset_id, created_at }`). For pending `MULTIPART` uploads, `uploaded_parts` queries object storage (`ListParts`) and returns `[{ "part_number", "etag", "size" }, …]` so clients can resume without re-uploading completed parts.
+
+### `POST /v1/uploads/{id}/parts` — refresh multipart part URLs
+
+Scope `uploads:write`. Re-signs presigned part `PUT` URLs for a pending `MULTIPART` upload whose session has not expired. Optional JSON body `{ "part_numbers": [2, 3] }`; when omitted or empty, Kadr signs all parts not yet present in storage.
+
+Response `200`: `{ "upload_id", "part_size", "parts": [{ "part_number", "url" }], "uploaded_parts": [{ "part_number", "etag", "size" }], "expires_at", "session_expires_at" }`.
+
+**Errors:** `upload_not_multipart` (409), `upload_aborted` (409), `upload_not_pending` (409), `upload_expired` (410), `validation_failed` (422), `namespace_forbidden` (403), `storage_error` (502), `not_found` (404).
 
 ### `POST /v1/uploads/{id}/complete?wait=5s`
 
@@ -265,9 +278,9 @@ Retries: 10 s, 30 s, 2 min, 10 min, 30 min, 1 h, 3 h, 6 h, 12 h (~24 h total), t
 | 400 | `invalid_json`, `invalid_multipart`, `invalid_idempotency_key`, `invalid_body` |
 | 401 | `unauthenticated` |
 | 402 | `quota_exceeded` |
-| 403 | `insufficient_scope`, `project_disabled` |
+| 403 | `insufficient_scope`, `namespace_forbidden`, `project_disabled` |
 | 404 | `not_found`, `preset_not_found` |
-| 409 | `upload_incomplete`, `upload_aborted`, `upload_not_pending`, `asset_processing`, `storage_not_configured`, `idempotency_in_progress` |
+| 409 | `upload_incomplete`, `upload_aborted`, `upload_not_pending`, `upload_not_multipart`, `asset_processing`, `storage_not_configured`, `idempotency_in_progress` |
 | 410 | `upload_expired` |
 | 413 | `too_large` |
 | 415 | `unsupported_media`, `unsupported_content_type` |

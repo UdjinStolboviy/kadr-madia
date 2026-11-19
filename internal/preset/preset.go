@@ -4,8 +4,13 @@
 package preset
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"slices"
+	"strings"
 )
 
 // ImageParams is params_json for kind=image presets.
@@ -14,11 +19,79 @@ type ImageParams struct {
 	Resize       Resize        `json:"resize"`
 	Color        Color         `json:"color"`
 	Sharpen      *Sharpen      `json:"sharpen"` // nil = disabled
+	Watermark    *Watermark    `json:"watermark,omitempty"`
 	Outputs      []ImageOutput `json:"outputs"`
 	Quality      Quality       `json:"quality"`
 	Placeholder  Placeholder   `json:"placeholder"`
 	Limits       ImageLimits   `json:"limits"`
 	RetainOrigin bool          `json:"retainOriginal"`
+}
+
+// MaxWatermarkImageBytes caps the decoded size of an inline watermark image.
+const MaxWatermarkImageBytes = 512 << 10
+
+// Watermark overlays a static text or image watermark onto processed images.
+type Watermark struct {
+	Text     string  `json:"text,omitempty"`
+	Image    string  `json:"image,omitempty"`    // base64 or data URI (PNG, WebP or JPEG; <= 512 KiB decoded)
+	Position string  `json:"position,omitempty"` // bottom-right | bottom-left | top-right | top-left | center | tile
+	Opacity  float64 `json:"opacity,omitempty"`  // (0, 1], default 0.35
+	Scale    float64 `json:"scale,omitempty"`    // fraction of image width 0.05..1.0, default 0.25
+	Margin   float64 `json:"margin,omitempty"`   // fraction of short side 0..0.25, default 0.04
+	Color    string  `json:"color,omitempty"`    // #RRGGBB, default #FFFFFF (text only)
+	Font     string  `json:"font,omitempty"`     // Pango font description, default "Sans Bold" (text only)
+}
+
+// DecodeWatermarkImage decodes a base64 or data:image/(png|webp|jpeg);base64,…
+// watermark logo and verifies by magic bytes that it is PNG, WebP or JPEG.
+func DecodeWatermarkImage(raw string) ([]byte, string, error) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return nil, "", errors.New("image is empty")
+	}
+	if strings.HasPrefix(strings.ToLower(s), "data:") {
+		head, body, ok := strings.Cut(s, ",")
+		if !ok {
+			return nil, "", errors.New("invalid data URI")
+		}
+		hl := strings.ToLower(head)
+		if !strings.HasSuffix(hl, ";base64") {
+			return nil, "", errors.New("data URI must be base64-encoded")
+		}
+		mime := strings.TrimPrefix(strings.TrimSuffix(hl, ";base64"), "data:")
+		switch mime {
+		case "image/png", "image/webp", "image/jpeg", "image/jpg":
+		default:
+			return nil, "", fmt.Errorf("unsupported watermark mime type %q (want PNG, WebP or JPEG)", mime)
+		}
+		s = body
+	}
+	s = strings.TrimSpace(s)
+	if len(s) > base64.StdEncoding.EncodedLen(MaxWatermarkImageBytes)+4 {
+		return nil, "", fmt.Errorf("watermark image exceeds %d KB", MaxWatermarkImageBytes>>10)
+	}
+	data, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		if data, err = base64.RawStdEncoding.DecodeString(s); err != nil {
+			return nil, "", errors.New("invalid base64 image data")
+		}
+	}
+	if len(data) == 0 {
+		return nil, "", errors.New("watermark image is empty")
+	}
+	if len(data) > MaxWatermarkImageBytes {
+		return nil, "", fmt.Errorf("watermark image exceeds %d KB", MaxWatermarkImageBytes>>10)
+	}
+	switch {
+	case bytes.HasPrefix(data, []byte("\x89PNG\r\n\x1a\n")):
+		return data, "png", nil
+	case len(data) >= 12 && string(data[0:4]) == "RIFF" && string(data[8:12]) == "WEBP":
+		return data, "webp", nil
+	case len(data) >= 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF:
+		return data, "jpeg", nil
+	default:
+		return nil, "", errors.New("watermark image must be PNG, WebP or JPEG")
+	}
 }
 
 // Resize describes geometry.

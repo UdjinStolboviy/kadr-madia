@@ -15,6 +15,7 @@ import (
 	"github.com/UdjinStolboviy/kadr-madia/internal/api/httpx"
 	"github.com/UdjinStolboviy/kadr-madia/internal/auth"
 	"github.com/UdjinStolboviy/kadr-madia/internal/db"
+	"github.com/UdjinStolboviy/kadr-madia/internal/pipeline"
 	"github.com/UdjinStolboviy/kadr-madia/internal/preset"
 )
 
@@ -318,9 +319,10 @@ func (s *Server) handleListAPIKeys(w http.ResponseWriter, r *http.Request) {
 }
 
 type createAPIKeyRequest struct {
-	Name      string   `json:"name"`
-	Scopes    []string `json:"scopes"`
-	ExpiresAt *string  `json:"expires_at"`
+	Name       string   `json:"name"`
+	Scopes     []string `json:"scopes"`
+	Namespaces []string `json:"namespaces"`
+	ExpiresAt  *string  `json:"expires_at"`
 }
 
 func (s *Server) handleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
@@ -356,6 +358,23 @@ func (s *Server) handleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 			scopes = append(scopes, sc)
 		}
 	}
+	var namespaces []string
+	if len(req.Namespaces) > 100 {
+		errs["namespaces"] = "at most 100 namespaces are allowed"
+	} else if len(req.Namespaces) > 0 {
+		seenNS := map[string]bool{}
+		for _, raw := range req.Namespaces {
+			ns := strings.TrimSpace(raw)
+			if !pipeline.ValidNamespace(ns) {
+				errs["namespaces"] = fmt.Sprintf("invalid namespace %q (1–128 characters of [A-Za-z0-9._:@-], starting with a letter or digit)", raw)
+				break
+			}
+			if !seenNS[ns] {
+				seenNS[ns] = true
+				namespaces = append(namespaces, ns)
+			}
+		}
+	}
 	var expiresAt *time.Time
 	if req.ExpiresAt != nil && *req.ExpiresAt != "" {
 		t, err := time.Parse(time.RFC3339, *req.ExpiresAt)
@@ -379,12 +398,16 @@ func (s *Server) handleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	k := &db.APIKey{ID: db.NewID(db.PrefixAPIKey), ProjectID: p.ID, Name: name, Prefix: gen.Prefix,
-		SecretHash: gen.Hash, Scopes: scopes, ExpiresAt: expiresAt, CreatedAt: s.now()}
+		SecretHash: gen.Hash, Scopes: scopes, Namespaces: namespaces, ExpiresAt: expiresAt, CreatedAt: s.now()}
 	err = s.store.InTx(r.Context(), func(tx *db.Store) error {
 		if err := tx.CreateAPIKey(r.Context(), k); err != nil {
 			return err
 		}
-		return s.audit(r, tx, "key.create", &p.ID, &k.ID, map[string]any{"name": k.Name, "prefix": k.Prefix, "scopes": k.Scopes})
+		details := map[string]any{"name": k.Name, "prefix": k.Prefix, "scopes": k.Scopes}
+		if len(k.Namespaces) > 0 {
+			details["namespaces"] = k.Namespaces
+		}
+		return s.audit(r, tx, "key.create", &p.ID, &k.ID, details)
 	})
 	if err != nil {
 		s.internalError(w, r, err)

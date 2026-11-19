@@ -31,9 +31,10 @@ type Report struct {
 	FFprobe  Cap `json:"ffprobe"`
 	Rclone   Cap `json:"rclone"`
 	VAAPI    Cap `json:"vaapi"`
-	// Ghostscript and qpdf are optional: they enable PDF thumbnails and optimisation.
+	// Ghostscript, qpdf and pdftotext are optional: they enable PDF thumbnails, optimisation and text extraction.
 	Ghostscript Cap `json:"ghostscript"`
 	QPDF        Cap `json:"qpdf"`
+	PDFToText   Cap `json:"pdftotext"`
 }
 
 // RenderDevice is the Intel iGPU render node used for VAAPI.
@@ -45,7 +46,7 @@ const probeTimeout = 15 * time.Second
 func Probe(ctx context.Context, tmpDir string) Report {
 	var r Report
 	var wg sync.WaitGroup
-	wg.Add(6)
+	wg.Add(7)
 	go func() {
 		defer wg.Done()
 		r.Vips = versionProbe(ctx, "vips", []string{"--version"}, func(out string) string {
@@ -87,6 +88,16 @@ func Probe(ctx context.Context, tmpDir string) Report {
 		defer wg.Done()
 		r.QPDF = versionProbe(ctx, "qpdf", []string{"--version"}, func(out string) string {
 			f := strings.Fields(firstLine(out)) // "qpdf version 12.2.0"
+			if len(f) >= 3 {
+				return f[2]
+			}
+			return ""
+		})
+	}()
+	go func() {
+		defer wg.Done()
+		r.PDFToText = versionProbe(ctx, "pdftotext", []string{"-v"}, func(out string) string {
+			f := strings.Fields(firstLine(out)) // "pdftotext version 26.11.0"
 			if len(f) >= 3 {
 				return f[2]
 			}
@@ -213,7 +224,7 @@ type Holder struct {
 // NewHolder returns a holder whose report says "probing" until Set is called.
 func NewHolder() *Holder {
 	pending := Cap{Detail: "probe in progress"}
-	return &Holder{report: Report{Vips: pending, VipsAVIF: pending, FFmpeg: pending, FFprobe: pending, Rclone: pending, VAAPI: pending, Ghostscript: pending, QPDF: pending}}
+	return &Holder{report: Report{Vips: pending, VipsAVIF: pending, FFmpeg: pending, FFprobe: pending, Rclone: pending, VAAPI: pending, Ghostscript: pending, QPDF: pending, PDFToText: pending}}
 }
 
 // Set stores the final report.

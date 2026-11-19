@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -20,6 +21,12 @@ type Principal struct {
 	ProjectSlug string
 	Environment string
 	Scopes      []string
+	Namespaces  []string
+}
+
+// AllowsNamespace reports whether the principal may access ns (empty Namespaces = unrestricted).
+func (p *Principal) AllowsNamespace(ns string) bool {
+	return len(p.Namespaces) == 0 || slices.Contains(p.Namespaces, ns)
 }
 
 // HasScope reports whether the principal holds scope.
@@ -102,7 +109,7 @@ func (v *KeyVerifier) Verify(ctx context.Context, secret string) (*Principal, er
 		// Non-fatal: the request is still authenticated.
 		slog.WarnContext(ctx, "touch api key failed", "key_id", k.ID, "err", err)
 	}
-	return &Principal{KeyID: k.ID, ProjectID: p.ID, ProjectSlug: p.Slug, Environment: p.Environment, Scopes: k.Scopes}, nil
+	return &Principal{KeyID: k.ID, ProjectID: p.ID, ProjectSlug: p.Slug, Environment: p.Environment, Scopes: k.Scopes, Namespaces: k.Namespaces}, nil
 }
 
 // APIKeyMiddleware authenticates requests with "Authorization: Bearer kd_…".

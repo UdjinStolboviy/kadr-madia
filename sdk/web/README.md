@@ -8,7 +8,7 @@ package moves the bytes.
 - `PUT` via `XMLHttpRequest` for real upload progress
 - Retries with exponential backoff and jitter (network errors, 408, 429, 5xx)
 - `AbortSignal` support
-- Multipart uploads: parallel parts (default 4), per-part retries, ETag collection
+- Multipart uploads: parallel parts (default 4), per-part retries, ETag collection, resume (`completedParts` / `onPartComplete`), and expired-URL refresh (`refreshParts`)
 - Zero runtime dependencies, ESM + CJS, ships types
 
 Not published yet (`"private": true`); use it from this repository.
@@ -40,8 +40,8 @@ returned it. `complete` receives `parts` only for multipart tickets (otherwise
 { upload_id, method: "PUT", url, headers?, expires_at? }
 
 // method: "MULTIPART"
-{ upload_id, method: "MULTIPART", part_size,
-  parts: [{ number: 1, url, headers? }, ...] }
+{ upload_id, method: "MULTIPART", part_size, session_expires_at?,
+  parts: [{ part_number: 1, url, headers? }, ...] }
 ```
 
 The file is cut into `part_size` chunks (the last may be shorter); part `n`
@@ -75,7 +75,12 @@ All types (`UploadTicket`, `PutUploadTicket`, `MultipartUploadTicket`,
 
 Options: `concurrency` (4), `retries` (3), `baseDelayMs` (500), `maxDelayMs`
 (8000), `timeoutMs` (per attempt, off by default), `onProgress({ loaded, total,
-fraction, partNumber? })`, `signal`.
+fraction, partNumber? })`, `completedParts` (`CompletedPart[]` from
+`GET /v1/uploads/{id}` to skip already-uploaded parts when resuming),
+`onPartComplete(part)` (persist each uploaded part ETag incrementally),
+`refreshParts(uploadId, partNumbers)` (called automatically when a part `PUT`
+returns HTTP 403 to fetch fresh presigned URLs via `POST /v1/uploads/{id}/parts`),
+`signal`.
 
 Pre-resize only touches jpeg/png/webp/avif/bmp, only downscales (images already
 within `maxSide` are uploaded untouched), keeps png/webp, otherwise encodes

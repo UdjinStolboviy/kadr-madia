@@ -120,6 +120,20 @@ export interface CompletedPart {
   etag: string;
 }
 
+/** Part already stored in object storage, reported by `uploads.get()` / `uploads.refreshParts()`. */
+export type UploadedPart = Camelize<Schemas["UploadedPart"]>;
+
+/** Current upload state returned by `GET /v1/uploads/{id}`. */
+export type UploadStatus = Camelize<Schemas["UploadStatus"]>;
+
+export interface RefreshUploadPartsInput {
+  /** Specific 1-based part numbers to re-sign; omit or pass empty to sign all missing parts. */
+  partNumbers?: number[];
+}
+
+/** Re-signed part URLs and uploaded part inventory returned by `POST /v1/uploads/{id}/parts`. */
+export type RefreshedUploadParts = Camelize<Schemas["RefreshedUploadParts"]>;
+
 export interface CompleteUploadInput {
   /** Required to complete `MULTIPART` tickets. */
   parts?: CompletedPart[];

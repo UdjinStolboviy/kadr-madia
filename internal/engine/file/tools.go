@@ -19,31 +19,37 @@ import (
 type Config struct {
 	Ghostscript string // default "gs"; empty result of LookPath disables PDF rendering/downsampling
 	QPDF        string // default "qpdf"
+	PDFToText   string // default "pdftotext"; empty result disables PDF text extraction
 	Nice        bool
 	// Timeouts per external command.
 	OptimizeTimeout time.Duration // default 3m
 	ThumbTimeout    time.Duration // default 45s
 	ProbeTimeout    time.Duration // default 30s
+	TextTimeout     time.Duration // default 45s
 }
 
 // Tools is the document engine (Engine implementation).
 type Tools struct {
-	cfg  Config
-	gs   string
-	qpdf string
-	nice string
+	cfg       Config
+	gs        string
+	qpdf      string
+	pdftotext string
+	nice      string
 }
 
 var _ Engine = (*Tools)(nil)
 
 // New builds the engine. It never fails: missing tools only disable the
-// features that need them (see HasGhostscript / HasQPDF).
+// features that need them (see HasGhostscript / HasQPDF / HasPDFToText).
 func New(cfg Config) *Tools {
 	if cfg.Ghostscript == "" {
 		cfg.Ghostscript = "gs"
 	}
 	if cfg.QPDF == "" {
 		cfg.QPDF = "qpdf"
+	}
+	if cfg.PDFToText == "" {
+		cfg.PDFToText = "pdftotext"
 	}
 	if cfg.OptimizeTimeout <= 0 {
 		cfg.OptimizeTimeout = 3 * time.Minute
@@ -54,9 +60,13 @@ func New(cfg Config) *Tools {
 	if cfg.ProbeTimeout <= 0 {
 		cfg.ProbeTimeout = 30 * time.Second
 	}
+	if cfg.TextTimeout <= 0 {
+		cfg.TextTimeout = 45 * time.Second
+	}
 	t := &Tools{cfg: cfg}
 	t.gs, _ = exec.LookPath(cfg.Ghostscript)
 	t.qpdf, _ = exec.LookPath(cfg.QPDF)
+	t.pdftotext, _ = exec.LookPath(cfg.PDFToText)
 	if cfg.Nice {
 		t.nice, _ = exec.LookPath("nice")
 	}
@@ -68,6 +78,9 @@ func (t *Tools) HasGhostscript() bool { return t.gs != "" }
 
 // HasQPDF reports whether lossless recompression and linearization are available.
 func (t *Tools) HasQPDF() bool { return t.qpdf != "" }
+
+// HasPDFToText reports whether PDF text extraction is available.
+func (t *Tools) HasPDFToText() bool { return t.pdftotext != "" }
 
 // run executes bin with a minimal environment in dir. okCodes are exit codes
 // treated as success (qpdf exits 3 on warnings but still writes the output).

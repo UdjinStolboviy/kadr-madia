@@ -19,7 +19,13 @@ func (s *Service) loadAsset(ctx context.Context, projectID, id string) (*db.Asse
 	if errors.Is(err, db.ErrNotFound) || (err == nil && (a.ProjectID != projectID || a.Status == db.AssetDeleted)) {
 		return nil, apiErr(http.StatusNotFound, CodeNotFound, "asset %s not found", id)
 	}
-	return a, err
+	if err != nil {
+		return nil, err
+	}
+	if err := checkNamespace(ctx, a.NS); err != nil {
+		return nil, err
+	}
+	return a, nil
 }
 
 // GetAsset returns one asset of the project.
@@ -49,8 +55,12 @@ type AssetPage struct {
 // ListAssets returns assets newest first with cursor pagination.
 func (s *Service) ListAssets(ctx context.Context, projectID string, in ListAssetsInput) (*AssetPage, error) {
 	errs := map[string]string{}
-	if in.Namespace != "" && !ValidNamespace(in.Namespace) {
-		errs["namespace"] = "invalid namespace"
+	if in.Namespace != "" {
+		if !ValidNamespace(in.Namespace) {
+			errs["namespace"] = "invalid namespace"
+		} else if err := checkNamespace(ctx, in.Namespace); err != nil {
+			return nil, err
+		}
 	}
 	if in.Kind != "" && in.Kind != "image" && in.Kind != "video" && in.Kind != "file" {
 		errs["kind"] = `must be "image", "video" or "file"`
@@ -66,7 +76,14 @@ func (s *Service) ListAssets(ctx context.Context, projectID string, in ListAsset
 	if in.Limit < 1 || in.Limit > 200 {
 		errs["limit"] = "must be between 1 and 200"
 	}
-	f := db.AssetFilter{ProjectID: projectID, NS: in.Namespace, Kind: in.Kind, Status: in.Status, Limit: in.Limit + 1}
+	f := db.AssetFilter{
+		ProjectID:  projectID,
+		NS:         in.Namespace,
+		Namespaces: allowedNamespaces(ctx),
+		Kind:       in.Kind,
+		Status:     in.Status,
+		Limit:      in.Limit + 1,
+	}
 	if in.Cursor != "" {
 		created, id, ok := decodeCursor(in.Cursor)
 		if !ok {
@@ -253,6 +270,9 @@ func (s *Service) NamespaceUsage(ctx context.Context, projectID, ns string) (*Us
 	if !ValidNamespace(ns) {
 		return nil, validationErr(map[string]string{"namespace": "invalid namespace"})
 	}
+	if err := checkNamespace(ctx, ns); err != nil {
+		return nil, err
+	}
 	v := &UsageView{Namespace: ns}
 	n, err := s.store.GetNamespace(ctx, projectID, ns)
 	switch {
@@ -291,6 +311,9 @@ func (s *Service) SetNamespaceQuota(ctx context.Context, projectID, ns string, i
 	}
 	if len(errs) > 0 {
 		return nil, validationErr(errs)
+	}
+	if err := checkNamespace(ctx, ns); err != nil {
+		return nil, err
 	}
 	err := s.store.InTx(ctx, func(tx *db.Store) error {
 		if err := tx.SetNamespaceQuota(ctx, projectID, ns, in.QuotaBytes, in.QuotaAssets, in.QuotaVideoSecMonth, s.now()); err != nil {

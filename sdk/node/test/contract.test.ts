@@ -36,6 +36,7 @@ describe("generated contract", () => {
     expectTypeOf<keyof paths>().toEqualTypeOf<
       | "/v1/ping"
       | "/v1/uploads"
+      | "/v1/uploads/{upload_id}/parts"
       | "/v1/uploads/{upload_id}/complete"
       | "/v1/uploads/{upload_id}"
       | "/v1/assets"

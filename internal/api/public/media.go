@@ -28,6 +28,8 @@ func (h *handlers) routes(r chi.Router) {
 	read := auth.RequireScope(auth.ScopeAssetsRead)
 
 	r.With(upload).Post("/uploads", h.createUpload)
+	r.With(upload).Get("/uploads/{id}", h.getUpload)
+	r.With(upload).Post("/uploads/{id}/parts", h.refreshUploadParts)
 	r.With(upload).Post("/uploads/{id}/complete", h.completeUpload)
 	r.With(upload).Delete("/uploads/{id}", h.abortUpload)
 
@@ -121,6 +123,33 @@ func (h *handlers) createUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusCreated, res.Ticket)
+}
+
+func (h *handlers) getUpload(w http.ResponseWriter, r *http.Request) {
+	u, err := h.svc.GetUpload(r.Context(), projectID(r), chi.URLParam(r, "id"))
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, u)
+}
+
+func (h *handlers) refreshUploadParts(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		PartNumbers []int `json:"part_numbers"`
+	}
+	if r.ContentLength != 0 {
+		if err := httpx.DecodeJSON(w, r, &body); err != nil && !errors.Is(err, io.EOF) {
+			badJSON(w, err)
+			return
+		}
+	}
+	out, err := h.svc.RefreshUploadParts(r.Context(), projectID(r), chi.URLParam(r, "id"), body.PartNumbers)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 func (h *handlers) completeUpload(w http.ResponseWriter, r *http.Request) {

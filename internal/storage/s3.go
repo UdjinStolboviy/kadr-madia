@@ -293,6 +293,37 @@ func (d *S3) PresignUploadPart(ctx context.Context, u MultipartUpload, part int3
 	return toPresigned(req.Method, req.URL, req.SignedHeader, ttl), nil
 }
 
+// ListParts returns all parts currently uploaded for u, sorted by part number.
+// Unknown or already-aborted uploads return ErrNotFound.
+func (d *S3) ListParts(ctx context.Context, u MultipartUpload) ([]UploadedPart, error) {
+	var out []UploadedPart
+	var marker *string
+	for {
+		res, err := d.client.ListParts(ctx, &s3.ListPartsInput{
+			Bucket:           &u.Bucket,
+			Key:              &u.Key,
+			UploadId:         &u.UploadID,
+			PartNumberMarker: marker,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("storage: list parts %s/%s: %w", u.Bucket, u.Key, mapErr(err))
+		}
+		for _, p := range res.Parts {
+			out = append(out, UploadedPart{
+				Number: aws.ToInt32(p.PartNumber),
+				ETag:   aws.ToString(p.ETag),
+				Size:   aws.ToInt64(p.Size),
+			})
+		}
+		if !aws.ToBool(res.IsTruncated) || res.NextPartNumberMarker == nil || *res.NextPartNumberMarker == "" {
+			break
+		}
+		marker = res.NextPartNumberMarker
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Number < out[j].Number })
+	return out, nil
+}
+
 // CompleteMultipart assembles the uploaded parts (sorted by number).
 func (d *S3) CompleteMultipart(ctx context.Context, u MultipartUpload, parts []CompletedPart) error {
 	sorted := append([]CompletedPart(nil), parts...)
@@ -335,11 +366,12 @@ func toPresigned(method, u string, signed http.Header, ttl time.Duration) Presig
 func mapErr(err error) error {
 	var nsk *types.NoSuchKey
 	var nf *types.NotFound
-	if errors.As(err, &nsk) || errors.As(err, &nf) {
+	var nsu *types.NoSuchUpload
+	if errors.As(err, &nsk) || errors.As(err, &nf) || errors.As(err, &nsu) {
 		return fmt.Errorf("%w: %v", ErrNotFound, err)
 	}
 	var ae smithy.APIError
-	if errors.As(err, &ae) && (ae.ErrorCode() == "NotFound" || ae.ErrorCode() == "NoSuchKey") {
+	if errors.As(err, &ae) && (ae.ErrorCode() == "NotFound" || ae.ErrorCode() == "NoSuchKey" || ae.ErrorCode() == "NoSuchUpload") {
 		return fmt.Errorf("%w: %v", ErrNotFound, err)
 	}
 	return err

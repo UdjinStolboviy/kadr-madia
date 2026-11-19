@@ -129,6 +129,7 @@ export interface ApiKey {
   name: string;
   prefix: string;
   scopes: ApiKeyScope[];
+  namespaces: string[];
   last_used_at: ISODateTime | null;
   expires_at: ISODateTime | null;
   revoked_at: ISODateTime | null;
@@ -138,6 +139,7 @@ export interface ApiKey {
 export interface CreateApiKeyRequest {
   name: string;
   scopes: ApiKeyScope[];
+  namespaces?: string[];
   expires_at?: ISODateTime;
 }
 
@@ -257,6 +259,7 @@ export interface FileParams {
   limits: { maxInputBytes: number; accept: string[] };
   optimize: { strategy: FileStrategy; imageDpi?: number; jpegQuality?: number; linearize: boolean; minSavingsPercent: number };
   thumbnail: { enabled: boolean; maxSide: number; maxBytes: number; formats?: string[] };
+  text?: { enabled: boolean; maxBytes?: number };
   retainOriginal: boolean;
   [k: string]: unknown;
 }
@@ -269,7 +272,7 @@ export interface Cap {
   detail?: string;
 }
 
-export const CAPABILITY_KEYS = ["vips", "vips_avif", "ffmpeg", "ffprobe", "rclone", "vaapi", "ghostscript", "qpdf"] as const;
+export const CAPABILITY_KEYS = ["vips", "vips_avif", "ffmpeg", "ffprobe", "rclone", "vaapi", "ghostscript", "qpdf", "pdftotext"] as const;
 export type CapabilityKey = (typeof CAPABILITY_KEYS)[number];
 
 export interface SystemInfo {
@@ -412,12 +415,25 @@ export interface Analytics {
 
 // ---- Playground -------------------------------------------------------------
 
+/** Static image watermark settings (docs/PIPELINES.md §1). */
+export interface ImageWatermark {
+  text?: string;
+  image?: string;
+  position?: string;
+  opacity?: number;
+  scale?: number;
+  margin?: number;
+  color?: string;
+  font?: string;
+}
+
 /** Image preset params (docs/PIPELINES.md §1); only the parts the playground edits are typed strictly. */
 export interface ImageParams {
   kind?: string;
   resize: { maxWidth: number; maxHeight: number; fit: string; crop?: string | null; aspect?: string | null };
   color: { grayscale: boolean; normalise: boolean };
   sharpen?: { sigma: number; m1: number; m2: number } | null;
+  watermark?: ImageWatermark | null;
   outputs: { name: string; format: string; effort?: number; chroma?: string; smartSubsample?: boolean }[];
   quality: {
     mode: "budget" | "ssim" | "fixed";

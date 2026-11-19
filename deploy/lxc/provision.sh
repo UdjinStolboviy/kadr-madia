@@ -31,7 +31,7 @@ fi
 log "installing packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-packages=(libvips-tools ffmpeg rclone ghostscript qpdf ca-certificates tzdata curl sqlite3)
+packages=(libvips-tools ffmpeg rclone ghostscript qpdf poppler-utils ca-certificates tzdata curl sqlite3)
 if [[ "${KADR_WITH_VAAPI:-0}" == "1" ]]; then
   packages+=(intel-media-va-driver vainfo)
 fi

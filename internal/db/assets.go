@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -111,9 +112,10 @@ func (s *Store) SetAssetMetadata(ctx context.Context, id string, meta json.RawMe
 
 // AssetFilter selects assets for ListAssets.
 type AssetFilter struct {
-	ProjectID string
-	NS        string // "" = all namespaces
-	Kind      string // "" = all
+	ProjectID  string
+	NS         string   // "" = all namespaces (subject to Namespaces)
+	Namespaces []string // non-empty restricts when NS == ""
+	Kind       string   // "" = all
 	Status    string // "" = all except deleted
 	// Cursor: return rows strictly after (CreatedBefore, IDBefore) in
 	// (created_at DESC, id DESC) order. Zero = from the newest.
@@ -129,6 +131,12 @@ func (s *Store) ListAssets(ctx context.Context, f AssetFilter) ([]*Asset, error)
 	if f.NS != "" {
 		q += ` AND ns = ?`
 		args = append(args, f.NS)
+	} else if len(f.Namespaces) > 0 {
+		placeholders := strings.Repeat(",?", len(f.Namespaces))[1:]
+		q += ` AND ns IN (` + placeholders + `)`
+		for _, ns := range f.Namespaces {
+			args = append(args, ns)
+		}
 	}
 	if f.Kind != "" {
 		q += ` AND kind = ?`

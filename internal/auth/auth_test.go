@@ -87,6 +87,20 @@ func TestScopes(t *testing.T) {
 	}
 }
 
+func TestAllowsNamespace(t *testing.T) {
+	unrestricted := &Principal{}
+	if !unrestricted.AllowsNamespace("org_a") || !unrestricted.AllowsNamespace("") {
+		t.Fatal("unrestricted principal should allow any namespace")
+	}
+	scoped := &Principal{Namespaces: []string{"org_a", "tenant:42"}}
+	if !scoped.AllowsNamespace("org_a") || !scoped.AllowsNamespace("tenant:42") {
+		t.Fatal("scoped principal should allow listed namespaces")
+	}
+	if scoped.AllowsNamespace("org_b") || scoped.AllowsNamespace("") {
+		t.Fatal("scoped principal should reject unlisted or empty namespace")
+	}
+}
+
 func TestTOTP(t *testing.T) {
 	secret, url, err := GenerateTOTP("admin@example.com")
 	if err != nil {

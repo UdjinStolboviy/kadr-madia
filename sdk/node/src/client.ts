@@ -18,12 +18,15 @@ import type {
   Page,
   PingResult,
   Preset,
+  RefreshUploadPartsInput,
+  RefreshedUploadParts,
   UpdateAssetInput,
   ImportCloudInput,
   ImportUrlInput,
   SignedUrl,
   SignUrlItem,
   UploadAssetInput,
+  UploadStatus,
   UploadTicket,
 } from "./types.js";
 import type { ApiPath, PathParamNames } from "./wire.js";
@@ -191,6 +194,37 @@ class Uploads {
       ...options,
     });
     return fromWire<Asset>(res.body);
+  }
+
+  /**
+   * Inspects an upload ticket (`GET /v1/uploads/{id}`), including parts already
+   * uploaded to object storage for pending `MULTIPART` uploads.
+   */
+  async get(uploadId: string, options: RequestOptions = {}): Promise<UploadStatus> {
+    const res = await this.http.request({
+      method: "GET",
+      path: route("/v1/uploads/{upload_id}", { upload_id: uploadId }),
+      ...options,
+    });
+    return fromWire<UploadStatus>(res.body);
+  }
+
+  /**
+   * Re-signs part URLs for a pending `MULTIPART` upload (`POST /v1/uploads/{id}/parts`).
+   * Omit `partNumbers` to sign all parts not yet present in storage.
+   */
+  async refreshParts(
+    uploadId: string,
+    input: RefreshUploadPartsInput & IdempotentRequestOptions = {},
+  ): Promise<RefreshedUploadParts> {
+    const { partNumbers, ...options } = input;
+    const res = await this.http.request({
+      method: "POST",
+      path: route("/v1/uploads/{upload_id}/parts", { upload_id: uploadId }),
+      ...(partNumbers ? { json: { part_numbers: partNumbers } } : {}),
+      ...options,
+    });
+    return fromWire<RefreshedUploadParts>(res.body);
   }
 
   /** Cancels a pending upload (`DELETE /v1/uploads/{id}`). Cancelling twice is a no-op. */

@@ -39,7 +39,23 @@ type SourceInfo struct {
 type Output struct {
 	Main      MainFile
 	ThumbPath string // PNG of the first page, "" when none
+	TextPath  string // UTF-8 extracted text JSON (text.json), "" when disabled or unavailable
 	CPUMillis int64
+}
+
+// ExtractedText is the schema written to text.json when text extraction runs.
+type ExtractedText struct {
+	Format    string     `json:"format"`
+	Pages     []TextPage `json:"pages"`
+	Text      string     `json:"text"`
+	Truncated bool       `json:"truncated"`
+}
+
+// TextPage is one extracted page (1-based). Formats without page breaks
+// (DOCX, ODT, TXT, CSV) produce a single page.
+type TextPage struct {
+	Number int    `json:"number"`
+	Text   string `json:"text"`
 }
 
 // MainFile is the stored document.

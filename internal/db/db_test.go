@@ -146,3 +146,54 @@ func TestNewID(t *testing.T) {
 		t.Fatalf("ids %q %q", a, b)
 	}
 }
+
+func TestAPIKeyNamespacesRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	p := &Project{ID: NewID(PrefixProject), Slug: "ns-proj", Name: "NS", Environment: "test", CreatedAt: now, UpdatedAt: now}
+	if err := s.CreateProject(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+
+	kAll := &APIKey{
+		ID:         NewID(PrefixAPIKey),
+		ProjectID:  p.ID,
+		Name:       "unrestricted",
+		Prefix:     "kd_test_11111111",
+		SecretHash: []byte("hash1"),
+		Scopes:     []string{"assets:read"},
+		CreatedAt:  now,
+	}
+	if err := s.CreateAPIKey(ctx, kAll); err != nil {
+		t.Fatal(err)
+	}
+	gotAll, err := s.GetAPIKeyByPrefix(ctx, kAll.Prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gotAll.Namespaces) != 0 {
+		t.Fatalf("expected empty Namespaces for unrestricted key, got %v", gotAll.Namespaces)
+	}
+
+	kScoped := &APIKey{
+		ID:         NewID(PrefixAPIKey),
+		ProjectID:  p.ID,
+		Name:       "scoped",
+		Prefix:     "kd_test_22222222",
+		SecretHash: []byte("hash2"),
+		Scopes:     []string{"assets:read", "uploads:write"},
+		Namespaces: []string{"org_a", "tenant:42"},
+		CreatedAt:  now,
+	}
+	if err := s.CreateAPIKey(ctx, kScoped); err != nil {
+		t.Fatal(err)
+	}
+	gotScoped, err := s.GetAPIKeyByPrefix(ctx, kScoped.Prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gotScoped.Namespaces) != 2 || gotScoped.Namespaces[0] != "org_a" || gotScoped.Namespaces[1] != "tenant:42" {
+		t.Fatalf("got Namespaces = %v, want [org_a tenant:42]", gotScoped.Namespaces)
+	}
+}

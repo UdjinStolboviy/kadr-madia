@@ -68,6 +68,9 @@ export const en = {
   "common.preset.sharpenLight": "sharpen light",
   "common.preset.sharpenStrong": "sharpen strong",
   "common.preset.sharpenOn": "on",
+  "common.preset.watermark": "Watermark",
+  "common.preset.watermarkShort": "watermark",
+  "common.preset.watermarkImage": "logo",
   "common.preset.placeholder": "Placeholder",
   "common.preset.dominantColor": "dominant color",
   "common.preset.input": "Input",
@@ -98,6 +101,8 @@ export const en = {
   "common.preset.fileThumb": "Thumbnail",
   "common.preset.fileThumbOff": "no thumbnail",
   "common.preset.fileThumbHeadline": "thumbnail ≤ {size}",
+  "common.preset.fileText": "Text",
+  "common.preset.fileTextShort": "text.json",
 };
 
 export const uk: Messages<typeof en> = {
@@ -164,6 +169,9 @@ export const uk: Messages<typeof en> = {
   "common.preset.sharpenLight": "різкість легка",
   "common.preset.sharpenStrong": "різкість сильна",
   "common.preset.sharpenOn": "увімк.",
+  "common.preset.watermark": "Водяний знак",
+  "common.preset.watermarkShort": "водяний знак",
+  "common.preset.watermarkImage": "логотип",
   "common.preset.placeholder": "Заглушка",
   "common.preset.dominantColor": "домінантний колір",
   "common.preset.input": "Вхідні дані",
@@ -194,6 +202,8 @@ export const uk: Messages<typeof en> = {
   "common.preset.fileThumb": "Мініатюра",
   "common.preset.fileThumbOff": "без мініатюри",
   "common.preset.fileThumbHeadline": "мініатюра ≤ {size}",
+  "common.preset.fileText": "Текст",
+  "common.preset.fileTextShort": "text.json",
 };
 
 export const es: Messages<typeof en> = {
@@ -260,6 +270,9 @@ export const es: Messages<typeof en> = {
   "common.preset.sharpenLight": "nitidez suave",
   "common.preset.sharpenStrong": "nitidez fuerte",
   "common.preset.sharpenOn": "activa",
+  "common.preset.watermark": "Marca de agua",
+  "common.preset.watermarkShort": "marca de agua",
+  "common.preset.watermarkImage": "logotipo",
   "common.preset.placeholder": "Marcador",
   "common.preset.dominantColor": "color dominante",
   "common.preset.input": "Entrada",
@@ -290,4 +303,6 @@ export const es: Messages<typeof en> = {
   "common.preset.fileThumb": "Miniatura",
   "common.preset.fileThumbOff": "sin miniatura",
   "common.preset.fileThumbHeadline": "miniatura ≤ {size}",
+  "common.preset.fileText": "Texto",
+  "common.preset.fileTextShort": "text.json",
 };

@@ -95,6 +95,13 @@ type CompletedPart struct {
 	ETag   string
 }
 
+// UploadedPart describes a part already uploaded to an in-progress multipart upload.
+type UploadedPart struct {
+	Number int32
+	ETag   string
+	Size   int64
+}
+
 // Driver is the storage abstraction used by the pipeline and the admin API.
 type Driver interface {
 	Put(ctx context.Context, bucket, key string, body io.ReadSeeker, size int64, opts PutOptions) error
@@ -118,6 +125,7 @@ type Driver interface {
 	// Multipart (implemented in M2).
 	CreateMultipart(ctx context.Context, bucket, key, contentType string) (MultipartUpload, error)
 	PresignUploadPart(ctx context.Context, u MultipartUpload, part int32, ttl time.Duration) (PresignedRequest, error)
+	ListParts(ctx context.Context, u MultipartUpload) ([]UploadedPart, error)
 	CompleteMultipart(ctx context.Context, u MultipartUpload, parts []CompletedPart) error
 	AbortMultipart(ctx context.Context, u MultipartUpload) error
 }

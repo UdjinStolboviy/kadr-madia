@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -568,5 +569,110 @@ func TestCSPAllowsInlineScriptsByHash(t *testing.T) {
 	}
 	if got := buildCSP(nil); !strings.Contains(got, "script-src 'self';") {
 		t.Fatalf("csp without UI = %s", got)
+	}
+}
+
+func TestAPIKeyNamespacesAdmin(t *testing.T) {
+	e := newEnv(t, nil)
+	c := &client{e: e}
+	c.login(t, nil)
+
+	r := c.do("POST", "/admin/api/projects", map[string]any{
+		"slug": "ns-scoped", "name": "NS Scoped", "environment": "test",
+	}, true)
+	if r.code != 201 {
+		t.Fatalf("create project: %d %s", r.code, r.body)
+	}
+	pid := r.json(t)["id"].(string)
+
+	// Invalid namespace entries -> 422 validation_failed.
+	expectProblem(t, c.do("POST", "/admin/api/projects/"+pid+"/api-keys", map[string]any{
+		"name": "bad-ns", "scopes": []string{"assets:read"}, "namespaces": []string{"-invalid"},
+	}, true), 422, "validation_failed")
+	expectProblem(t, c.do("POST", "/admin/api/projects/"+pid+"/api-keys", map[string]any{
+		"name": "empty-ns", "scopes": []string{"assets:read"}, "namespaces": []string{"   "},
+	}, true), 422, "validation_failed")
+	tooMany := make([]string, 101)
+	for i := range tooMany {
+		tooMany[i] = fmt.Sprintf("ns_%03d", i)
+	}
+	expectProblem(t, c.do("POST", "/admin/api/projects/"+pid+"/api-keys", map[string]any{
+		"name": "many-ns", "scopes": []string{"assets:read"}, "namespaces": tooMany,
+	}, true), 422, "validation_failed")
+
+	// Unrestricted key returns namespaces: [] on Admin API and omits it on /v1/ping.
+	r = c.do("POST", "/admin/api/projects/"+pid+"/api-keys", map[string]any{
+		"name": "all-ns", "scopes": []string{"assets:read"},
+	}, true)
+	if r.code != 201 {
+		t.Fatalf("create unrestricted key: %d %s", r.code, r.body)
+	}
+	allResp := r.json(t)
+	allKey := allResp["api_key"].(map[string]any)
+	if ns, ok := allKey["namespaces"].([]any); !ok || len(ns) != 0 {
+		t.Fatalf("unrestricted api_key namespaces = %v", allKey["namespaces"])
+	}
+	allSecret := allResp["secret"].(string)
+
+	// Scoped key trims and deduplicates namespaces.
+	r = c.do("POST", "/admin/api/projects/"+pid+"/api-keys", map[string]any{
+		"name": "scoped-ns", "scopes": []string{"assets:read", "uploads:write"},
+		"namespaces": []string{" org_a ", "tenant:42", "org_a"},
+	}, true)
+	if r.code != 201 {
+		t.Fatalf("create scoped key: %d %s", r.code, r.body)
+	}
+	scopedResp := r.json(t)
+	scopedKey := scopedResp["api_key"].(map[string]any)
+	scopedNS := scopedKey["namespaces"].([]any)
+	if len(scopedNS) != 2 || scopedNS[0] != "org_a" || scopedNS[1] != "tenant:42" {
+		t.Fatalf("scoped api_key namespaces = %v", scopedNS)
+	}
+	scopedSecret := scopedResp["secret"].(string)
+
+	// GET /api-keys reflects stored namespaces.
+	r = c.do("GET", "/admin/api/projects/"+pid+"/api-keys", nil, false)
+	if r.code != 200 {
+		t.Fatalf("list api keys: %d %s", r.code, r.body)
+	}
+	items := r.json(t)["items"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("expected 2 keys, got %d", len(items))
+	}
+	foundScoped := false
+	for _, it := range items {
+		m := it.(map[string]any)
+		if m["id"] == scopedKey["id"] {
+			ns := m["namespaces"].([]any)
+			if len(ns) != 2 || ns[0] != "org_a" || ns[1] != "tenant:42" {
+				t.Fatalf("listed scoped namespaces = %v", ns)
+			}
+			foundScoped = true
+		}
+	}
+	if !foundScoped {
+		t.Fatalf("scoped key missing in list: %v", items)
+	}
+
+	// /v1/ping surfaces namespaces only when scoped.
+	ping := func(sec string) map[string]any {
+		req := httptest.NewRequest("GET", "/v1/ping", nil)
+		req.Header.Set("Authorization", "Bearer "+sec)
+		rec := httptest.NewRecorder()
+		e.public.ServeHTTP(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("ping %d %s", rec.Code, rec.Body)
+		}
+		var out map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return out
+	}
+	if _, has := ping(allSecret)["namespaces"]; has {
+		t.Fatalf("unrestricted /v1/ping should omit namespaces")
+	}
+	pScoped := ping(scopedSecret)
+	pNS, ok := pScoped["namespaces"].([]any)
+	if !ok || len(pNS) != 2 || pNS[0] != "org_a" || pNS[1] != "tenant:42" {
+		t.Fatalf("scoped /v1/ping namespaces = %v", pScoped["namespaces"])
 	}
 }

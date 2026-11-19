@@ -70,8 +70,23 @@ func (t *Tools) Process(ctx context.Context, src SourceInfo, p preset.FileParams
 	var cpu int64
 	out := &Output{Main: MainFile{Path: src.Path, Format: src.Format, ContentType: src.ContentType, Bytes: src.Bytes,
 		OriginalBytes: src.Bytes, Skipped: "disabled"}}
+
+	// Best-effort UTF-8 text extraction for PDF/DOCX/ODT/TXT/CSV when enabled.
+	if p.Text.Enabled {
+		tp, err := t.extractTextFile(ctx, &cpu, workDir, src, p.Text.MaxBytes)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			// Never fail an upload if optional text extraction fails.
+		} else {
+			out.TextPath = tp
+		}
+	}
+
 	if src.Format != "pdf" {
 		out.Main.Skipped = "not_pdf"
+		out.CPUMillis = cpu
 		return out, nil
 	}
 

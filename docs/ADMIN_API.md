@@ -62,10 +62,10 @@ Enabled when `KADR_WEBAUTHN_RP_ID` (e.g. `admin.example.com`) and `KADR_WEBAUTHN
 | Method | Path | Body | Response |
 |---|---|---|---|
 | GET | `/admin/api/projects/{id}/api-keys` | — | `200 { items: ApiKey[] }` |
-| POST | `/admin/api/projects/{id}/api-keys` | `{ name, scopes: string[], expires_at? }` | `201 { api_key: ApiKey, secret }` — `secret` is shown **once** |
+| POST | `/admin/api/projects/{id}/api-keys` | `{ name, scopes: string[], namespaces?: string[], expires_at? }` | `201 { api_key: ApiKey, secret }` — `secret` is shown **once** |
 | DELETE | `/admin/api/api-keys/{key_id}` | — | `204` (revocation) |
 
-`ApiKey`: `{ id, project_id, name, prefix, scopes, last_used_at, expires_at, revoked_at, created_at }`
+`ApiKey`: `{ id, project_id, name, prefix, scopes, namespaces, last_used_at, expires_at, revoked_at, created_at }` (`namespaces: []` = unrestricted; up to 100 valid namespaces when restricted).
 
 Scopes: `uploads:write`, `assets:read`, `assets:write`, `assets:delete`, `urls:sign`, `namespaces:admin`, `imports:write`.
 

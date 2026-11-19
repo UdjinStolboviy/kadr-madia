@@ -250,6 +250,11 @@ func (s *Service) produceFile(ctx context.Context, pc *processCtx, srcPath, outD
 			return nil, ctx.Err()
 		} // a thumbnail that cannot be compressed is skipped; the document itself is stored
 	}
+	if fo.TextPath != "" {
+		if st, err := os.Stat(fo.TextPath); err == nil && st.Size() > 0 {
+			p.files = append(p.files, producedFile{name: "text", format: "json", path: fo.TextPath, bytes: st.Size()})
+		}
+	}
 	return p, nil
 }
 

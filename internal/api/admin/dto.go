@@ -64,6 +64,7 @@ type apiKeyDTO struct {
 	Name       string   `json:"name"`
 	Prefix     string   `json:"prefix"`
 	Scopes     []string `json:"scopes"`
+	Namespaces []string `json:"namespaces"`
 	LastUsedAt *string  `json:"last_used_at"`
 	ExpiresAt  *string  `json:"expires_at"`
 	RevokedAt  *string  `json:"revoked_at"`
@@ -75,7 +76,11 @@ func toAPIKeyDTO(k *db.APIKey) apiKeyDTO {
 	if scopes == nil {
 		scopes = []string{}
 	}
-	return apiKeyDTO{ID: k.ID, ProjectID: k.ProjectID, Name: k.Name, Prefix: k.Prefix, Scopes: scopes,
+	namespaces := k.Namespaces
+	if namespaces == nil {
+		namespaces = []string{}
+	}
+	return apiKeyDTO{ID: k.ID, ProjectID: k.ProjectID, Name: k.Name, Prefix: k.Prefix, Scopes: scopes, Namespaces: namespaces,
 		LastUsedAt: tsp(k.LastUsedAt), ExpiresAt: tsp(k.ExpiresAt), RevokedAt: tsp(k.RevokedAt), CreatedAt: ts(k.CreatedAt)}
 }
 

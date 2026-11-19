@@ -58,6 +58,10 @@ paths:
                   environment: { type: string, enum: [live, test] }
                   key_id: { type: string }
                   scopes: { type: array, items: { $ref: "#/components/schemas/Scope" } }
+                  namespaces:
+                    type: array
+                    description: Present when the API key is restricted to specific namespaces.
+                    items: { $ref: "#/components/schemas/Namespace" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -76,7 +80,8 @@ paths:
         and preset version, a new ready asset referencing it is created and
         returned with `200` — no upload is needed.
 
-        Scope: `uploads:write`. Video files over 64 MB get a `MULTIPART` ticket:
+        Scope: `uploads:write`. Video and document files over 16 MB (or any file
+        over 5 MB when `multipart: true` is sent) get a `MULTIPART` ticket:
         upload each part (`part_size` bytes, the last may be smaller) with PUT
         to its URL, collect the `ETag` response headers and send them to
         `complete`. Image presets are limited to 64 MB.
@@ -176,6 +181,30 @@ paths:
               schema: { $ref: "#/components/schemas/Problem" }
 
   /v1/uploads/{upload_id}:
+    get:
+      tags: [uploads]
+      operationId: getUpload
+      summary: Inspect upload status and uploaded parts
+      description: |
+        Returns the status of an upload ticket. For pending `MULTIPART` uploads,
+        lists parts already stored in object storage (`uploaded_parts`) so
+        resumed uploads only transfer missing parts. Scope `uploads:write`.
+      parameters:
+        - $ref: "#/components/parameters/UploadId"
+      responses:
+        "200":
+          description: Current upload status.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UploadStatus" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502":
+          description: "`storage_error` — storage could not list uploaded parts."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
     delete:
       tags: [uploads]
       operationId: abortUpload
@@ -190,6 +219,50 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409":
           description: "`upload_not_pending` — complete was already called."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /v1/uploads/{upload_id}/parts:
+    post:
+      tags: [uploads]
+      operationId: refreshUploadParts
+      summary: Re-sign part URLs for a pending multipart upload
+      description: |
+        Returns the parts already stored (`uploaded_parts`) and fresh presigned
+        PUT URLs for the requested `part_numbers`, or for all missing parts when
+        `part_numbers` is omitted or empty. Scope `uploads:write`.
+      parameters:
+        - $ref: "#/components/parameters/UploadId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RefreshPartsRequest" }
+      responses:
+        "200":
+          description: Refreshed part URLs and uploaded parts list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RefreshedUploadParts" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`upload_not_multipart`, `upload_aborted`, `upload_not_pending`, or `idempotency_in_progress`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "410":
+          description: "`upload_expired` — the multipart upload session has expired."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "502":
+          description: "`storage_error` — storage could not list uploaded parts."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
@@ -876,13 +949,16 @@ components:
         size:
           type: integer
           minimum: 1
-          maximum: 67108864
+          maximum: 5368709120
           description: Exact size in bytes; signed into the PUT.
         sha256:
           type: string
           pattern: "^[0-9a-fA-F]{64}$"
           description: Optional hex SHA-256 of the file. Enables dedup and is verified after download.
         metadata: { $ref: "#/components/schemas/Metadata" }
+        multipart:
+          type: boolean
+          description: Request a `MULTIPART` ticket whenever `size` exceeds the 5 MiB S3 part minimum.
 
     UploadTicket:
       type: object
@@ -902,17 +978,77 @@ components:
           type: array
           description: "`MULTIPART` tickets: presigned PUT URL of every part."
           items:
-            type: object
-            required: [part_number, url]
-            properties:
-              part_number: { type: integer }
-              url: { type: string, format: uri }
+            $ref: "#/components/schemas/PartTicket"
         headers:
           type: object
           description: Headers the client must send with the PUT (at least Content-Type and Content-Length).
           additionalProperties: { type: string }
           examples: [{ Content-Type: image/jpeg, Content-Length: "384211" }]
         expires_at: { type: string, format: date-time }
+        session_expires_at:
+          type: string
+          format: date-time
+          description: "`MULTIPART` tickets: when the multipart session itself expires (after which parts cannot be refreshed)."
+
+    PartTicket:
+      type: object
+      required: [part_number, url]
+      properties:
+        part_number: { type: integer }
+        url: { type: string, format: uri }
+
+    UploadedPart:
+      type: object
+      required: [part_number, etag, size]
+      properties:
+        part_number: { type: integer }
+        etag: { type: string }
+        size: { type: integer, format: int64 }
+
+    UploadStatus:
+      type: object
+      required: [upload_id, status, method, namespace, preset, visibility, filename, content_type, size, expires_at, asset_id, created_at]
+      properties:
+        upload_id: { type: string }
+        status: { type: string, enum: [pending, uploaded, processing, done, expired, aborted, failed] }
+        method: { type: string, enum: [PUT, MULTIPART, SERVER, URL, CLOUD] }
+        namespace: { $ref: "#/components/schemas/Namespace" }
+        preset: { type: string }
+        visibility: { $ref: "#/components/schemas/Visibility" }
+        filename: { type: [string, "null"] }
+        content_type: { type: [string, "null"] }
+        size: { type: integer, format: int64 }
+        part_size: { type: integer, format: int64 }
+        total_parts: { type: integer }
+        uploaded_parts:
+          type: array
+          items: { $ref: "#/components/schemas/UploadedPart" }
+        expires_at: { type: string, format: date-time }
+        asset_id: { type: [string, "null"] }
+        created_at: { type: string, format: date-time }
+
+    RefreshPartsRequest:
+      type: object
+      properties:
+        part_numbers:
+          type: array
+          description: Part numbers to re-sign; omit or send empty to sign all missing parts.
+          items: { type: integer, minimum: 1, maximum: 10000 }
+
+    RefreshedUploadParts:
+      type: object
+      required: [upload_id, part_size, parts, uploaded_parts, expires_at, session_expires_at]
+      properties:
+        upload_id: { type: string }
+        part_size: { type: integer, format: int64 }
+        parts:
+          type: array
+          items: { $ref: "#/components/schemas/PartTicket" }
+        uploaded_parts:
+          type: array
+          items: { $ref: "#/components/schemas/UploadedPart" }
+        expires_at: { type: string, format: date-time }
+        session_expires_at: { type: string, format: date-time }
 
     Asset:
       type: object
