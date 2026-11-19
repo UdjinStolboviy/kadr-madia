@@ -60,8 +60,11 @@ export interface Page<T> {
 
 /**
  * Body of `PATCH /v1/assets/{id}`. `metadata` replaces the stored object.
- * Changing `visibility` is not implemented yet (the server answers
- * `501 not_implemented`); sending the current visibility is accepted.
+ * Changing `visibility` moves the renditions server-side into the other
+ * bucket: the asset gets a new blob, so storage keys and URLs change (public
+ * renditions get a CDN `url`, private ones a `key`); the old objects are
+ * removed by GC. Only ready assets (`409 asset_not_ready`); sending the
+ * current visibility is a no-op.
  */
 export type UpdateAssetInput = Camelize<
   operations["updateAsset"]["requestBody"]["content"]["application/json"]

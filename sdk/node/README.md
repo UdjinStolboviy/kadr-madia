@@ -107,7 +107,7 @@ asset in `processing` and an `asset.ready` / `asset.failed` webhook follows.
 | `assets.get(id, opts?): Promise<Asset>` | `GET /v1/assets/{id}` |
 | `assets.listPage(params?, opts?): Promise<Page<Asset>>` | `GET /v1/assets?…` (one page) |
 | `assets.list(params?, opts?): AsyncGenerator<Asset>` | follows `next_cursor` across all pages |
-| `assets.update(id, { metadata?, visibility? }, opts?): Promise<Asset>` | `PATCH /v1/assets/{id}` (visibility changes: `501` for now) |
+| `assets.update(id, { metadata?, visibility? }, opts?): Promise<Asset>` | `PATCH /v1/assets/{id}` (a visibility change moves the files to the other bucket: new keys/URLs — store the returned asset) |
 | `assets.delete(id, opts?): Promise<void>` | `DELETE /v1/assets/{id}` (`409 asset_processing` while processing) |
 | `assets.upload(file, input, { idempotencyKey? }?): Promise<Asset>` | `POST /v1/assets?wait=…` (multipart/form-data) |
 
@@ -358,10 +358,12 @@ the Go implementation). Request paths are checked against the generated
 spec change that the SDK does not follow fails `pnpm typecheck`. CI runs
 `pnpm gen:check` to make sure the committed file matches the spec.
 
-Not wrapped because the server does not implement them yet (they answer
-`501 not_implemented`): multipart uploads (`POST /v1/uploads/{id}/parts`),
-`POST /v1/assets/{id}/reprocess`, `DELETE /v1/namespaces/{ns}` (and the
-`namespace.purged` event), `POST /v1/signed-urls`, `/v1/imports/*` and
+Implemented by the server but not wrapped yet (call them with `fetch`):
+`POST /v1/signed-urls` (or sign locally with `signUrl` / `presignGet`) and
+`/v1/imports/*`. Large files use multipart tickets (`parts` in the ticket,
+completed with `{ parts }`). Not implemented by the server (unknown routes
+answer `501 not_implemented`): `POST /v1/assets/{id}/reprocess`,
+`DELETE /v1/namespaces/{ns}` (and the `namespace.purged` event) and
 `PUT /v1/presets/{slug}`.
 
 ## Development

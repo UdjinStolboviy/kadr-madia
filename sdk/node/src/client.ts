@@ -245,8 +245,9 @@ class Assets {
   }
 
   /**
-   * `PATCH /v1/assets/{id}` — replaces `metadata` and emits `asset.updated`.
-   * Changing `visibility` answers `501 not_implemented` for now. Not retried.
+   * `PATCH /v1/assets/{id}` — replaces `metadata` and/or changes `visibility`
+   * (renditions are copied into the other bucket: keys and URLs change — store
+   * the returned asset). Emits one `asset.updated`. Not retried.
    */
   async update(id: string, input: UpdateAssetInput, options: RequestOptions = {}): Promise<Asset> {
     const res = await this.http.request({
