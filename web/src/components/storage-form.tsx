@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { BookOpen, ChevronDown, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
@@ -8,6 +8,7 @@ import { z } from "zod";
 import { Field } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Dialog,
   DialogContent,
@@ -33,6 +34,78 @@ const PROVIDER_DEFAULTS: Record<StorageProvider, { endpoint: string; region: str
   hetzner: { endpoint: "https://<LOCATION>.your-objectstorage.com", region: "fsn1" },
   garage: { endpoint: "http://garage.internal:3900", region: "garage" },
 };
+
+type GuideStep = { title: MessageKey; body: MessageKey; code?: string };
+
+const CORS_JSON = `[
+  {
+    "AllowedOrigins": ["https://app.example.com"],
+    "AllowedMethods": ["GET", "PUT", "HEAD"],
+    "AllowedHeaders": ["*"],
+    "ExposeHeaders": ["ETag"],
+    "MaxAgeSeconds": 3600
+  }
+]`;
+
+const S3_IAM_POLICY = `{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket"],
+    "Resource": [
+      "arn:aws:s3:::acme-public", "arn:aws:s3:::acme-public/*",
+      "arn:aws:s3:::acme-private", "arn:aws:s3:::acme-private/*"
+    ]
+  }]
+}`;
+
+const GARAGE_CLI = `garage bucket create acme-public
+garage bucket create acme-private
+garage bucket website --allow acme-public
+garage key create kadr
+garage bucket allow --read --write --owner acme-public --key kadr
+garage bucket allow --read --write --owner acme-private --key kadr`;
+
+function guideStepsFor(p: StorageProvider): GuideStep[] {
+  const steps: Record<StorageProvider, GuideStep[]> = {
+    r2: [
+      { title: "storage.guide.step1.title", body: "storage.guide.r2.step1" },
+      { title: "storage.guide.step2.title", body: "storage.guide.r2.step2", code: CORS_JSON },
+      { title: "storage.guide.step3.title", body: "storage.guide.r2.step3" },
+      { title: "storage.guide.step4.title", body: "storage.guide.r2.step4" },
+      { title: "storage.guide.step5.title", body: "storage.guide.r2.step5" },
+    ],
+    s3: [
+      { title: "storage.guide.step1.title", body: "storage.guide.s3.step1" },
+      { title: "storage.guide.step2.title", body: "storage.guide.s3.step2", code: CORS_JSON },
+      { title: "storage.guide.step3.title", body: "storage.guide.s3.step3" },
+      { title: "storage.guide.step4.title", body: "storage.guide.s3.step4", code: S3_IAM_POLICY },
+      { title: "storage.guide.step5.title", body: "storage.guide.s3.step5" },
+    ],
+    b2: [
+      { title: "storage.guide.step1.title", body: "storage.guide.b2.step1" },
+      { title: "storage.guide.step2.title", body: "storage.guide.b2.step2" },
+      { title: "storage.guide.step3.title", body: "storage.guide.b2.step3" },
+      { title: "storage.guide.step4.title", body: "storage.guide.b2.step4" },
+      { title: "storage.guide.step5.title", body: "storage.guide.b2.step5" },
+    ],
+    hetzner: [
+      { title: "storage.guide.step1.title", body: "storage.guide.hetzner.step1" },
+      { title: "storage.guide.step2.title", body: "storage.guide.hetzner.step2", code: CORS_JSON },
+      { title: "storage.guide.step3.title", body: "storage.guide.hetzner.step3" },
+      { title: "storage.guide.step4.title", body: "storage.guide.hetzner.step4" },
+      { title: "storage.guide.step5.title", body: "storage.guide.hetzner.step5" },
+    ],
+    garage: [
+      { title: "storage.guide.step1.title", body: "storage.guide.garage.step1" },
+      { title: "storage.guide.step2.title", body: "storage.guide.garage.step2" },
+      { title: "storage.guide.step3.title", body: "storage.guide.garage.step3" },
+      { title: "storage.guide.step4.title", body: "storage.guide.garage.step4", code: GARAGE_CLI },
+      { title: "storage.guide.step5.title", body: "storage.guide.garage.step5" },
+    ],
+  };
+  return steps[p];
+}
 
 const url = (msg: string) =>
   z
@@ -104,6 +177,7 @@ export function StorageFormDialog({
   const editing = !!profile;
   const save = useSaveStorageProfile();
   const [showSecret, setShowSecret] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(!editing);
   const form = useForm<Values>({ resolver: zodResolver(makeSchema(editing, t)), defaultValues: defaults(profile) });
   const { errors } = form.formState;
   const provider = useWatch({ control: form.control, name: "provider" });
@@ -196,6 +270,36 @@ export function StorageFormDialog({
               />
             </Field>
           </div>
+
+          <Collapsible open={guideOpen} onOpenChange={setGuideOpen} className="rounded-lg border bg-muted/30">
+            <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm transition-colors hover:bg-muted/50">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <BookOpen className="size-4 shrink-0 text-muted-foreground" />
+                <div className="min-w-0">
+                  <div className="font-medium">{t("storage.guide.title", { provider: PROVIDER_LABEL[provider] })}</div>
+                  <div className="text-xs text-muted-foreground">{t("storage.guide.subtitle")}</div>
+                </div>
+              </div>
+              <ChevronDown
+                className={`size-4 shrink-0 text-muted-foreground transition-transform ${guideOpen ? "rotate-180" : ""}`}
+              />
+            </CollapsibleTrigger>
+            <CollapsibleContent className="border-t px-4 py-3">
+              <div className="space-y-3 text-xs leading-relaxed">
+                {guideStepsFor(provider).map((step) => (
+                  <div key={step.body}>
+                    <div className="font-medium text-foreground">{t(step.title)}</div>
+                    <p className="mt-0.5 text-muted-foreground">{t(step.body)}</p>
+                    {step.code && (
+                      <pre className="mt-1.5 overflow-x-auto rounded border bg-background/80 p-2 font-mono text-[11px] leading-snug text-foreground">
+                        {step.code}
+                      </pre>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
 
           <div className="grid gap-4 sm:grid-cols-[1fr_9rem]">
             <Field

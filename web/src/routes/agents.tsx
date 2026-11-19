@@ -323,7 +323,7 @@ export default function AgentsPage() {
       <KillSwitch />
 
       <Tabs value={tab} onValueChange={(v) => void navigate({ search: { tab: v as AgentsTab }, replace: true })}>
-        <TabsList variant="line" className="mb-4 w-full justify-start overflow-x-auto border-b pb-0">
+        <TabsList variant="line" className="mb-4 w-full justify-start overflow-x-auto overflow-y-hidden border-b [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <TabsTrigger className="flex-none px-3" value="agents">
             {t("agents.tab.agents")}
           </TabsTrigger>
