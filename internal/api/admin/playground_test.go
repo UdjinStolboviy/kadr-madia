@@ -95,8 +95,8 @@ func TestValidateFileParams(t *testing.T) {
 		if m := validateFileParams(&fp); m != "" {
 			t.Errorf("%s rejected: %s", d.Slug, m)
 		}
-		if fp.Text.Enabled {
-			t.Errorf("%s default preset should have text.enabled=false", d.Slug)
+		if !fp.Text.Enabled || fp.Text.MaxBytes != 2<<20 {
+			t.Errorf("%s default preset should have text.enabled=true and maxBytes=2MiB, got %+v", d.Slug, fp.Text)
 		}
 	}
 

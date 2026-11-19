@@ -34,6 +34,8 @@ Commands:
   migrate up                  apply pending database migrations
   migrate status              list migrations and their state
   admin create --email EMAIL  create an administrator (password prompted, or --password-stdin)
+  preset enable-text [--project SLUG]
+                              enable text extraction (text.json) on file presets
   doctor                      check external tools, directories, database and keys
   restore-drill [--config F | --replica URL] [--keep]
                               restore the newest Litestream replica to a scratch dir and verify it
@@ -68,6 +70,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		err = cmdMigrate(ctx, args[1:], stdout)
 	case "admin":
 		err = cmdAdmin(ctx, args[1:], stdin, stdout, stderr)
+	case "preset":
+		err = cmdPreset(ctx, args[1:], stdout, stderr)
 	case "doctor":
 		var ok bool
 		ok, err = cmdDoctor(ctx, args[1:], stdout)

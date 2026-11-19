@@ -63,12 +63,24 @@ func TestDocumentUploads(t *testing.T) {
 		t.Fatalf("docx: %v", a)
 	}
 	rends := a["renditions"].([]any)
-	if len(rends) != 1 {
+	if len(rends) != 2 {
 		t.Fatalf("docx renditions: %v", rends)
 	}
-	main := rends[0].(map[string]any)
-	if main["name"] != "main" || main["format"] != "docx" || main["key"] == nil {
-		t.Fatalf("main rendition: %v", main)
+	var main, text map[string]any
+	for _, x := range rends {
+		r := x.(map[string]any)
+		switch r["name"] {
+		case "main":
+			main = r
+		case "text":
+			text = r
+		}
+	}
+	if main == nil || main["format"] != "docx" || main["key"] == nil {
+		t.Fatalf("main rendition: %v", rends)
+	}
+	if text == nil || text["format"] != "json" || text["key"] == nil {
+		t.Fatalf("text rendition: %v", rends)
 	}
 	key := main["key"].(string)
 	if !e.objectExists(privateBucket, key) {

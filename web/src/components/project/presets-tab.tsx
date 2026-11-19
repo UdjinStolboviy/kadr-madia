@@ -1,9 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, FileText, Film, ImageIcon, Layers } from "lucide-react";
+import { ChevronDown, FileText, Film, ImageIcon, Layers, Pencil } from "lucide-react";
 import { useState } from "react";
 
 import { CopyButton, StatusBadge } from "@/components/common";
+import { PresetEditor } from "@/components/project/preset-editor";
 import { EmptyState, ErrorState } from "@/components/states";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -14,7 +16,7 @@ import { isModeSlug, summarizePreset } from "@/lib/presets";
 import type { Preset } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-function PresetCard({ preset }: { preset: Preset }) {
+function PresetCard({ preset, onEdit }: { preset: Preset; onEdit: () => void }) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const summary = summarizePreset(preset.kind, preset.params);
@@ -50,6 +52,9 @@ function PresetCard({ preset }: { preset: Preset }) {
             </div>
             {preset.description && <p className="mt-0.5 text-sm text-muted-foreground">{preset.description}</p>}
           </div>
+          <Button size="sm" variant="outline" className="shrink-0" onClick={onEdit} aria-label={t("presets.editAria", { slug: preset.slug })}>
+            <Pencil /> {t("presets.edit")}
+          </Button>
         </div>
       </CardHeader>
       <CardContent className="grid gap-4 px-5">
@@ -86,6 +91,7 @@ function PresetCard({ preset }: { preset: Preset }) {
 export function PresetsTab({ projectId }: { projectId: string }) {
   const t = useT();
   const presets = useQuery(presetsQuery(projectId));
+  const [editing, setEditing] = useState<Preset | null>(null);
 
   if (presets.isPending) {
     return (
@@ -121,11 +127,12 @@ export function PresetsTab({ projectId }: { projectId: string }) {
             <h2 className="mb-3 text-sm font-semibold">{g.title}</h2>
             <div className="grid gap-4 md:grid-cols-2">
               {g.items.map((p) => (
-                <PresetCard key={p.id} preset={p} />
+                <PresetCard key={p.id} preset={p} onEdit={() => setEditing(p)} />
               ))}
             </div>
           </section>
         ))}
+      <PresetEditor projectId={projectId} preset={editing} open={!!editing} onOpenChange={(o) => !o && setEditing(null)} />
     </div>
   );
 }

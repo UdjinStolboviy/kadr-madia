@@ -116,6 +116,7 @@ export function defaultPresets(projectId: string, createdAt: string): Preset[] {
       limits: fileLimits,
       optimize: { strategy: "none", linearize: false, minSavingsPercent: 0 },
       thumbnail: { enabled: true, maxSide: 640, maxBytes: 20480 },
+      text: { enabled: true, maxBytes: 2097152 },
       retainOriginal: false,
     }),
     ...modePresets(projectId, createdAt),
@@ -177,7 +178,7 @@ export function modePresets(projectId: string, createdAt: string): Preset[] {
     description,
     current_version: 1,
     created_at: createdAt,
-    params: { kind: "file", limits: fileLimits, optimize, thumbnail, retainOriginal: false },
+    params: { kind: "file", limits: fileLimits, optimize, thumbnail, text: { enabled: true, maxBytes: 2097152 }, retainOriginal: false },
   });
   return [
     img("compact", "Compact: good quality at a very small size (max side 1080, ≤ 30 KB)", 1080, { mode: "budget", maxBytes: 30720, qMax: 55, qMin: 25, downscaleStep: 0.85, minSide: 480 }, std, { sigma: 0.6, m1: 0.5, m2: 1.5 }),

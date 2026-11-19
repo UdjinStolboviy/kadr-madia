@@ -59,6 +59,8 @@ var DefaultFileFormats = []string{"pdf", "docx", "xlsx", "pptx", "odt", "ods", "
 
 var defaultFileLimits = FileLimits{MaxInputBytes: 100 << 20, Accept: DefaultFileFormats}
 
+var defaultFileText = FileText{Enabled: true, MaxBytes: 2 << 20}
+
 func filePresets() []struct {
 	slug, kind, desc string
 	params           any
@@ -68,7 +70,7 @@ func filePresets() []struct {
 		params           any
 	}
 	f := func(slug, desc string, o FileOptimize, th FileThumb) item {
-		return item{slug, "file", desc, FileParams{Kind: "file", Limits: defaultFileLimits, Optimize: o, Thumbnail: th}}
+		return item{slug, "file", desc, FileParams{Kind: "file", Limits: defaultFileLimits, Optimize: o, Thumbnail: th, Text: defaultFileText}}
 	}
 	return []item{
 		f(ModeSlug("file", ModeCompact), "Compact: smallest documents, images re-encoded",

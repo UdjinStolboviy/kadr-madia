@@ -37,7 +37,7 @@ const TITLES: Record<CompressionMode, { title: MessageKey; blurb: MessageKey }> 
 const FACT_LABELS: Record<"image" | "video" | "file", MessageKey[]> = {
   image: ["common.preset.resize", "common.preset.quality", "common.preset.formats"],
   video: ["common.preset.video", "common.preset.frame", "common.preset.audio"],
-  file: ["common.preset.fileOptimize", "common.preset.fileThumb", "common.preset.input"],
+  file: ["common.preset.fileOptimize", "common.preset.fileThumb", "common.preset.fileText", "common.preset.input"],
 };
 
 function PresetColumn({
