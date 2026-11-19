@@ -94,7 +94,7 @@ Secret format: `kd_{live|test}_{8 base62 chars — prefix}_{32 base62 chars}`; t
 |---|---|---|
 | GET | `/admin/api/projects/{id}/presets` | `200 { items: Preset[] }` |
 
-`Preset`: `{ id, slug, kind: "image"|"video", description, current_version, params: object, created_at }`
+`Preset`: `{ id, slug, kind: "image"|"video"|"file", description, current_version, params: object, created_at }` — `description` is the purpose of the preset; the parameters are in `params` (current version)
 
 ## System
 
@@ -191,7 +191,7 @@ Audit actions: `webhook.create`, `webhook.delete`, `webhook.test`, `delivery.ret
 |---|---|---|---|
 | GET | `/admin/api/projects/{id}/modes` | — | `200 { default_mode, modes: [{ mode, description, image: Preset, video: Preset, customized: { image, video } }] }` |
 | PATCH | `/admin/api/projects/{id}` | `{ default_mode: "compact"\|"balanced"\|"quality" }` | `200 Project` (also exposes `default_mode`) |
-| POST | `/admin/api/projects/{id}/presets/{slug}/versions` | `{ params, description? }` | image **and video** presets (validated: video `maxWidth` 160–4096, `fps` 1–60, `crf` 14–40, bitrates like `900k`/`4M`, x264 preset names, audio channels 1–2) |
+| POST | `/admin/api/projects/{id}/presets/{slug}/versions` | `{ params, description? }` | image, video and file presets (validated: video `codec` h264 | av1, `maxWidth` 160–4096, `fps` 1–60, `crf` 14–40 for H.264 and 14–63 for AV1, bitrates like `900k`/`4M`, x264 preset names (mapped to SVT-AV1 speed for AV1), audio channels 1–2, `poster.formats` / `thumbnail.formats` from avif, webp) |
 | POST | `/admin/api/projects/{id}/presets/{slug}/reset` | — | `200 Preset` — restores a built-in preset (incl. the six mode presets) as a new version |
 
 ## Billing / metering (M5, preview)

@@ -37,7 +37,7 @@ type FileOptimize struct {
 }
 
 // FileThumb controls the first-page thumbnail of PDFs (compressed with the
-// image budget search to MaxBytes; AVIF + WebP).
+// image budget search to MaxBytes; formats as listed, AVIF + WebP when empty).
 type FileThumb struct {
 	Enabled  bool `json:"enabled"`
 	MaxSide  int  `json:"maxSide"`
@@ -63,16 +63,16 @@ func filePresets() []struct {
 		return item{slug, "file", desc, FileParams{Kind: "file", Limits: defaultFileLimits, Optimize: o, Thumbnail: th}}
 	}
 	return []item{
-		f(ModeSlug("file", ModeCompact), "Compact: PDF images re-encoded at 110 dpi / JPEG 60, linearized; thumbnail ≤ 12 KB",
+		f(ModeSlug("file", ModeCompact), "Compact: smallest documents, images re-encoded",
 			FileOptimize{Strategy: FileStrategyDownsample, ImageDPI: 110, JPEGQuality: 60, Linearize: true, MinSavingsPercent: 5},
-			FileThumb{Enabled: true, MaxSide: 480, MaxBytes: 12 << 10}),
-		f(ModeSlug("file", ModeBalanced), "Balanced: PDF images at 150 dpi / JPEG 75, linearized; thumbnail ≤ 20 KB",
+			FileThumb{Enabled: true, MaxSide: 480, MaxBytes: 12 << 10, Formats: defaultDerived}),
+		f(ModeSlug("file", ModeBalanced), "Balanced: the golden middle",
 			FileOptimize{Strategy: FileStrategyDownsample, ImageDPI: 150, JPEGQuality: 75, Linearize: true, MinSavingsPercent: 5},
-			FileThumb{Enabled: true, MaxSide: 640, MaxBytes: 20 << 10}),
-		f(ModeSlug("file", ModeQuality), "Quality: lossless PDF recompression (no visible change), linearized; thumbnail ≤ 30 KB",
+			FileThumb{Enabled: true, MaxSide: 640, MaxBytes: 20 << 10, Formats: defaultDerived}),
+		f(ModeSlug("file", ModeQuality), "Quality: lossless recompression, no visible change",
 			FileOptimize{Strategy: FileStrategyLossless, Linearize: true, MinSavingsPercent: 3},
-			FileThumb{Enabled: true, MaxSide: 800, MaxBytes: 30 << 10}),
-		f("file-original", "Documents stored exactly as uploaded (validated by content); PDF thumbnail ≤ 20 KB",
-			FileOptimize{Strategy: FileStrategyNone}, FileThumb{Enabled: true, MaxSide: 640, MaxBytes: 20 << 10}),
+			FileThumb{Enabled: true, MaxSide: 800, MaxBytes: 30 << 10, Formats: defaultDerived}),
+		f("file-original", "Documents stored exactly as uploaded",
+			FileOptimize{Strategy: FileStrategyNone}, FileThumb{Enabled: true, MaxSide: 640, MaxBytes: 20 << 10, Formats: defaultDerived}),
 	}
 }

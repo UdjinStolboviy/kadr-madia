@@ -23,9 +23,15 @@ export interface PresetFact {
 }
 
 export interface PresetSummary {
-  /** One-line summary, e.g. "AVIF + WebP · ≤ 20 KB · max 800px · sharpen light". */
+  /** One-line summary, e.g. "AVIF · ≤ 20 KB · max 800px · sharpen light". */
   headline: string;
   facts: PresetFact[];
+}
+
+/** Poster / document thumbnail encodings; the server stores AVIF + WebP when the list is empty. */
+function derivedFormats(v: unknown): string {
+  const list = Array.isArray(v) ? v.filter((f): f is string => typeof f === "string") : [];
+  return (list.length ? list : ["avif", "webp"]).map((f) => (f === "webp" ? "WebP" : f.toUpperCase())).join(" + ");
 }
 
 function sharpenLabel(s: Obj | null): string | null {
@@ -171,10 +177,11 @@ function videoSummary(p: Obj): PresetSummary {
   const poster = obj(p.poster);
   if (poster) {
     const mb = num(poster.maxBytes);
-    if (mb) parts.push(t("common.preset.posterHeadline", { size: formatBytes(mb) }));
+    const pf = derivedFormats(poster.formats);
+    if (mb) parts.push(`${t("common.preset.posterHeadline", { size: formatBytes(mb) })} ${pf}`);
     facts.push({
       label: t("common.preset.poster"),
-      value: [num(poster.atSec) !== null && t("common.preset.posterAt", { sec: String(poster.atSec) }), str(poster.preset), mb && `≤ ${formatBytes(mb)}`]
+      value: [num(poster.atSec) !== null && t("common.preset.posterAt", { sec: String(poster.atSec) }), str(poster.preset), mb && `≤ ${formatBytes(mb)}`, pf]
         .filter(Boolean)
         .join(" · "),
     });
@@ -215,10 +222,11 @@ function fileSummary(p: Obj): PresetSummary {
   const th = obj(p.thumbnail);
   if (th) {
     const on = th.enabled === true;
+    const tf = derivedFormats(th.formats);
     const value = on
-      ? [num(th.maxBytes) !== null && `≤ ${formatBytes(num(th.maxBytes))}`, num(th.maxSide) !== null && `≤ ${th.maxSide}px`].filter(Boolean).join(" · ")
+      ? [num(th.maxBytes) !== null && `≤ ${formatBytes(num(th.maxBytes))}`, num(th.maxSide) !== null && `≤ ${th.maxSide}px`, tf].filter(Boolean).join(" · ")
       : t("common.preset.fileThumbOff");
-    parts.push(on ? t("common.preset.fileThumbHeadline", { size: formatBytes(num(th.maxBytes)) }) : t("common.preset.fileThumbOff"));
+    parts.push(on ? `${t("common.preset.fileThumbHeadline", { size: formatBytes(num(th.maxBytes)) })} ${tf}` : t("common.preset.fileThumbOff"));
     facts.push({ label: t("common.preset.fileThumb"), value });
   }
   const lim = obj(p.limits);

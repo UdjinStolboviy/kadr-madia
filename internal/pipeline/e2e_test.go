@@ -378,7 +378,7 @@ func TestUploadTicketEndToEnd(t *testing.T) {
 		t.Fatalf("placeholder: %v", ph)
 	}
 	rends := a["renditions"].([]any)
-	if len(rends) != 2 {
+	if len(rends) != 1 || rends[0].(map[string]any)["format"] != "avif" { // default presets: AVIF only
 		t.Fatalf("renditions: %v", rends)
 	}
 	total := renditionsTotal(a)

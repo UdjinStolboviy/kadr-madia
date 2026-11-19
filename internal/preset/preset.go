@@ -184,22 +184,28 @@ func ptr[T any](v T) *T { return &v }
 
 var (
 	defaultImageLimits = ImageLimits{MaxInputBytes: 25 << 20, MaxInputPixels: 40_000_000, Accept: []string{"jpeg", "png", "webp", "heic", "avif", "gif"}}
-	defaultOutputs     = []ImageOutput{
+	// AVIF only: every current browser decodes it, and one file per rendition
+	// halves storage. Add a {Format: "webp"} output to a preset for a fallback.
+	defaultOutputs = []ImageOutput{
 		{Name: "main", Format: "avif", Effort: 4, Chroma: "4:2:0"},
-		{Name: "main", Format: "webp", SmartSubsample: true},
 	}
+	// Posters and document thumbnails of the default presets: AVIF only.
+	defaultDerived     = []string{"avif"}
 	defaultVideoLimits = VideoLimits{MaxInputBytes: 2 << 30, MaxDurationSec: 300, MaxWidth: 4096, MaxHeight: 4096}
 	defaultAudio       = AudioCodec{Codec: "aac", Bitrate: "64k", Channels: 1, SampleRate: 44100}
 	defaultContainer   = Container{Format: "mp4", Faststart: true}
 )
 
 // DefaultPresets returns the standard presets from docs/PIPELINES.md §1.
+// Descriptions say what a preset is for, never its parameters: parameters
+// change with new versions while the description stays, and the admin console
+// renders the technical summary from the params of the current version.
 func DefaultPresets() []DefaultPreset {
 	items := []struct {
 		slug, kind, desc string
 		params           any
 	}{
-		{"photo-lite", "image", "Cards, inventory, thumbnails: max side 800, ≤ 20 KB, AVIF + WebP", ImageParams{
+		{"photo-lite", "image", "Cards, inventory, thumbnails", ImageParams{
 			Kind:        "image",
 			Resize:      Resize{MaxWidth: 800, MaxHeight: 800, Fit: "inside"},
 			Sharpen:     &Sharpen{Sigma: 0.6, M1: 0.5, M2: 1.5},
@@ -208,7 +214,7 @@ func DefaultPresets() []DefaultPreset {
 			Placeholder: Placeholder{ThumbHash: true, DominantColor: true},
 			Limits:      defaultImageLimits,
 		}},
-		{"photo-balanced", "image", "Full-screen viewing: max side 1440, SSIM target, AVIF + WebP", ImageParams{
+		{"photo-balanced", "image", "Full-screen viewing", ImageParams{
 			Kind:        "image",
 			Resize:      Resize{MaxWidth: 1440, MaxHeight: 1440, Fit: "inside"},
 			Outputs:     defaultOutputs,
@@ -216,7 +222,7 @@ func DefaultPresets() []DefaultPreset {
 			Placeholder: Placeholder{ThumbHash: true, DominantColor: true},
 			Limits:      defaultImageLimits,
 		}},
-		{"doc-lite", "image", "Receipts, contracts, labels: grayscale + normalise, max side 1100, ≤ 20 KB", ImageParams{
+		{"doc-lite", "image", "Receipts, contracts, labels", ImageParams{
 			Kind:        "image",
 			Resize:      Resize{MaxWidth: 1100, MaxHeight: 1100, Fit: "inside"},
 			Color:       Color{Grayscale: true, Normalise: true},
@@ -226,7 +232,7 @@ func DefaultPresets() []DefaultPreset {
 			Placeholder: Placeholder{ThumbHash: false, DominantColor: false},
 			Limits:      defaultImageLimits,
 		}},
-		{"avatar", "image", "Avatars: smart crop 1:1 (attention), 256 px, ≤ 8 KB", ImageParams{
+		{"avatar", "image", "Avatars and profile pictures", ImageParams{
 			Kind:        "image",
 			Resize:      Resize{MaxWidth: 256, MaxHeight: 256, Fit: "cover", Crop: ptr("attention"), Aspect: ptr("1:1")},
 			Sharpen:     &Sharpen{Sigma: 0.5, M1: 0.5, M2: 1.5},
@@ -235,20 +241,20 @@ func DefaultPresets() []DefaultPreset {
 			Placeholder: Placeholder{ThumbHash: true, DominantColor: true},
 			Limits:      defaultImageLimits,
 		}},
-		{"video-720p", "video", "Regular clips: H.264 CRF 26, maxrate 900k, 30 fps, AAC 64k mono, poster ≤ 15 KB", VideoParams{
+		{"video-720p", "video", "Regular clips", VideoParams{
 			Kind:      "video",
 			Video:     VideoCodec{Codec: "h264", MaxWidth: 1280, FPS: 30, CRF: 26, Maxrate: "900k", Bufsize: "1800k", Preset: "slow", HW: "auto"},
 			Audio:     defaultAudio,
 			Container: defaultContainer,
-			Poster:    Poster{AtSec: 1.0, Preset: "photo-lite", MaxBytes: 15360},
+			Poster:    Poster{AtSec: 1.0, Preset: "photo-lite", MaxBytes: 15360, Formats: defaultDerived},
 			Limits:    defaultVideoLimits,
 		}},
-		{"video-480p-eco", "video", "Economy: H.264 CRF 28, maxrate 500k, 854 px", VideoParams{
+		{"video-480p-eco", "video", "Economy clips", VideoParams{
 			Kind:      "video",
 			Video:     VideoCodec{Codec: "h264", MaxWidth: 854, FPS: 30, CRF: 28, Maxrate: "500k", Bufsize: "1000k", Preset: "slow", HW: "auto"},
 			Audio:     AudioCodec{Codec: "aac", Bitrate: "48k", Channels: 1, SampleRate: 44100},
 			Container: defaultContainer,
-			Poster:    Poster{AtSec: 1.0, Preset: "photo-lite", MaxBytes: 15360},
+			Poster:    Poster{AtSec: 1.0, Preset: "photo-lite", MaxBytes: 15360, Formats: defaultDerived},
 			Limits:    defaultVideoLimits,
 		}},
 	}

@@ -39,7 +39,7 @@ const agentGuide = `# Working with Kadr as an AI agent
 
 ## Model
 - Project: a tenant (one product/environment). Assets belong to a project and a namespace (end user or org).
-- Preset: immutable, versioned processing parameters (image: resize, outputs avif/webp, quality mode budget|fixed|ssim with maxBytes; video: H.264 ladder, poster; file: PDF optimisation, thumbnail).
+- Preset: immutable, versioned processing parameters (image: resize, outputs (AVIF only by default, optional WebP), quality mode budget|fixed|ssim with maxBytes; video: codec h264|av1, CRF and maxrate cap, poster with formats; file: PDF optimisation, thumbnail with formats). A preset description states its purpose only; read the parameters from the current version.
 - Compression modes: compact | balanced | quality — per-project defaults mapping to presets.
 - Renditions: the stored outputs. Originals are not kept by default.
 - Kadr is not on the read path: public files are served by the CDN, private ones by the kadr-edge Worker with signed URLs.

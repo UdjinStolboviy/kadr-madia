@@ -110,7 +110,7 @@ Project (acme, acme-staging, shop, crm…)
  └── Namespace[]         opaque ID from the product (orgId / householdId / userId), quotas
       └── Asset          logical file: visibility, metadata, status
            └── Blob      physical processing result (dedup by sha256 + preset version)
-                └── Rendition[]   avif/webp/mp4/poster: key, bytes, width, height
+                └── Rendition[]   avif (+ optional webp)/mp4/poster/thumb: key, bytes, width, height
 ```
 
 **Asset ≠ Blob.** The same file uploaded twice within `(project, visibility, preset_version)` yields two Assets and one Blob (refcounted). Deleting an Asset decrements the refcount; GC deletes the Blob and its R2 objects when the refcount reaches 0.
@@ -162,7 +162,7 @@ sequenceDiagram
 
 ### 5.2 Public delivery
 
-`https://cdn.<domain>/{project}/{kind}/{yyyy}/{mm}/{blobId}/{file}` (DATA_MODEL.md §R2 object keys) — R2 Custom Domain, Cloudflare cache, `immutable`. The SDK renders `<picture>` with AVIF and WebP, so no Worker is needed on the public path (no Worker invocation cost).
+`https://cdn.<domain>/{project}/{kind}/{yyyy}/{mm}/{blobId}/{file}` (DATA_MODEL.md §R2 object keys) — R2 Custom Domain, Cloudflare cache, `immutable`. The SDK renders `<picture>` with AVIF (and WebP when a preset stores it), so no Worker is needed on the public path (no Worker invocation cost).
 
 ### 5.3 Private delivery
 

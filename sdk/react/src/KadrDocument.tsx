@@ -4,7 +4,7 @@ import { KadrImage } from "./KadrImage.js";
 import type { KadrAssetLike, KadrRendition, ResolveUrl } from "./types.js";
 
 export interface KadrDocumentProps extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href" | "children"> {
-  /** A document asset (`kind: "file"`): a `main` rendition (pdf, docx, …) and optionally a `thumb` (avif/webp). */
+  /** A document asset (`kind: "file"`): a `main` rendition (pdf, docx, …) and optionally a `thumb` (AVIF, or the formats the preset lists). */
   asset: KadrAssetLike;
   /** Shown next to the thumbnail; also the suggested download name. */
   filename?: string;

@@ -155,7 +155,7 @@ func TestDocumentPipelineWithRealEngines(t *testing.T) {
 	if mainBytes == 0 || mainBytes > float64(len(data))/5 {
 		t.Fatalf("main file %v bytes of %d: not optimised", mainBytes, len(data))
 	}
-	if thumbs != 2 {
+	if thumbs != 1 { // default presets: AVIF-only thumbnail
 		t.Fatalf("thumb renditions = %d", thumbs)
 	}
 	if a["placeholder"] == nil {

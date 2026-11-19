@@ -2,7 +2,7 @@
 
 React components for **Kadr** assets. `react` (>= 18) is a peer dependency.
 
-- `<KadrImage>`: `<picture>` with AVIF and WebP sources, `width`/`height` and an `aspect-ratio` wrapper (no layout shift), lazy loading, and a ThumbHash placeholder decoded to a PNG data URL and blurred until the image loads
+- `<KadrImage>`: `<picture>` with the stored formats as sources (AVIF; WebP too when the preset stores it), `width`/`height` and an `aspect-ratio` wrapper (no layout shift), lazy loading, and a ThumbHash placeholder decoded to a PNG data URL and blurred until the image loads
 - `<KadrVideo>`: `<video>` with mp4 sources and a poster; falls back to the ThumbHash as the poster
 - A small dependency-free ThumbHash decoder (port of the reference algorithm; reads the base64 hash from `asset.placeholder.thumbhash`)
 - Works with SSR (no canvas, no effects needed to render the placeholder)

@@ -66,7 +66,7 @@ func TestVideoUploadEndToEnd(t *testing.T) {
 			poster++
 		}
 	}
-	if mp4 != 1 || poster != 2 {
+	if mp4 != 1 || poster != 1 { // default presets: AVIF-only poster
 		t.Fatalf("renditions: %s", r.body)
 	}
 	if a["placeholder"] == nil {

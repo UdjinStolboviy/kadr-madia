@@ -20,7 +20,7 @@ Every product reinvents uploads, compression, previews, private links and garbag
 | Capability | How |
 |---|---|
 | **Direct-to-R2 uploads** | The browser uploads straight to R2 via presigned PUT / S3 Multipart. Zero media bytes pass through the tunnel or product APIs. |
-| **Byte-budget compression** | Photos ≤ 20 KB (AVIF + WebP) with a quality/size search to hit the budget; PHOTO, DOCUMENT and BALANCED profiles. |
+| **Byte-budget compression** | Photos ≤ 20 KB as one AVIF file (WebP fallback optional) with a quality/size search to hit the budget; PHOTO, DOCUMENT and BALANCED profiles. |
 | **Video** | H.264 MP4 +faststart, CRF + bitrate ceiling, ≤ 15 KB poster, ThumbHash, VAAPI hardware encoding when an iGPU is present. |
 | **Public and private** | Two physically separate buckets. Public files get permanent CDN URLs; private files get signed URLs verified by an edge Worker. |
 | **Multi-tenancy** | Projects → namespaces (org/user) → assets. Keys, quotas, presets and webhooks are per project. |

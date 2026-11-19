@@ -78,28 +78,27 @@ func modePresets() []struct {
 	vid := func(mode, desc string, v VideoCodec, a AudioCodec) item {
 		return item{ModeSlug("video", mode), "video", desc, VideoParams{
 			Kind: "video", Video: v, Audio: a, Container: defaultContainer,
-			Poster: Poster{AtSec: 1.0, Preset: "photo-lite", MaxBytes: 15360}, Limits: defaultVideoLimits,
+			Poster: Poster{AtSec: 1.0, Preset: "photo-lite", MaxBytes: 15360, Formats: defaultDerived}, Limits: defaultVideoLimits,
 		}}
 	}
 	hq := []ImageOutput{
 		{Name: "main", Format: "avif", Effort: 4, Chroma: "4:4:4"},
-		{Name: "main", Format: "webp", SmartSubsample: false},
 	}
 	return []item{
-		img(ModeCompact, "Compact: good quality at a very small size (max side 1080, ≤ 30 KB)", 1080,
+		img(ModeCompact, "Compact: good quality at a very small size", 1080,
 			Quality{Mode: "budget", MaxBytes: 30 << 10, QMax: 55, QMin: 25, DownscaleStep: 0.85, MinSide: 480},
 			defaultOutputs, &Sharpen{Sigma: 0.6, M1: 0.5, M2: 1.5}),
-		img(ModeBalanced, "Balanced: the golden middle (max side 1440, SSIM ≥ 0.975)", 1440,
+		img(ModeBalanced, "Balanced: the golden middle", 1440,
 			Quality{Mode: "ssim", Target: 0.975, QMin: 35, QMax: 65}, defaultOutputs, nil),
-		img(ModeQuality, "Quality: ideal quality at the smallest size that achieves it (max side 2048, SSIM ≥ 0.99, 4:4:4)", 2048,
+		img(ModeQuality, "Quality: ideal quality at the smallest size that achieves it", 2048,
 			Quality{Mode: "ssim", Target: 0.99, QMin: 45, QMax: 85}, hq, nil),
-		vid(ModeCompact, "Compact: 480p H.264 CRF 30, ≤ 450 kbit/s, AAC 48k mono",
+		vid(ModeCompact, "Compact: good quality at a very small size",
 			VideoCodec{Codec: "h264", MaxWidth: 854, FPS: 30, CRF: 30, Maxrate: "450k", Bufsize: "900k", Preset: "slow", HW: "auto"},
 			AudioCodec{Codec: "aac", Bitrate: "48k", Channels: 1, SampleRate: 44100}),
-		vid(ModeBalanced, "Balanced: 720p H.264 CRF 26, ≤ 1.2 Mbit/s, AAC 96k stereo",
+		vid(ModeBalanced, "Balanced: the golden middle",
 			VideoCodec{Codec: "h264", MaxWidth: 1280, FPS: 30, CRF: 26, Maxrate: "1200k", Bufsize: "2400k", Preset: "slow", HW: "auto"},
 			AudioCodec{Codec: "aac", Bitrate: "96k", Channels: 2, SampleRate: 44100}),
-		vid(ModeQuality, "Quality: 1080p H.264 CRF 20, ≤ 5 Mbit/s, AAC 160k stereo",
+		vid(ModeQuality, "Quality: ideal quality at the smallest size that achieves it",
 			VideoCodec{Codec: "h264", MaxWidth: 1920, FPS: 30, CRF: 20, Maxrate: "5000k", Bufsize: "10000k", Preset: "slow", HW: "auto"},
 			AudioCodec{Codec: "aac", Bitrate: "160k", Channels: 2, SampleRate: 48000}),
 	}

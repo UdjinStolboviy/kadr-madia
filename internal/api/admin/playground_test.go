@@ -64,7 +64,7 @@ func TestPlaygroundHandler(t *testing.T) {
 			Data string
 		}
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || len(out.Renditions) != 2 || out.Renditions[0].SSIM != 0.97 || out.Renditions[0].Data == "" {
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || len(out.Renditions) != 1 || out.Renditions[0].SSIM != 0.97 || out.Renditions[0].Data == "" {
 		t.Fatalf("%v %s", err, rec.Body)
 	}
 	// Missing params → 422.

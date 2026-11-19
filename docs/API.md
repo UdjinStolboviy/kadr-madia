@@ -116,7 +116,7 @@ Scope `uploads:write`. For backend processes (scanners, imports): files ≤ 25 M
 
 ### Documents
 
-PDF, DOCX, XLSX, PPTX, ODT, ODS, ODP, RTF, TXT and CSV are accepted as assets of `kind: "file"` (see [PIPELINES.md §4](PIPELINES.md)). Use `"mode"` or a `file-*` preset (`file-original` stores as uploaded). The format is verified from the content; a mismatch fails the asset with `unsupported_media` / `corrupt`. The asset has a `main` rendition whose `format` is the document format (`pdf`, `docx`, …) and, for PDFs, a `thumb` rendition (avif + webp) plus `placeholder`. Documents are stored with `Content-Disposition: attachment`. Private documents are delivered with signed URLs (`rendition: "main"`, optional `download` file name).
+PDF, DOCX, XLSX, PPTX, ODT, ODS, ODP, RTF, TXT and CSV are accepted as assets of `kind: "file"` (see [PIPELINES.md §4](PIPELINES.md)). Use `"mode"` or a `file-*` preset (`file-original` stores as uploaded). The format is verified from the content; a mismatch fails the asset with `unsupported_media` / `corrupt`. The asset has a `main` rendition whose `format` is the document format (`pdf`, `docx`, …) and, for PDFs, a `thumb` rendition (AVIF in the default presets; `thumbnail.formats`) plus `placeholder`. Documents are stored with `Content-Disposition: attachment`. Private documents are delivered with signed URLs (`rendition: "main"`, optional `download` file name).
 
 ### Compression modes
 
@@ -147,8 +147,7 @@ The fetch is SSRF-safe: http/https only, no credentials in the URL, ports 80/443
   "preset_version": 3,
   "original": { "filename": "IMG_2231.HEIC", "content_type": "image/heic", "bytes": 4382110, "width": 4032, "height": 3024 },
   "renditions": [
-    { "name": "main", "format": "avif", "bytes": 19422, "width": 800, "height": 600, "url": "https://cdn.example.com/acme/image/2026/11/blb_01jd…/main-800x600.avif" },
-    { "name": "main", "format": "webp", "bytes": 20110, "width": 800, "height": 600, "url": "https://cdn.example.com/acme/image/2026/11/blb_01jd…/main-800x600.webp" }
+    { "name": "main", "format": "avif", "bytes": 19422, "width": 800, "height": 600, "url": "https://cdn.example.com/acme/image/2026/11/blb_01jd…/main-800x600.avif" }
   ],
   "placeholder": { "thumbhash": "1QcSHQRnh493V4dIh4eXh1h4kJUI", "dominant_color": "#a3866c" },
   "duration_sec": null,

@@ -85,7 +85,7 @@ const asset = await uploadFile(file, {
 });
 
 <KadrImage asset={asset} sizes="(max-width: 640px) 100vw, 400px" />
-// → <picture> with AVIF + WebP, ThumbHash placeholder while loading, width/height with no CLS
+// → <picture> with AVIF (plus WebP when the preset stores it), ThumbHash placeholder while loading, width/height with no CLS
 ```
 
 Without the SDK: `PUT` the file to `ticket.url` with exactly `ticket.headers`; for `MULTIPART` tickets upload each part and collect the `ETag` response headers.

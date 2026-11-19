@@ -6,14 +6,18 @@ A preset is a named set of processing parameters at the project level. Every cha
 
 ### Default presets (created for every new project)
 
-| slug | Kind | Purpose | Key parameters |
+| slug | Kind | Purpose | Key parameters (version 1) |
 |---|---|---|---|
-| `photo-lite` | image | Cards, inventory, thumbnails | max side 800, **≤ 20,480 B**, AVIF+WebP, light sharpen |
-| `photo-balanced` | image | Full-screen viewing | max side 1440, SSIM target, AVIF q≈52 + WebP |
-| `doc-lite` | image | Receipts, contracts, labels | grayscale + normalise, max side 1100, **≤ 20,480 B**, sharpen 0.85 |
-| `avatar` | image | Avatars | smart crop 1:1 (attention), 256 px, ≤ 8 KB |
-| `video-720p` | video | Regular clips | H.264 CRF 26, maxrate 900k, 30 fps, AAC 64k mono, poster ≤ 15 KB |
-| `video-480p-eco` | video | Economy | H.264 CRF 28, maxrate 500k, 854 px |
+| `photo-lite` | image | Cards, inventory, thumbnails | max side 800, **≤ 20,480 B**, AVIF, light sharpen |
+| `photo-balanced` | image | Full-screen viewing | max side 1440, SSIM target 0.985, AVIF |
+| `doc-lite` | image | Receipts, contracts, labels | grayscale + normalise, max side 1100, **≤ 20,480 B**, sharpen 0.85, AVIF |
+| `avatar` | image | Avatars and profile pictures | smart crop 1:1 (attention), 256 px, ≤ 8 KB, AVIF |
+| `video-720p` | video | Regular clips | H.264 CRF 26, maxrate 900k, 30 fps, AAC 64k mono, poster ≤ 15 KB AVIF |
+| `video-480p-eco` | video | Economy clips | H.264 CRF 28, maxrate 500k, 854 px, poster ≤ 15 KB AVIF |
+
+Default presets store **one AVIF file per rendition** (posters and document thumbnails too); add a `webp` output when a product needs a fallback. Video defaults to H.264 because it plays everywhere and encodes on any host; switch a preset to `"codec": "av1"` for 30–50 % smaller files where clients support it (§2, AV1).
+
+**Description vs parameters.** A preset's `description` says what it is for ("Cards, inventory, thumbnails") and never lists parameters: parameters change with every new version while the description stays, so a description with numbers goes stale. The admin console shows the technical summary computed from the current version's params.
 
 ### Parameter schema (`params_json`)
 
@@ -58,14 +62,14 @@ flowchart LR
   D --> E[grayscale + normalise?]
   E --> F[sharpen]
   F --> G[intermediate .v file]
-  G --> H[budget encoding<br/>AVIF and WebP]
+  G --> H[budget encoding<br/>per output: AVIF, optional WebP]
   G --> I[100px → ThumbHash<br/>+ dominant color]
   H --> J[PUT renditions to R2]
   I --> K[Blob metadata]
   J --> K --> L[asset.ready]
 ```
 
-**Why two files (`main.avif` and `main.webp`) per image:** they are not duplicates but two encodings of the same rendition. AVIF is ~20–30 % smaller; WebP is the fallback for clients without AVIF (older Safari/iOS < 16, some in-app browsers, e-mail clients). Serve them with `<picture><source type="image/avif" srcset="…main.avif"><img src="…main.webp"></picture>`. Both are byte-budgeted, so the pair typically costs ~2× a few KB. If every client of a product supports AVIF, remove the `webp` output from the preset (preset editor → outputs) and only `main.avif` is stored; likewise a WebP-only preset is valid. Video posters and document thumbnails follow the same rule (`poster.avif` + `poster.webp`, `thumb.avif` + `thumb.webp`); choose their encodings with `poster.formats` / `thumbnail.formats` (`["avif"]`, `["webp"]`, or unset for both). The asset's `poster` field is the poster rendition (AVIF when present).
+**One file or two per image:** every `outputs` entry is one stored file of the same rendition. The default presets have a single AVIF output, so an image is stored once (`main-800x600.avif`). Add a `webp` output for clients without AVIF (Safari/iOS < 16, some in-app browsers, e-mail clients): Kadr then also stores `main-800x600.webp`, which is not a duplicate but a second encoding, byte-budgeted like the first, and the SDK serves both with `<picture>`. A WebP-only preset is valid as well. Video posters and document thumbnails are chosen with `poster.formats` / `thumbnail.formats`: `["avif"]` (the defaults), `["webp"]`, `["avif","webp"]`; a preset that does not list them (presets created before this setting) stores both. The asset's `poster` field is the poster rendition (AVIF when present).
 
 **Why an intermediate `.v`:** decoding and resizing (the expensive part) happen once; encoding at different qualities works on an already small raster and takes tens of milliseconds.
 
@@ -98,9 +102,11 @@ Three ready-made trade-offs for **images and videos**, seeded into every project
 
 | Mode | Idea | Image | Video |
 |---|---|---|---|
-| `compact` | good quality, very small | max side 1080, byte budget ≤ 30 KB, AVIF q25–55 + WebP | 480p (854 px), CRF 30, ≤ 450 kbit/s, AAC 48k mono |
-| `balanced` | the golden middle (default) | max side 1440, SSIM target 0.975 within q35–65, AVIF + WebP | 720p, CRF 26, ≤ 1.2 Mbit/s, AAC 96k stereo |
-| `quality` | ideal quality at the smallest size that achieves it | max side 2048, SSIM target 0.99 within q45–85, AVIF 4:4:4 + WebP | 1080p, CRF 20, ≤ 5 Mbit/s, AAC 160k stereo |
+| `compact` | good quality, very small | max side 1080, byte budget ≤ 30 KB, AVIF q25–55 | 480p (854 px), H.264 CRF 30, ≤ 450 kbit/s, AAC 48k mono |
+| `balanced` | the golden middle (default) | max side 1440, SSIM target 0.975 within q35–65, AVIF | 720p, H.264 CRF 26, ≤ 1.2 Mbit/s, AAC 96k stereo |
+| `quality` | ideal quality at the smallest size that achieves it | max side 2048, SSIM target 0.99 within q45–85, AVIF 4:4:4 | 1080p, H.264 CRF 20, ≤ 5 Mbit/s, AAC 160k stereo |
+
+Video posters of the mode presets are ≤ 15 KB AVIF.
 
 On the reference photo the three image modes produce ≈ 24 KB / 96 KB / 350 KB; the video modes on synthetic noisy 1080p ≈ 0.17 / 0.6 / 2.5 MB (tests `TestCompressionModesAreOrdered`, `TestVideoModesAreOrdered`). `quality` uses the SSIM search, so it stops at the lowest quality that still reaches the target instead of always using the maximum.
 
@@ -217,7 +223,7 @@ Accepted formats: **PDF, DOCX, XLSX, PPTX, ODT, ODS, ODP, RTF, TXT, CSV** (a pre
 
 DOCX/XLSX/PPTX/ODF are ZIP containers already; they are stored unchanged (rewriting them risks corrupting documents for a few percent).
 
-**Thumbnail:** page 1 of the PDF is rendered by Ghostscript and compressed by the image budget search (AVIF + WebP, rendition name `thumb`, ThumbHash and dominant colour included).
+**Thumbnail:** page 1 of the PDF is rendered by Ghostscript and compressed by the image budget search (formats from `thumbnail.formats`, AVIF in the default presets; rendition name `thumb`, ThumbHash and dominant colour included).
 
 **Storage and delivery:** the document is the rendition `main` with `format` = `pdf`/`docx`/…; it is stored with its real `Content-Type` and `Content-Disposition: attachment; filename="…"; filename*=UTF-8''…`, so a document is downloaded, never rendered inline from the CDN origin (add a Transform Rule with `X-Content-Type-Options: nosniff` on `cdn.<domain>`; `kadr-edge` already sets it and honours the stored disposition, or `download` per URL). Dedup by SHA-256, quotas, public/private, visibility change, signed URLs and imports work like for media. Limits: 100 MB default (`limits.maxInputBytes`, max 5 GB); files over 64 MB use multipart tickets like videos; ClamAV scanning is not built in.
 
