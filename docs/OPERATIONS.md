@@ -124,6 +124,17 @@ Migrations are forward-only and backward compatible with the previous version (e
    - the delivery listener of Kadr published through the tunnel (§7.1) — no Worker.
 7. Billing alert at $5.
 
+### 7.0 Private files straight from the bucket (recommended, no Worker, no tunnel)
+
+Clients read private objects directly from R2 with S3 presigned GETs; nothing is proxied (ADR 0018).
+
+1. R2 → Manage API tokens → create a token with **Object Read only**, limited to the private bucket. Give it to the product backend (e.g. `KADR_R2_ENDPOINT`, `KADR_R2_PRIVATE_BUCKET`, `KADR_R2_READ_ACCESS_KEY_ID`, `KADR_R2_READ_SECRET_ACCESS_KEY`) and sign locally with `presignGet` from `@kadr/node` — synchronous, no request to Kadr.
+2. Or call `POST /v1/signed-urls` (Kadr presigns with the profile's credentials) after clearing `private_base_url` on the storage profile and `KADR_EDGE_BASE_URL`.
+3. Private bucket CORS: add `GET` to `AllowedMethods` if the frontend reads private files with `fetch`/XHR (`<img>`, `<video>` and download links need no CORS).
+4. Check: the URL opens (200), `Range: bytes=0-99` → 206, a changed `X-Amz-Signature` → 403.
+
+Trade-offs: URLs are on `<account>.r2.cloudflarestorage.com` (R2 presigned URLs do not work on custom domains), there is no edge cache (each miss is an R2 Class B read; 10 M/month free), URLs live at most 7 days, revocation is per token, and private HLS is not possible (use the MP4 rendition, or a delivery host).
+
 ### 7.1 Private delivery without a Worker (origin mode)
 
 Kadr can verify signed URLs and stream private objects itself (ADR 0017). One listener serves every project: the `kid` names the project, the project's storage profile names the bucket, and only keys under `{project_slug}/` are served.

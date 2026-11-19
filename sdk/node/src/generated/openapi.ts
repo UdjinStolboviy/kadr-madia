@@ -174,11 +174,14 @@ export interface paths {
         /**
          * Sign private rendition URLs
          * @description Returns time-limited URLs for renditions of ready **private** assets,
-         *     signed with the project's active signing key and verified by kadr-edge.
-         *     Equivalent to `signUrl` in the SDK, without holding the secret.
+         *     signed with the project's active signing key for the private delivery
+         *     host (kadr-edge or the delivery listener). Without a delivery host the
+         *     URLs are S3 presigned GETs on the bucket itself (direct reads, no
+         *     signing key; stable within min(ttl, 1h)).
          *
          *     Scope: `urls:sign`. `409 no_signing_key` until a key is created in the
-         *     admin console; `503 signing_unavailable` when `KADR_EDGE_BASE_URL` is unset.
+         *     admin console (delivery-host mode); `409 hls_requires_delivery_host` for
+         *     HLS without a delivery host.
          */
         post: operations["signUrls"];
         delete?: never;

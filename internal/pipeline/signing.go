@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/UdjinStolboviy/kadr-madia/internal/db"
+	"github.com/UdjinStolboviy/kadr-madia/internal/delivery"
+	"github.com/UdjinStolboviy/kadr-madia/internal/storage"
 )
 
 // Limits of signed URLs.
@@ -65,14 +67,21 @@ func (s *Service) SignURLs(ctx context.Context, projectID string, items []SignIt
 	}
 	// The private delivery host belongs to the project's storage profile
 	// (one kadr-edge per Cloudflare account); KADR_EDGE_BASE_URL is the default.
+	// Without one, clients read straight from the bucket with presigned URLs.
 	edgeBase := s.edgeBaseURL
-	if project, err := s.store.GetProject(ctx, projectID); err != nil {
+	project, err := s.store.GetProject(ctx, projectID)
+	if err != nil {
 		return nil, err
-	} else if tgt, err := s.storageFor(ctx, project); err == nil && tgt.profile.PrivateBaseURL != nil && *tgt.profile.PrivateBaseURL != "" {
+	}
+	tgt, terr := s.storageFor(ctx, project)
+	if terr == nil && tgt.profile.PrivateBaseURL != nil && *tgt.profile.PrivateBaseURL != "" {
 		edgeBase = *tgt.profile.PrivateBaseURL
 	}
 	if edgeBase == "" {
-		return nil, apiErr(http.StatusServiceUnavailable, "signing_unavailable", "no private delivery URL: set private_base_url on the project's storage profile or KADR_EDGE_BASE_URL")
+		if terr != nil {
+			return nil, terr
+		}
+		return s.presignDirect(ctx, projectID, tgt, items)
 	}
 	k, err := s.store.GetActiveSigningKey(ctx, projectID)
 	if errors.Is(err, db.ErrNotFound) {
@@ -87,34 +96,9 @@ func (s *Service) SignURLs(ctx context.Context, projectID string, items []SignIt
 	}
 	out := make([]SignedURL, len(items))
 	for i, it := range items {
-		a, err := s.loadAsset(ctx, projectID, it.AssetID)
+		key, prefixMode, ttl, err := s.signableKey(ctx, projectID, it)
 		if err != nil {
 			return nil, err
-		}
-		if a.Visibility != "private" || a.BlobID == nil || a.Status != db.AssetReady {
-			return nil, apiErr(http.StatusConflict, "not_signable", "asset %s is not a ready private asset", it.AssetID)
-		}
-		ttl := time.Duration(it.TTL) * time.Second
-		if it.TTL == 0 {
-			ttl = DefaultSignTTL
-		}
-		if ttl < 0 || ttl > MaxSignTTL {
-			return nil, validationErr(map[string]string{"ttl": "must be between 1 second and 7 days"})
-		}
-		rs, err := s.store.ListRenditions(ctx, *a.BlobID)
-		if err != nil {
-			return nil, err
-		}
-		var key string
-		prefixMode := false // HLS playlists: one signature covers the whole package directory
-		for _, r := range rs {
-			if it.Rendition == "" || it.Rendition == r.Name || it.Rendition == r.Name+"."+r.Format {
-				key, prefixMode = r.StorageKey, r.Format == hlsRenditionFormat
-				break
-			}
-		}
-		if key == "" {
-			return nil, apiErr(http.StatusNotFound, CodeNotFound, "asset %s has no rendition %q", it.AssetID, it.Rendition)
 		}
 		exp := s.now().Add(ttl).Unix()
 		u := strings.TrimRight(edgeBase, "/") + "/" + escapeKey(key) + "?exp=" + strconv.FormatInt(exp, 10) +
@@ -128,6 +112,64 @@ func (s *Service) SignURLs(ctx context.Context, projectID string, items []SignIt
 			}
 		}
 		out[i] = SignedURL{URL: u, ExpiresAt: rfc3339(time.Unix(exp, 0))}
+	}
+	return out, nil
+}
+
+// signableKey resolves one item to the storage key of a ready private
+// rendition, whether it is an HLS package, and the validated TTL.
+func (s *Service) signableKey(ctx context.Context, projectID string, it SignItem) (key string, prefixMode bool, ttl time.Duration, err error) {
+	a, err := s.loadAsset(ctx, projectID, it.AssetID)
+	if err != nil {
+		return "", false, 0, err
+	}
+	if a.Visibility != "private" || a.BlobID == nil || a.Status != db.AssetReady {
+		return "", false, 0, apiErr(http.StatusConflict, "not_signable", "asset %s is not a ready private asset", it.AssetID)
+	}
+	ttl = time.Duration(it.TTL) * time.Second
+	if it.TTL == 0 {
+		ttl = DefaultSignTTL
+	}
+	if ttl < 0 || ttl > MaxSignTTL {
+		return "", false, 0, validationErr(map[string]string{"ttl": "must be between 1 second and 7 days"})
+	}
+	rs, err := s.store.ListRenditions(ctx, *a.BlobID)
+	if err != nil {
+		return "", false, 0, err
+	}
+	for _, r := range rs {
+		if it.Rendition == "" || it.Rendition == r.Name || it.Rendition == r.Name+"."+r.Format {
+			// HLS playlists: one signature covers the whole package directory.
+			return r.StorageKey, r.Format == hlsRenditionFormat, ttl, nil
+		}
+	}
+	return "", false, 0, apiErr(http.StatusNotFound, CodeNotFound, "asset %s has no rendition %q", it.AssetID, it.Rendition)
+}
+
+// presignDirect answers POST /v1/signed-urls with presigned GETs on the
+// storage provider itself (no delivery host): bytes never pass through Kadr
+// or a Worker. URLs are stable within a window of min(ttl, 1h) so caches hit.
+// HLS packages need a delivery host (each segment would need its own signature).
+func (s *Service) presignDirect(ctx context.Context, projectID string, tgt *target, items []SignItem) ([]SignedURL, error) {
+	out := make([]SignedURL, len(items))
+	for i, it := range items {
+		key, prefixMode, ttl, err := s.signableKey(ctx, projectID, it)
+		if err != nil {
+			return nil, err
+		}
+		if prefixMode {
+			return nil, apiErr(http.StatusConflict, "hls_requires_delivery_host",
+				"private HLS needs a delivery host (kadr-edge or KADR_DELIVERY_ADDR); sign the MP4 rendition instead")
+		}
+		o := storage.PresignGetOptions{TTL: ttl, StableWindow: min(ttl, time.Hour), Now: s.now()}
+		if it.Download != "" {
+			o.ContentDisposition = delivery.ContentDisposition(it.Download)
+		}
+		r, err := tgt.driver.PresignDownload(ctx, tgt.profile.PrivateBucket, key, o)
+		if err != nil {
+			return nil, apiErr(http.StatusBadGateway, CodeStorageError, "could not presign %s: %v", key, err)
+		}
+		out[i] = SignedURL{URL: r.URL, ExpiresAt: rfc3339(r.ExpiresAt)}
 	}
 	return out, nil
 }

@@ -113,3 +113,33 @@ func TestSignedURLsServedByOriginDelivery(t *testing.T) {
 		t.Fatalf("tampered: %d", resp.StatusCode)
 	}
 }
+
+// Without a delivery host the API presigns a direct read on the bucket: no
+// signing key is needed and the bytes never pass through Kadr.
+func TestSignedURLsDirectPresign(t *testing.T) {
+	e := newEnv(t, func(c *pipeline.Config) { c.EdgeBaseURL = "" })
+	a := e.upload(photo("priv-direct"), "org_d", "private")
+	sign := func() map[string]any {
+		r := e.call("POST", "/v1/signed-urls", map[string]any{"items": []map[string]any{{"asset_id": a["id"], "rendition": "main.avif", "ttl": 600, "download": "фото.avif"}}}, nil)
+		expect(t, r, 200, "")
+		return r.obj(t)["items"].([]any)[0].(map[string]any)
+	}
+	item := sign()
+	u, _ := url.Parse(item["url"].(string))
+	q := u.Query()
+	if !strings.HasPrefix(u.Path, "/kadr-private/acme/image/") || q.Get("X-Amz-Signature") == "" || q.Get("X-Amz-Expires") != "1200" ||
+		!strings.Contains(q.Get("response-content-disposition"), "filename*=UTF-8''%D1%84%D0%BE%D1%82%D0%BE.avif") {
+		t.Fatalf("direct url: %s", item["url"])
+	}
+	resp, err := http.Get(item["url"].(string))
+	must(t, err)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || len(body) == 0 {
+		t.Fatalf("direct read: %d", resp.StatusCode)
+	}
+	// Stable within the window: the same URL is returned again.
+	if again := sign(); again["url"] != item["url"] {
+		t.Fatalf("not stable:\n%s\n%s", item["url"], again["url"])
+	}
+}

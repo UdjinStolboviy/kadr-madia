@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
@@ -217,6 +218,52 @@ func (d *S3) PresignGet(ctx context.Context, bucket, key string, ttl time.Durati
 		return PresignedRequest{}, fmt.Errorf("storage: presign get %s/%s: %w", bucket, key, err)
 	}
 	return toPresigned(req.Method, req.URL, req.SignedHeader, ttl), nil
+}
+
+// PresignDownload returns a presigned GET for direct reads by clients.
+func (d *S3) PresignDownload(ctx context.Context, bucket, key string, o PresignGetOptions) (PresignedRequest, error) {
+	now := o.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	ttl := o.TTL
+	if ttl <= 0 {
+		ttl = time.Hour
+	}
+	signAt, expires := now.UTC().Truncate(time.Second), ttl
+	if o.StableWindow > 0 {
+		// The same URL for the whole window: validity counts from the window
+		// start and covers the window, so the remaining time is always >= TTL.
+		signAt, expires = now.UTC().Truncate(o.StableWindow), ttl+o.StableWindow
+	}
+	if expires > MaxPresignTTL {
+		expires = MaxPresignTTL
+	}
+	expires = expires.Truncate(time.Second)
+	in := &s3.GetObjectInput{Bucket: &bucket, Key: &key}
+	if o.ContentDisposition != "" {
+		in.ResponseContentDisposition = aws.String(o.ContentDisposition)
+	}
+	pc := s3.NewPresignClient(d.client, func(po *s3.PresignOptions) {
+		po.Expires = expires
+		po.Presigner = fixedTimePresigner{inner: v4.NewSigner(func(so *v4.SignerOptions) { so.DisableURIPathEscaping = true }), at: signAt}
+	})
+	req, err := pc.PresignGetObject(ctx, in)
+	if err != nil {
+		return PresignedRequest{}, fmt.Errorf("storage: presign download %s/%s: %w", bucket, key, err)
+	}
+	return PresignedRequest{Method: req.Method, URL: req.URL, Headers: req.SignedHeader, ExpiresAt: signAt.Add(expires)}, nil
+}
+
+// fixedTimePresigner signs with a given time instead of the current one.
+type fixedTimePresigner struct {
+	inner *v4.Signer
+	at    time.Time
+}
+
+func (p fixedTimePresigner) PresignHTTP(ctx context.Context, c aws.Credentials, r *http.Request, payloadHash, service, region string,
+	_ time.Time, optFns ...func(*v4.SignerOptions)) (string, http.Header, error) {
+	return p.inner.PresignHTTP(ctx, c, r, payloadHash, service, region, p.at, optFns...)
 }
 
 // CreateMultipart starts a multipart upload.

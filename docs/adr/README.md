@@ -21,3 +21,4 @@ Format: Context → Decision → Consequences → Alternatives considered. Statu
 | [0015](0015-ai-operations.md) | AI operations: Claude moderation and scheduled agent runs | Accepted |
 | [0016](0016-storage-key-layout.md) | Descriptive, partitioned storage keys | Accepted |
 | [0017](0017-origin-delivery.md) | Private delivery from Kadr through a tunnel (no Worker) | Accepted |
+| [0018](0018-direct-presigned-reads.md) | Private files read directly from the bucket (presigned GET) | Accepted |

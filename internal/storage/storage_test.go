@@ -7,7 +7,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/johannesboyne/gofakes3"
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
@@ -187,5 +190,37 @@ func TestGetRange(t *testing.T) {
 	}
 	if _, _, err := d.GetRange(ctx, "priv", "missing", 0, 1); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing: %v", err)
+	}
+}
+
+func TestPresignDownloadStable(t *testing.T) {
+	ctx := context.Background()
+	_, d := newFake(t, "priv")
+	base := time.Date(2026, 11, 19, 10, 0, 0, 0, time.UTC)
+	opts := func(now time.Time) PresignGetOptions {
+		return PresignGetOptions{TTL: time.Hour, StableWindow: time.Hour, Now: now, ContentDisposition: `attachment; filename="a.pdf"`}
+	}
+	a, err := d.PresignDownload(ctx, "priv", "acme/x/main.pdf", opts(base.Add(5*time.Minute)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := d.PresignDownload(ctx, "priv", "acme/x/main.pdf", opts(base.Add(50*time.Minute)))
+	c, _ := d.PresignDownload(ctx, "priv", "acme/x/main.pdf", opts(base.Add(65*time.Minute)))
+	if a.URL != b.URL || a.URL == c.URL {
+		t.Fatalf("stability: same window equal=%v, next window differs=%v", a.URL == b.URL, a.URL != c.URL)
+	}
+	u, _ := url.Parse(a.URL)
+	q := u.Query()
+	if q.Get("X-Amz-Date") != "20261119T100000Z" || q.Get("X-Amz-Expires") != "7200" ||
+		q.Get("response-content-disposition") != `attachment; filename="a.pdf"` || !strings.HasSuffix(u.Path, "/priv/acme/x/main.pdf") {
+		t.Fatalf("url %s", a.URL)
+	}
+	// Remaining validity is never below the TTL inside a window.
+	if b.ExpiresAt.Sub(base.Add(50*time.Minute)) < time.Hour {
+		t.Fatalf("expires %v", b.ExpiresAt)
+	}
+	long, _ := d.PresignDownload(ctx, "priv", "k", PresignGetOptions{TTL: 30 * 24 * time.Hour, Now: base})
+	if lq, _ := url.Parse(long.URL); lq.Query().Get("X-Amz-Expires") != "604800" {
+		t.Fatalf("cap: %s", long.URL)
 	}
 }

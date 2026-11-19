@@ -189,7 +189,7 @@ The canonical form is specified in `sdk/node/README.md`. The `kadr-edge` Worker 
 
 ### Via the API (scope `urls:sign`)
 
-`POST /v1/signed-urls` `{ "items": [{ "asset_id": "ast_…", "rendition": "main.avif", "ttl": 3600, "download": "receipt.avif" }] }` → `{ "items": [{ "url": "…", "expires_at": "…" }] }` (1–100 items, ttl ≤ 7 days). Only ready **private** assets can be signed; `409 no_signing_key` until a key exists, `503 signing_unavailable` without a private delivery host: the project's storage profile `private_base_url` wins, `KADR_EDGE_BASE_URL` is the default.
+`POST /v1/signed-urls` `{ "items": [{ "asset_id": "ast_…", "rendition": "main.avif", "ttl": 3600, "download": "receipt.avif" }] }` → `{ "items": [{ "url": "…", "expires_at": "…" }] }` (1–100 items, ttl ≤ 7 days). Only ready **private** assets can be signed. With a private delivery host (the project's storage profile `private_base_url` wins, `KADR_EDGE_BASE_URL` is the default) URLs are HMAC-signed for kadr-edge or the delivery listener (`409 no_signing_key` until a key exists). **Without a delivery host** they are S3 presigned GETs on the bucket itself (`https://<account>.r2.cloudflarestorage.com/<bucket>/<key>?X-Amz-…`): browsers read straight from storage, no signing key is needed, `download` becomes `response-content-disposition`, and URLs stay identical within a window of `min(ttl, 1 h)` (valid `ttl + window` from the window start) so caches hit. Private HLS needs a delivery host (`409 hls_requires_delivery_host`). For local signing without calling Kadr see `presignGet` in the Node SDK.
 
 ## Namespaces and quotas
 

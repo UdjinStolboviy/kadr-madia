@@ -19,6 +19,8 @@ export type {
   VerifySignedUrlResult,
   VerifySignedUrlFailure,
 } from "./signing.js";
+export { presignGet, attachmentDisposition, MAX_PRESIGN_SECONDS } from "./presign.js";
+export type { PresignConfig, PresignGetOptions } from "./presign.js";
 export { Webhooks, verifyWebhook, signWebhook, WEBHOOK_TOLERANCE_SECONDS } from "./webhooks.js";
 export type {
   RawBody,

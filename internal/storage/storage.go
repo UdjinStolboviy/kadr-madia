@@ -58,6 +58,22 @@ type PresignPutOptions struct {
 	TTL           time.Duration
 }
 
+// PresignGetOptions shape a direct-download URL.
+type PresignGetOptions struct {
+	TTL time.Duration // minimal remaining validity; at most 7 days
+	// ContentDisposition overrides the response header (response-content-disposition).
+	ContentDisposition string
+	// StableWindow, when > 0, signs with the start of the current window as
+	// the signing time, so one object has the same URL for the whole window
+	// (browser and CDN caches hit); the URL is then valid for TTL + window
+	// from the window start, i.e. at least TTL from any moment in it.
+	StableWindow time.Duration
+	Now          time.Time // signing clock (tests); zero = time.Now()
+}
+
+// MaxPresignTTL is the SigV4 limit of a presigned URL.
+const MaxPresignTTL = 7 * 24 * time.Hour
+
 // PresignedRequest is a URL plus the headers the client must send.
 type PresignedRequest struct {
 	Method    string
@@ -95,6 +111,9 @@ type Driver interface {
 	Copy(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string, opts ...PutOptions) error
 	PresignPut(ctx context.Context, bucket, key string, opts PresignPutOptions) (PresignedRequest, error)
 	PresignGet(ctx context.Context, bucket, key string, ttl time.Duration) (PresignedRequest, error)
+	// PresignDownload returns a presigned GET URL clients use to read a
+	// private object directly from the bucket (see PresignGetOptions).
+	PresignDownload(ctx context.Context, bucket, key string, o PresignGetOptions) (PresignedRequest, error)
 
 	// Multipart (implemented in M2).
 	CreateMultipart(ctx context.Context, bucket, key, contentType string) (MultipartUpload, error)
